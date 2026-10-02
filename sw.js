@@ -1,6 +1,6 @@
 // ECRF Campo — permite abrir la app sin internet y avisa cuando hay una versión nueva.
 // Al publicar cambios, sube este número (v2, v3...) para que los celulares descarguen la versión nueva.
-const VERSION = "ecrf-campo-v1";
+const VERSION = "ecrf-campo-v2";
 const ARCHIVOS = ["./", "./index.html", "./config.js", "./manifest.json", "./icon-192.png", "./icon-512.png"];
 
 self.addEventListener("install", e => {
