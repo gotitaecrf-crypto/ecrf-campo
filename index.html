@@ -592,7 +592,42 @@
   }
 
   /* ---------------- Watermark ---------------- */
-  function watermarkPhoto(file, info) {
+  // Fecha real de una foto de la galería: se lee del EXIF (DateTimeOriginal); si no tiene, la fecha del archivo
+  async function fechaDeFoto(file) {
+    try {
+      const buf = new DataView(await file.slice(0, 256 * 1024).arrayBuffer());
+      if (buf.getUint16(0) === 0xFFD8) {
+        let p = 2;
+        while (p + 4 < buf.byteLength) {
+          const marca = buf.getUint16(p), largo = buf.getUint16(p + 2);
+          if (marca === 0xFFE1 && buf.getUint32(p + 4) === 0x45786966) {   // "Exif"
+            const t = p + 10, le = buf.getUint16(t) === 0x4949;
+            const u16 = o => buf.getUint16(t + o, le), u32 = o => buf.getUint32(t + o, le);
+            const leerTexto = (o, n) => { let s = ""; for (let i = 0; i < n - 1; i++) s += String.fromCharCode(buf.getUint8(t + o + i)); return s; };
+            const buscar = (ifd, tags) => {
+              const n = u16(ifd), r = {};
+              for (let i = 0; i < n; i++) {
+                const e = ifd + 2 + i * 12, tag = u16(e);
+                if (tags.includes(tag)) r[tag] = tag === 0x8769 ? u32(e + 8) : leerTexto(u32(e + 8), u32(e + 4));
+              }
+              return r;
+            };
+            const ifd0 = buscar(u32(4), [0x0132, 0x8769]);
+            const exif = ifd0[0x8769] ? buscar(ifd0[0x8769], [0x9003]) : {};
+            const txt = exif[0x9003] || ifd0[0x0132];
+            const m = /^(\d{4}):(\d{2}):(\d{2}) (\d{2}):(\d{2}):(\d{2})/.exec(txt || "");
+            if (m) return new Date(+m[1], +m[2] - 1, +m[3], +m[4], +m[5], +m[6]);
+            break;
+          }
+          if ((marca & 0xFF00) !== 0xFF00) break;
+          p += 2 + largo;
+        }
+      }
+    } catch (e) {}
+    return file.lastModified ? new Date(file.lastModified) : new Date();
+  }
+
+  function watermarkPhoto(file, info, fecha) {
     const dato = info || state.nisSel;
     return new Promise((resolve, reject) => {
       const url = URL.createObjectURL(file);
@@ -608,7 +643,8 @@
         ctx.drawImage(img, 0, 0, w, h);
 
         const lines = [];
-        lines.push(fmtCaptureStamp(new Date()));
+        const cuando = fecha || new Date();
+        lines.push(fmtCaptureStamp(cuando));
         if (dato) {
           if (String(dato.direccion || "").trim()) lines.push(tituloWM(dato.direccion));
           if (String(dato.urb || "").trim()) lines.push(tituloWM(dato.urb));
@@ -616,7 +652,8 @@
         }
         lines.push(PROVINCIA);
         const c = state.coords || {};
-        if (typeof c.alt === "number") lines.push(`Altitud:${c.alt.toFixed(1)}msnm`);
+        // la altitud es la del celular en este momento: solo se pone si la foto es de la última hora
+        if (typeof c.alt === "number" && Math.abs(Date.now() - cuando) < 3600000) lines.push(`Altitud:${c.alt.toFixed(1)}msnm`);
         if (dato) lines.push(`NIS:${dato.nis}`);
 
         // Estilo como la cámara de referencia: abajo a la derecha, letra blanca con sombra, sin franja
@@ -661,16 +698,16 @@
     });
   }
 
-  async function destinoFoto(fileOrBlob) {
-    if (state.camDestino === "editar") return fotoEdicion(fileOrBlob);
-    return procesarFoto(fileOrBlob);
+  async function destinoFoto(fileOrBlob, fecha) {
+    if (state.camDestino === "editar") return fotoEdicion(fileOrBlob, fecha);
+    return procesarFoto(fileOrBlob, fecha);
   }
-  async function procesarFoto(fileOrBlob) {
+  async function procesarFoto(fileOrBlob, fecha) {
     if (state.fotos.length >= 5) { toast("Maximo 5 fotos", true); return; }
     ensureLocation();
     toast("Procesando foto...");
     try {
-      const watermarked = await watermarkPhoto(fileOrBlob);
+      const watermarked = await watermarkPhoto(fileOrBlob, null, fecha);
       const previewUrl = URL.createObjectURL(watermarked);
       state.fotos.push({ blob: watermarked, previewUrl });
       state.previewIdx = state.fotos.length - 1; // muestra de frente la foto con marca de agua
@@ -1242,6 +1279,13 @@
             <input id="inpFoto" type="file" accept="image/*" capture="environment" class="hidden" style="display:none">
           ` : ""}
         </div>
+        ${state.fotos.length < 5 ? `
+          <button id="btnGaleria" class="btn-ghost w-full mt-3" style="display:flex;align-items:center;justify-content:center;gap:8px">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg>
+            Subir fotos de la galería
+          </button>
+          <div class="text-xs mt-1 text-center" style="color:var(--ink-soft)">Se les pone la marca de agua con la fecha y hora en que se tomó cada foto.</div>
+        ` : ""}
       </div>
 
       <button id="btnGuardar" class="btn-primary w-full" ${(!validRecord() || state.saving) ? "disabled" : ""}>
@@ -1312,6 +1356,8 @@
     if (inpFoto) inpFoto.onchange = () => handlePhotoCapture(inpFoto);
     const btnFoto = document.getElementById("btnFoto");
     if (btnFoto) btnFoto.onclick = () => { state.camDestino = "registro"; abrirCamara(); };
+    const btnGaleria = document.getElementById("btnGaleria");
+    if (btnGaleria) btnGaleria.onclick = () => abrirGaleria("registro");
     document.getElementById("btnGuardar").onclick = guardarRegistro;
   }
 
@@ -1585,13 +1631,13 @@
       el.querySelector("#cfNo").onclick = () => { el.remove(); ok(false); };
     });
   }
-  async function fotoEdicion(fileOrBlob) {
+  async function fotoEdicion(fileOrBlob, fecha) {
     const r = state.registros.find(x => x.id === state.editId); if (!r) return;
     const v = id => (document.getElementById(id) || {}).value || "";
     ensureLocation();
     toast("Procesando foto...");
     try {
-      const blob = await watermarkPhoto(fileOrBlob, { nis: r.nis, direccion: v("ed_direccion"), urb: v("ed_urb"), distrito: v("ed_distrito") });
+      const blob = await watermarkPhoto(fileOrBlob, { nis: r.nis, direccion: v("ed_direccion"), urb: v("ed_urb"), distrito: v("ed_distrito") }, fecha);
       const url = URL.createObjectURL(blob);
       if (await confirmarFoto(url)) { state.edFotos.push({ tipo: "nueva", blob, url }); pintarFotosEdicion(); }
       else URL.revokeObjectURL(url);
@@ -1613,6 +1659,7 @@
       state.edFotos.splice(+b.dataset.edq, 1); pintarFotosEdicion();
     });
     document.getElementById("edFotoMas").onclick = () => { state.camDestino = "editar"; abrirCamara(); };
+    const edGal = document.getElementById("edGaleria"); if (edGal) edGal.onclick = () => abrirGaleria("editar");
   }
 
   function formEdicion(r) {
@@ -1670,8 +1717,12 @@
         </div>`}
         <div class="text-xs font-semibold mt-4 mb-1" style="color:var(--ink-soft)">Fotos</div>
         ${r.fotoPendiente ? `<div class="text-xs p-2 rounded-lg" style="background:#FFF1C7;color:#6B4A00">Hay cambios de fotos esperando subirse. Podrás editar las fotos cuando haya internet y se suban.</div>`
-          : `<div class="text-xs mb-2" style="color:var(--ink-soft)">Toca ✕ para quitar una foto o + para tomar otra. La foto nueva lleva la marca de agua con los datos de arriba.</div>
-             <div id="edFotos" class="grid grid-cols-3 gap-2"></div>`}
+          : `<div class="text-xs mb-2" style="color:var(--ink-soft)">Toca ✕ para quitar una foto, + para tomar otra o "Subir fotos de la galería". La foto nueva lleva la marca de agua con los datos de arriba.</div>
+             <div id="edFotos" class="grid grid-cols-3 gap-2"></div>
+             <button id="edGaleria" class="btn-ghost w-full mt-3" style="display:flex;align-items:center;justify-content:center;gap:8px">
+               <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg>
+               Subir fotos de la galería
+             </button>`}
         <div class="grid grid-cols-2 gap-3 mt-4">
           <button id="edCancelar" class="btn-ghost">Cancelar</button>
           <button id="edGuardar" class="btn-primary">Guardar cambios</button>
@@ -1723,6 +1774,29 @@
       ? { ...x, ...cambios, ediciones: { ...(x.ediciones || {}), [ts]: nota }, editPendiente: true } : x);
     guardarLS("gpfo_cache_registros", cache);
     sincronizar();
+  }
+
+  function abrirGaleria(destino) {
+    state.camDestino = destino;
+    if (destino !== "editar" && state.fotos.length >= 5) { toast("Maximo 5 fotos", true); return; }
+    ensureLocation();
+    let g = document.getElementById("inpGaleria");
+    if (!g) {
+      g = document.createElement("input");
+      g.type = "file"; g.accept = "image/*"; g.multiple = true; g.id = "inpGaleria"; g.style.display = "none";
+      document.body.appendChild(g);
+    }
+    g.onchange = async () => {
+      let archivos = [...(g.files || [])].filter(f => /^image\//.test(f.type) || /\.(jpe?g|png|heic|webp)$/i.test(f.name));
+      g.value = "";
+      if (state.camDestino !== "editar") {
+        const libres = 5 - state.fotos.length;
+        if (archivos.length > libres) toast(`Solo se agregan ${libres} foto(s): máximo 5 por registro`, true);
+        archivos = archivos.slice(0, libres);
+      }
+      for (const f of archivos) await destinoFoto(f, await fechaDeFoto(f));
+    };
+    g.click();
   }
 
   function inputCamaraGlobal() {
