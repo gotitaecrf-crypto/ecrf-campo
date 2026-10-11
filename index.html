@@ -962,6 +962,14 @@
     if (NIS_REMOTO[nis]) return NIS_REMOTO[nis];
     return NIS_DB.find(r => r.nis === nis) || null;
   }
+  // Precarga: al escribir los 3 primeros dígitos, el servidor abre ese grupo de la base mientras el operario termina de escribir
+  const PRECARGADOS = {};
+  function precargarNis(q) {
+    const p = String(q || "").slice(0, 3);
+    if (p.length < 3 || q.length >= 7 || PRECARGADOS[p] || !apiListo() || !enLinea()) return;
+    PRECARGADOS[p] = Date.now();
+    apiGet({ action: "nis_pre", p }).catch(() => { delete PRECARGADOS[p]; });
+  }
   async function buscarNisServidor(nis) {
     if (!apiListo() || !enLinea() || BUSCANDO[nis] || NIS_REMOTO[nis] !== undefined) return;
     BUSCANDO[nis] = true;
@@ -1247,6 +1255,7 @@
         const limpio = inp.value.replace(/\D/g, "").slice(0, 9);
         if (limpio === state.nisQuery) { inp.value = limpio; return; }
         state.nisQuery = limpio;
+        precargarNis(limpio);
         if (limpio.length === 7 && NIS_REMOTO[limpio]) { seleccionarNis(NIS_REMOTO[limpio]); return; }   // ya consultado antes
         renderNuevo();
       };
@@ -1381,7 +1390,7 @@
       inp.oninput = () => {
         const limpio = inp.value.replace(/\D/g, "").slice(0, 9);
         if (limpio === state.rutaQuery) { inp.value = limpio; return; }
-        state.rutaQuery = limpio; renderRuta();
+        state.rutaQuery = limpio; precargarNis(limpio); renderRuta();
         if (estadoBusqueda(limpio) === "pendiente") buscarNisServidor(limpio).then(() => { if (state.rutaQuery === limpio && !state.rutaSel && state.tab === "ruta") renderRuta(); });
         const n = document.getElementById("rutaNis"); if (n) { n.focus(); n.selectionStart = n.selectionEnd = n.value.length; }
       };
