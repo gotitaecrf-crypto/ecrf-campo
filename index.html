@@ -1898,9 +1898,17 @@
             <span class="text-sm" style="color:var(--ink-soft)">GPFO0416 · fugas detectadas</span></span>
           <span class="text-sm font-semibold" style="color:var(--brand)">${(n => n ? n + " hechos" : "Abrir")(state.registros.filter(r => formDe(r) === "GPFO0416").length)}</span>
         </button>
+        <button class="form-card" id="btnPdf" style="background:#E1F3FB;border-color:#7CCBEA">
+          <span class="form-ico" style="display:flex;align-items:center;justify-content:center;color:var(--brand-dark)">
+            <svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><path d="M12 18v-6"/><path d="M9 15l3 3 3-3"/></svg>
+          </span>
+          <span class="flex-1 min-w-0"><b class="block text-lg leading-tight">Generar mis PDF</b>
+            <span class="text-sm" style="color:var(--ink-soft)">Formularios del mes · GPFO0416 por quincena</span></span>
+        </button>
         <div class="mt-2 flex justify-center"><span id="syncBadge"></span></div>
       </div>`;
-    document.querySelectorAll(".form-card:not(:disabled)").forEach(b => b.onclick = () => {
+    document.getElementById("btnPdf").onclick = () => abrirPanelPdf();
+    document.querySelectorAll(".form-card[data-form]:not(:disabled)").forEach(b => b.onclick = () => {
       state.form = b.dataset.form; sessionStorage.setItem("ecrf_form", state.form); state.tab = "nuevo";
       resetForm(); state.editId = null; state.rutaSel = null; state.rutaQuery = "";
       render(); window.scrollTo(0, 0);
@@ -1910,6 +1918,96 @@
       state.operario = null; state.form = null; state.pinBuffer = ""; render();
     };
     pintarEstadoSync();
+  }
+
+  /* ---------------- Generar PDF (cada operario el suyo; el supervisor, el de cualquiera) ---------------- */
+  const MESES_APP = ["enero","febrero","marzo","abril","mayo","junio","julio","agosto","setiembre","octubre","noviembre","diciembre"];
+  function abrirPanelPdf() {
+    const hoy = new Date();
+    const meses = [];
+    for (let i = 0; i < 6; i++) {
+      const d = new Date(hoy.getFullYear(), hoy.getMonth() - i, 1);
+      meses.push({ v: d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0"), t: MESES_APP[d.getMonth()] + " " + d.getFullYear() });
+    }
+    const p = state.pdf = state.pdf || { form: "GPFO0381", mes: meses[0].v, quincena: hoy.getDate() <= 15 ? 1 : 2, para: state.operario };
+    if (!esSupervisor()) p.para = state.operario;
+    let el = document.getElementById("panelPdf");
+    if (!el) {
+      el = document.createElement("div"); el.id = "panelPdf";
+      el.style.cssText = "position:fixed;inset:0;z-index:80;background:rgba(3,32,76,.55);display:flex;align-items:flex-end;justify-content:center";
+      document.body.appendChild(el);
+      el.addEventListener("click", e => { if (e.target === el) cerrarPanelPdf(); });
+    }
+    const chip = (grupo, v, t, activo) => `<button data-${grupo}="${v}" style="min-height:46px;border-radius:12px;font-weight:700;font-size:15px;border:${activo ? "2px solid var(--brand-dark);background:var(--brand-dark);color:#fff" : "1.5px solid #CFD8E3;background:#fff;color:var(--ink)"}">${t}</button>`;
+    const nombres = OPERARIOS.filter(o => o.rol !== "SUPERVISOR").map(o => o.name);
+    el.innerHTML = `
+      <div style="background:#F2F5F8;width:100%;max-width:520px;border-radius:20px 20px 0 0;padding:18px 16px calc(18px + env(safe-area-inset-bottom,0px));max-height:92vh;overflow:auto">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+          <b style="font-size:20px;color:var(--brand-dark)">Generar PDF</b>
+          <button id="pdfCerrar" aria-label="Cerrar" style="font-size:24px;line-height:1;background:none;border:0;color:var(--ink-soft);width:40px;height:40px">✕</button>
+        </div>
+        <label class="text-sm font-semibold block mb-1" style="color:var(--ink-soft)">Operario</label>
+        ${esSupervisor()
+          ? `<select id="pdfPara" class="w-full mb-3" style="height:50px;border:1.5px solid #CFD8E3;border-radius:12px;background:#fff;padding:0 12px;font-size:16px;font-weight:600">
+               ${nombres.map(n => `<option ${n === p.para ? "selected" : ""}>${escA(n)}</option>`).join("")}</select>`
+          : `<div class="mb-3" style="height:50px;display:flex;align-items:center;border-radius:12px;background:#fff;border:1.5px solid #CFD8E3;padding:0 12px;font-size:16px;font-weight:600">${escA(state.operario)}</div>`}
+        <label class="text-sm font-semibold block mb-1" style="color:var(--ink-soft)">Formulario</label>
+        <div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px" class="mb-3">
+          ${chip("f", "GPFO0381", "0381<br><small style='font-weight:500'>Presiones</small>", p.form === "GPFO0381")}
+          ${chip("f", "GPFO0405", "0405<br><small style='font-weight:500'>Reparación</small>", p.form === "GPFO0405")}
+          ${chip("f", "GPFO0416", "0416<br><small style='font-weight:500'>Muestreo</small>", p.form === "GPFO0416")}
+        </div>
+        <label class="text-sm font-semibold block mb-1" style="color:var(--ink-soft)">Mes</label>
+        <select id="pdfMes" class="w-full mb-3" style="height:50px;border:1.5px solid #CFD8E3;border-radius:12px;background:#fff;padding:0 12px;font-size:16px;font-weight:600">
+          ${meses.map(m => `<option value="${m.v}" ${m.v === p.mes ? "selected" : ""}>${m.t}</option>`).join("")}
+        </select>
+        ${p.form === "GPFO0416" ? `
+          <label class="text-sm font-semibold block mb-1" style="color:var(--ink-soft)">Quincena</label>
+          <div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px" class="mb-3">
+            ${chip("q", 1, "1ra · del 1 al 15", p.quincena === 1)}
+            ${chip("q", 2, "2da · del 16 al fin", p.quincena === 2)}
+          </div>` : ""}
+        <div id="pdfEstado" class="text-sm mb-3" style="color:var(--ink-soft)"></div>
+        <button id="pdfGenerar" class="btn-primary w-full">Generar PDF</button>
+      </div>`;
+    el.querySelector("#pdfCerrar").onclick = cerrarPanelPdf;
+    el.querySelectorAll("[data-f]").forEach(b => b.onclick = () => { p.form = b.dataset.f; abrirPanelPdf(); });
+    el.querySelectorAll("[data-q]").forEach(b => b.onclick = () => { p.quincena = Number(b.dataset.q); abrirPanelPdf(); });
+    el.querySelector("#pdfMes").onchange = e => { p.mes = e.target.value; };
+    const sel = el.querySelector("#pdfPara"); if (sel) sel.onchange = e => { p.para = e.target.value; };
+    el.querySelector("#pdfGenerar").onclick = generarPdf;
+  }
+  function cerrarPanelPdf() { const el = document.getElementById("panelPdf"); if (el) el.remove(); }
+
+  async function generarPdf() {
+    const p = state.pdf, est = document.getElementById("pdfEstado"), btn = document.getElementById("pdfGenerar");
+    const aviso = (t, color) => { est.style.color = color || "var(--ink-soft)"; est.innerHTML = t; };
+    if (!apiListo() || !enLinea()) { aviso("Necesitas internet para generar el PDF.", "#8E2019"); return; }
+    btn.disabled = true; btn.textContent = "Generando…";
+    try {
+      if (p.para === state.operario && await porSubir()) {          // primero se suben los registros pendientes del celular
+        aviso("Subiendo tus registros pendientes…");
+        await sincronizar();
+      }
+      const quedan = p.para === state.operario ? await porSubir() : 0;
+      aviso("Armando el PDF, espera unos segundos…");
+      const r = await apiPost({ tipo: "pdf", para: p.para, form: p.form, mes: p.mes, quincena: p.quincena });
+      aviso(`<div style="background:#DDF3E7;color:#12613B;border-radius:12px;padding:12px">
+          <b>Listo:</b> ${r.n} registro(s) · ${escA(r.periodo)}<br><span style="font-size:12px;word-break:break-all">${escA(r.nombre)}</span>
+          ${quedan ? `<br><span style="color:#6B4A00">Ojo: ${quedan} registro(s) aún no se subieron y no salen en el PDF.</span>` : ""}
+        </div>
+        <div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin-top:10px">
+          <a href="${r.url}" target="_blank" rel="noopener" class="btn-ghost" style="display:flex;align-items:center;justify-content:center;text-decoration:none">Ver PDF</a>
+          <a href="${r.descarga}" target="_blank" rel="noopener" class="btn-primary" style="display:flex;align-items:center;justify-content:center;text-decoration:none">Descargar</a>
+        </div>`);
+    } catch (e) {
+      const msg = e && e.code === "sin_registros" ? e.message
+        : e && e.code === "permiso" ? e.message
+        : "No se pudo generar el PDF. Revisa tu internet e inténtalo otra vez.";
+      aviso(escA(msg || ""), "#8E2019");
+    } finally {
+      btn.disabled = false; btn.textContent = "Generar PDF";
+    }
   }
 
   /* ---------------- App instalable / actualizaciones ---------------- */
