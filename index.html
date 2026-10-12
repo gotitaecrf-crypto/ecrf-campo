@@ -197,7 +197,7 @@
   const apiListo = () => /^https:\/\/script\.google\.com\//.test(API_URL);
 
   async function apiGet(params) {
-    const q = new URLSearchParams({ ...params, token: TOKEN, t: Date.now() });
+    const q = new URLSearchParams({ ...params, token: TOKEN, quien: localStorage.getItem("gpfo_operario") || "", t: Date.now() });
     const r = await fetch(API_URL + "?" + q.toString());
     if (!r.ok) throw { code: "http_" + r.status };
     const j = await r.json(); if (!j.ok) throw { code: j.error || "servidor", message: j.msg }; return j;
@@ -1498,9 +1498,17 @@
     const c = document.getElementById("tabContent");
     c.innerHTML = `
       ${state.syncMode === "cloud" && regsDelForm().some(r => r.local) ? `<button id="btnSubir" class="btn-primary w-full mb-3">Subir ahora</button>` : ""}
+      ${esSupervisor() ? `
+        <label class="text-sm font-semibold block mb-1" for="verDe" style="color:var(--ink-soft)">Ver registros de</label>
+        <select id="verDe" class="w-full mb-3" style="height:48px;border:1.5px solid #CFD8E3;border-radius:12px;background:#fff;padding:0 12px;font-size:16px;font-weight:600">
+          <option value="">Todos los operarios</option>
+          ${OPERARIOS.map(o => `<option ${o.name === state.verDe ? "selected" : ""}>${escA(o.name)}</option>`).join("")}
+        </select>` : ""}
       <button id="btnExport" class="btn-ghost w-full mb-4">⬇ Descargar todo (JSON)</button>
       <div id="listaWrap"></div>
     `;
+    const selVer = document.getElementById("verDe");
+    if (selVer) selVer.onchange = () => { state.verDe = selVer.value; render(); };
     document.getElementById("btnExport").onclick = exportarTodo;
     const bs = document.getElementById("btnSubir");
     if (bs) bs.onclick = () => { if (!enLinea()) { toast("Sin internet: se subirá solo cuando vuelva la señal", true); return; } sincronizar(); };
@@ -1843,7 +1851,10 @@
   }
   const dmy = s => /^\d{4}-\d{2}-\d{2}$/.test(String(s || "")) ? String(s).split("-").reverse().join("/") : (s || "");
   const formDe = r => (r && r.form) || "GPFO0381";
-  const regsDelForm = () => state.registros.filter(r => formDe(r) === state.form);
+  // Cada operario ve solo sus registros; el supervisor ve todos (o los de un operario que elija)
+  const regsVisibles = () => state.registros.filter(r => esSupervisor()
+    ? (!state.verDe || r.operario === state.verDe) : r.operario === state.operario);
+  const regsDelForm = () => regsVisibles().filter(r => formDe(r) === state.form);
 
   function renderMenu() {
     const app = document.getElementById("app");
@@ -1884,19 +1895,19 @@
           <span class="form-ico">${mano(50, false)}</span>
           <span class="flex-1 min-w-0"><b class="block text-lg leading-tight">Toma de presiones</b>
             <span class="text-sm" style="color:var(--ink-soft)">GPFO0381 · conexión domiciliaria</span></span>
-          <span class="text-sm font-semibold" style="color:var(--brand)">${(n => n ? n + " hechos" : "Abrir")(state.registros.filter(r => formDe(r) === "GPFO0381").length)}</span>
+          <span class="text-sm font-semibold" style="color:var(--brand)">${(n => n ? n + " hechos" : "Abrir")(regsVisibles().filter(r => formDe(r) === "GPFO0381").length)}</span>
         </button>
         <button class="form-card" data-form="GPFO0405">
           <span class="form-ico">${ICO_0405}</span>
           <span class="flex-1 min-w-0"><b class="block text-lg leading-tight">Verificación de reparación</b>
             <span class="text-sm" style="color:var(--ink-soft)">GPFO0405 · fugas no visibles</span></span>
-          <span class="text-sm font-semibold" style="color:var(--brand)">${(n => n ? n + " hechos" : "Abrir")(state.registros.filter(r => formDe(r) === "GPFO0405").length)}</span>
+          <span class="text-sm font-semibold" style="color:var(--brand)">${(n => n ? n + " hechos" : "Abrir")(regsVisibles().filter(r => formDe(r) === "GPFO0405").length)}</span>
         </button>
         <button class="form-card" data-form="GPFO0416">
           <span class="form-ico">${ICO_0416}</span>
           <span class="flex-1 min-w-0"><b class="block text-lg leading-tight">Verificación por muestreo</b>
             <span class="text-sm" style="color:var(--ink-soft)">GPFO0416 · fugas detectadas</span></span>
-          <span class="text-sm font-semibold" style="color:var(--brand)">${(n => n ? n + " hechos" : "Abrir")(state.registros.filter(r => formDe(r) === "GPFO0416").length)}</span>
+          <span class="text-sm font-semibold" style="color:var(--brand)">${(n => n ? n + " hechos" : "Abrir")(regsVisibles().filter(r => formDe(r) === "GPFO0416").length)}</span>
         </button>
         <button class="form-card" id="btnPdf" style="background:#E1F3FB;border-color:#7CCBEA">
           <span class="form-ico" style="display:flex;align-items:center;justify-content:center;color:var(--brand-dark)">
