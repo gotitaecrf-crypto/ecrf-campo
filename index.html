@@ -1939,7 +1939,7 @@
       el.addEventListener("click", e => { if (e.target === el) cerrarPanelPdf(); });
     }
     const chip = (grupo, v, t, activo) => `<button data-${grupo}="${v}" style="min-height:46px;border-radius:12px;font-weight:700;font-size:15px;border:${activo ? "2px solid var(--brand-dark);background:var(--brand-dark);color:#fff" : "1.5px solid #CFD8E3;background:#fff;color:var(--ink)"}">${t}</button>`;
-    const nombres = OPERARIOS.filter(o => o.rol !== "SUPERVISOR").map(o => o.name);
+    const nombres = OPERARIOS.map(o => o.name);   // el supervisor puede generar el suyo o el de cualquier operario
     el.innerHTML = `
       <div style="background:#F2F5F8;width:100%;max-width:520px;border-radius:20px 20px 0 0;padding:18px 16px calc(18px + env(safe-area-inset-bottom,0px));max-height:92vh;overflow:auto">
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
