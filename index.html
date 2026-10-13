@@ -421,6 +421,13 @@
       ops.shift(); guardarLS("gpfo_pend_ops", ops);
     }
   }
+  // Errores que no se arreglan reintentando (p. ej. alguien borró la fila en la hoja)
+  const esImposible = e => /not_found|tipo|datos/.test(String(e && (e.code || e.message) || ""));
+  function descartarOp(que, op, e) {
+    const d = leerLS("gpfo_ops_descartadas", []); d.push({ que, op, error: String(e && (e.code || e.message)), cuando: Date.now() });
+    guardarLS("gpfo_ops_descartadas", d.slice(-50));
+    toast("Una " + que + " no se pudo subir: el registro ya no existe en la hoja", true);
+  }
   async function sincronizar() {
     if (sincronizando || state.syncMode !== "cloud" || !enLinea()) { pintarEstadoSync(); return; }
     sincronizando = true; let subidos = 0;
@@ -429,8 +436,14 @@
       await flushPendOps();
       const edits = leerLS("gpfo_edit_ops", []);
       while (edits.length) {
-        await db.collection("registros").doc(edits[0].id).update(edits[0].data);   // ediciones: mapa por fecha, reintentar no duplica
-        edits.shift(); guardarLS("gpfo_edit_ops", edits); subidos++;
+        try {
+          await db.collection("registros").doc(edits[0].id).update(edits[0].data);   // ediciones: mapa por fecha, reintentar no duplica
+          subidos++;
+        } catch (e) {
+          if (!esImposible(e)) throw e;                     // sin internet: se reintenta luego
+          descartarOp("edición", edits[0], e);              // el registro ya no existe en la hoja: se aparta y se sigue
+        }
+        edits.shift(); guardarLS("gpfo_edit_ops", edits);
       }
       const fops = (await IDB.fall()).sort((a, b) => a.creadoEn - b.creadoEn);
       for (const op of fops) {
@@ -438,7 +451,9 @@
           const up = await assets.upload(op.nuevas[i], { type: "image/jpeg", meta: { ...(op.meta || {}), n: i + 1 } });
           op.subidas.push(up.id); await IDB.fput(op);
         }
-        await db.collection("registros").doc(op.regId).update({ fotos: op.mantener.concat(op.subidas), ediciones: { [op.ts]: op.nota } });
+        try {
+          await db.collection("registros").doc(op.regId).update({ fotos: op.mantener.concat(op.subidas), ediciones: { [op.ts]: op.nota } });
+        } catch (e) { if (!esImposible(e)) throw e; descartarOp("fotos", { id: op.regId, fotos: op.subidas }, e); }
         for (const id of op.quitar) { try { await assets.delete(id); } catch (e) {} }
         await IDB.fdel(op.id); subidos++;
       }
@@ -619,6 +634,7 @@
 
   // "SANTA ANITA" -> "Santa Anita" (deja en minúscula de, del, la, los...)
   function tituloWM(t) {
+    if (/[a-záéíóúñ]/.test(String(t || "").replace(/\b(Mz|Lt)\b/g, ""))) return String(t).trim();   // ya está en forma legible
     const menores = new Set(["de","del","la","las","los","el","y"]);
     const prefijos = new Set(["urb","asoc","a.h","p.j","apv","coop","agru","c.h","ca","av","jr","ps","pr","al","gr","ml"]);
     const ws = String(t || "").toLowerCase().replace(/\s+/g, " ").trim().split(" ");
@@ -1054,10 +1070,49 @@
   /* ---------- Búsqueda de NIS en la base de SEDAPAL (servidor) ---------- */
   const NIS_REMOTO = {};        // NIS ya consultados (se guardan en el celular para usar sin internet)
   const BUSCANDO = {};
-  const desdeServidor = (nis, d) => ({ nis, direccion: d.dir || "", urb: d.urb || "", distrito: d.dist || "", sector: d.sec || "",
+  // Direcciones de la base (MAYÚSCULAS, "MAGNOLIAS, LAS") -> forma legible ("Av. Las Magnolias")
+  // Si el texto ya viene escrito a mano (con minúsculas), se deja tal cual.
+  const PREF_DIR = { JR: "Jr.", CA: "Ca.", AV: "Av.", PS: "Psje.", BL: "Blq.", ML: "Malecón", PR: "Prol.", PQ: "Parque", AL: "Alameda", VE: "Vía Expresa", AC: "Acceso" };
+  const PREF_URB = { URB: "Urb.", CERCADO: "Cercado", COOP: "Coop.", ASOC: "Asoc.", "A.H": "A.H.", "U.V": "U.V.", "P.J": "P.J.", APV: "APV", "U.IND": "Urb. Ind.", "C.R": "C.R.", "C.H": "C.H." };
+  const TITULOS = { GRAL: "Gral.", ALMTE: "Almte.", CMDTE: "Cmdte.", CRNL: "Crnl.", MCAL: "Mcal.", PDTE: "Pdte.", CAP: "Cap.", TTE: "Tte.", DR: "Dr.", ING: "Ing.", STA: "Sta.", STO: "Sto.", SGTO: "Sgto.", MONS: "Mons.", PROF: "Prof." };
+  const MENORES = new Set(["de", "del", "la", "las", "los", "el", "y", "e"]);
+  function palabrasLegibles(txt) {
+    return txt.split(/\s+/).filter(Boolean).map((w, i) => {
+      if (w.startsWith("(")) return "(" + palabrasLegibles(w.slice(1));            // "(CERCADO)" -> "(Cercado)"
+      if (TITULOS[w]) return TITULOS[w];
+      if (/^(I|II|III|IV|V|VI|VII|VIII|IX|X)$/.test(w) && i > 0) return w;      // etapas en romanos
+      if (/^\d/.test(w)) return w.toLowerCase();                                 // 1RA -> 1ra
+      if (/^[A-ZÑ]$/.test(w)) return w;                                          // letras sueltas (Mz A)
+      const l = w.toLowerCase();
+      if (i > 0 && MENORES.has(l)) return l;
+      return l.charAt(0).toUpperCase() + l.slice(1);
+    }).join(" ");
+  }
+  function legibleBase(t, tipo) {
+    const s = String(t || "").trim();
+    if (!s || /[a-záéíóúñ]/.test(s.replace(/\b(Mz|Lt)\b/g, ""))) return s;      // ya está escrito a mano
+    let tok = s.split(/\s+/);
+    const pref = (tipo === "urb" ? PREF_URB : PREF_DIR)[tok[0]];
+    if (pref) tok = tok.slice(1);
+    let nombre = tok, cola = [];
+    if (tipo !== "urb") {
+      const i = tok.findIndex(w => /^\d/.test(w) || /^(MZ|Mz|LT|Lt|S\/N)$/.test(w));
+      if (i >= 0) { nombre = tok.slice(0, i); cola = tok.slice(i).map(w => w === "MZ" ? "Mz" : w === "LT" ? "Lt" : w); }
+    }
+    let n = nombre.join(" ");
+    const coma = n.indexOf(",");
+    if (coma >= 0) n = (n.slice(coma + 1).trim() + " " + n.slice(0, coma).trim()).trim();   // "MAGNOLIAS, LAS" -> "LAS MAGNOLIAS"
+    if (tipo === "dist") return palabrasLegibles(n);
+    return [pref, palabrasLegibles(n), cola.join(" ")].filter(Boolean).join(" ");
+  }
+  const desdeServidor = (nis, d) => ({ nis, direccion: legibleBase(d.dir, "dir"), urb: legibleBase(d.urb, "urb"), distrito: legibleBase(d.dist, "dist"), sector: d.sec || "",
                                         ccss: d.ccss || "", latNis: d.lat === "" ? null : d.lat, lonNis: d.lon === "" ? null : d.lon });
   async function cargarCacheNis() {
-    try { const c = await IDB.kget("nisCache"); if (c) Object.assign(NIS_REMOTO, c); } catch (e) {}
+    try {
+      const c = await IDB.kget("nisCache");
+      if (c) for (const [k, v] of Object.entries(c))   // lo guardado antes de esta versión pasa a la forma legible
+        NIS_REMOTO[k] = v ? { ...v, direccion: legibleBase(v.direccion, "dir"), urb: legibleBase(v.urb, "urb"), distrito: legibleBase(v.distrito, "dist") } : v;
+    } catch (e) {}
   }
   async function guardarCacheNis() {
     try {
