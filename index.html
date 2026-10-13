@@ -537,6 +537,43 @@
     state.registros = [...vistaLocal, ...nube.filter(r => !idsLocales.has(r.id))];
   }
 
+  /* ---------------- Saludo de bienvenida (voz + globo con la mascota) ---------------- */
+  // "Brayan (Supervisor)" -> "Brayan"; "Erick Espinoza Pacosonco" -> "Erick"
+  const primerNombre = n => String(n || "").replace(/\(.*?\)/g, "").trim().split(/\s+/)[0] || "";
+  function saludar(nombre) {
+    const nom = primerNombre(nombre);
+    const texto = `¡Bienvenido, ${nom}!`;
+    // voz: funciona sin internet con la voz en español del celular
+    try {
+      if ("speechSynthesis" in window) {
+        const u = new SpeechSynthesisUtterance(`Bienvenido, ${nom}. Que tengas un buen día de trabajo.`);
+        const voces = speechSynthesis.getVoices();
+        u.voice = ["es-PE", "es-US", "es-MX", "es-419", "es-ES"].map(l => voces.find(v => v.lang === l || v.lang.replace("_", "-") === l)).find(Boolean)
+               || voces.find(v => /^es/i.test(v.lang)) || null;
+        u.lang = u.voice ? u.voice.lang : "es-PE"; u.rate = 1; u.pitch = 1.05;
+        speechSynthesis.cancel(); speechSynthesis.speak(u);
+      }
+    } catch (e) {}
+    // globo en pantalla
+    const viejo = document.getElementById("saludo"); if (viejo) viejo.remove();
+    const el = document.createElement("div"); el.id = "saludo";
+    el.setAttribute("role", "status");
+    el.style.cssText = "position:fixed;left:12px;right:12px;bottom:calc(18px + env(safe-area-inset-bottom,0px));z-index:95;display:flex;align-items:flex-end;gap:10px;pointer-events:none;animation:saludoIn .45s ease-out";
+    el.innerHTML = `${mano(64, true)}
+      <div style="background:#03204C;color:#fff;border-radius:18px 18px 18px 4px;padding:12px 16px;box-shadow:0 10px 30px rgba(3,32,76,.35)">
+        <div style="font-weight:800;font-size:18px">${escA(texto)}</div>
+        <div style="font-size:14px;opacity:.85">Que tengas un buen día de trabajo 💧</div>
+      </div>`;
+    if (!document.getElementById("saludoCss")) {
+      const st = document.createElement("style"); st.id = "saludoCss";
+      st.textContent = "@keyframes saludoIn{from{opacity:0;transform:translateY(20px)}to{opacity:1;transform:none}}@keyframes saludoOut{to{opacity:0;transform:translateY(20px)}}";
+      document.head.appendChild(st);
+    }
+    document.body.appendChild(el);
+    setTimeout(() => { el.style.animation = "saludoOut .4s ease-in forwards"; setTimeout(() => el.remove(), 450); }, 3800);
+  }
+  if ("speechSynthesis" in window) { try { speechSynthesis.getVoices(); speechSynthesis.onvoiceschanged = () => speechSynthesis.getVoices(); } catch (e) {} }
+
   /* ---------------- Login ---------------- */
   async function tryLogin(name, ficha) {
     const u = OPERARIOS.find(o => o.name === name);
@@ -546,6 +583,7 @@
     if (found) {
       state.operario = found.name;
       localStorage.setItem("gpfo_operario", found.name);
+      saludar(found.name);
       loadRegistros().then(render);
     } else {
       toast("Ficha incorrecta", true);
