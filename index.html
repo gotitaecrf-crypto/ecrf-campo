@@ -627,7 +627,7 @@
     return file.lastModified ? new Date(file.lastModified) : new Date();
   }
 
-  function watermarkPhoto(file, info, fecha) {
+  function watermarkPhoto(file, info, fecha, real) {
     const dato = info || state.nisSel;
     return new Promise((resolve, reject) => {
       const url = URL.createObjectURL(file);
@@ -653,7 +653,7 @@
         lines.push(PROVINCIA);
         const c = state.coords || {};
         // la altitud es la del celular en este momento: solo se pone si la foto es de la última hora
-        if (typeof c.alt === "number" && Math.abs(Date.now() - cuando) < 3600000) lines.push(`Altitud:${c.alt.toFixed(1)}msnm`);
+        if (typeof c.alt === "number" && Math.abs(Date.now() - (real || cuando)) < 3600000) lines.push(`Altitud:${c.alt.toFixed(1)}msnm`);
         if (dato) lines.push(`NIS:${dato.nis}`);
 
         // Estilo como la cámara de referencia: abajo a la derecha, letra blanca con sombra, sin franja
@@ -702,14 +702,42 @@
     if (state.camDestino === "editar") return fotoEdicion(fileOrBlob, fecha);
     return procesarFoto(fileOrBlob, fecha);
   }
+  // Fecha y hora de la marca de agua = las que el operario puso en el formulario:
+  //   GPFO0381: fecha y hora de la toma · GPFO0405: fecha de verificación · GPFO0416: fecha SEDAPAL
+  //   (en 0405 y 0416 la hora es la de la foto). Si el campo está vacío, se usa la fecha real de la foto.
+  function fechaMarca(form, v, real) {
+    const f = form === "GPFO0405" ? v.fechaVerificacion : form === "GPFO0416" ? v.fechaSedapal : v.fecha;
+    const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(f || ""));
+    if (!m) return real;
+    let hh = real.getHours(), mm = real.getMinutes(), ss = real.getSeconds();
+    const t = form === "GPFO0381" ? /^(\d{1,2}):(\d{2})/.exec(String(v.hora || "")) : null;
+    if (t) { hh = +t[1]; mm = +t[2]; }
+    return new Date(+m[1], +m[2] - 1, +m[3], hh, mm, ss);
+  }
+  // Si cambian la fecha/hora después de tomar las fotos, las miniaturas se actualizan con la nueva marca
+  let refrescando = null;
+  function refrescarMarcas() {
+    clearTimeout(refrescando);
+    refrescando = setTimeout(async () => {
+      for (const [i, f] of state.fotos.entries()) {
+        if (!f.original) continue;
+        const b = await watermarkPhoto(f.original, null, fechaMarca(state.form, valoresFormulario(), f.real), f.real);
+        URL.revokeObjectURL(f.previewUrl); f.blob = b; f.previewUrl = URL.createObjectURL(b);
+        const img = document.querySelector(`[data-view="${i}"] img`); if (img) img.src = f.previewUrl;
+      }
+    }, 300);
+  }
+  const valoresFormulario = () => ({ fecha: state.fecha, hora: state.hora, fechaVerificacion: state.fechaVerif, fechaSedapal: state.m && state.m.sFecha });
+
   async function procesarFoto(fileOrBlob, fecha) {
     if (state.fotos.length >= 5) { toast("Maximo 5 fotos", true); return; }
     ensureLocation();
     toast("Procesando foto...");
     try {
-      const watermarked = await watermarkPhoto(fileOrBlob, null, fecha);
+      const real = fecha || new Date();                      // cuándo se tomó de verdad
+      const watermarked = await watermarkPhoto(fileOrBlob, null, fechaMarca(state.form, valoresFormulario(), real), real);
       const previewUrl = URL.createObjectURL(watermarked);
-      state.fotos.push({ blob: watermarked, previewUrl });
+      state.fotos.push({ blob: watermarked, previewUrl, original: fileOrBlob, real });
       state.previewIdx = state.fotos.length - 1; // muestra de frente la foto con marca de agua
       render();
     } catch (e) {
@@ -829,6 +857,11 @@
     };
 
     try {
+      // por si cambiaron la fecha u hora después de tomar las fotos: la marca de agua usa los valores finales
+      for (const f of state.fotos) {
+        if (!f.original) continue;
+        f.blob = await watermarkPhoto(f.original, null, fechaMarca(state.form, valoresFormulario(), f.real), f.real);
+      }
       const reg = { id: nuevoId("r"), ...base, fotosBlobs: state.fotos.map(f => f.blob), subido: false };
       await IDB.put(reg);                                   // queda guardado en el celular aunque no haya internet
       if (state.pendienteId) await borrarPendiente(state.pendienteId);
@@ -1172,7 +1205,7 @@
     });
     document.getElementById("f6Tecnico").onchange = e => { m.tecnico = e.target.value; ok(); };
     document.getElementById("f6cFecha").onchange = e => { m.cFecha = e.target.value; ok(); };
-    document.getElementById("f6sFecha").onchange = e => { m.sFecha = e.target.value; ok(); };
+    document.getElementById("f6sFecha").onchange = e => { m.sFecha = e.target.value; ok(); refrescarMarcas(); };
     document.querySelectorAll(".f6cUbi").forEach(b => b.onclick = () => {
       m.cUbi = b.dataset.u; if (!m.sUbi) m.sUbi = m.cUbi;    // SEDAPAL parte de lo que indicó la contratista
       const y = window.scrollY; renderNuevo(); window.scrollTo(0, y);
@@ -1207,7 +1240,7 @@
     const num = (id, campo, max) => { const el = document.getElementById(id); el.oninput = () => { el.value = el.value.replace(/\D/g, "").slice(0, max); state[campo] = el.value; ok(); }; };
     num("f5Codigo", "codigoSgio", 7); num("f5Caudal", "caudal", 6);
     document.getElementById("f5FechaDet").onchange = e => { state.fechaDeteccion = e.target.value; ok(); };
-    document.getElementById("f5FechaVer").onchange = e => { state.fechaVerif = e.target.value; ok(); };
+    document.getElementById("f5FechaVer").onchange = e => { state.fechaVerif = e.target.value; ok(); refrescarMarcas(); };
     const re = () => { const y = window.scrollY; renderNuevo(); window.scrollTo(0, y); };
     document.querySelectorAll(".f5Ubi").forEach(b => b.onclick = () => { state.ubicacion = b.dataset.u; re(); });
     document.querySelectorAll(".f5Sit").forEach(b => b.onclick = () => { state.situacion = b.dataset.s; re(); });
@@ -1347,8 +1380,8 @@
         e.target.value = limpio; state.presion = limpio;
         document.getElementById("btnGuardar").disabled = !validRecord();
       };
-      document.getElementById("inpFecha").onchange = (e) => { state.fecha = e.target.value; };
-      document.getElementById("inpHora").onchange = (e) => { state.hora = e.target.value; };
+      document.getElementById("inpFecha").onchange = (e) => { state.fecha = e.target.value; refrescarMarcas(); };
+      document.getElementById("inpHora").onchange = (e) => { state.hora = e.target.value; refrescarMarcas(); };
     }
     document.querySelectorAll("[data-rm]").forEach(b => b.onclick = (e) => { e.stopPropagation(); removeFoto(Number(b.dataset.rm)); });
     document.querySelectorAll("[data-view]").forEach(el => el.onclick = () => { state.previewIdx = Number(el.dataset.view); render(); });
@@ -1651,7 +1684,10 @@
     ensureLocation();
     toast("Procesando foto...");
     try {
-      const blob = await watermarkPhoto(fileOrBlob, { nis: r.nis, direccion: v("ed_direccion"), urb: v("ed_urb"), distrito: v("ed_distrito") }, fecha);
+      const real = fecha || new Date();
+      const marca = fechaMarca(formDe(r), { fecha: v("ed_fecha") || r.fecha, hora: v("ed_hora") || r.hora,
+        fechaVerificacion: v("ed_fver") || r.fechaVerificacion, fechaSedapal: v("ed_sfecha") || r.fechaSedapal }, real);
+      const blob = await watermarkPhoto(fileOrBlob, { nis: r.nis, direccion: v("ed_direccion"), urb: v("ed_urb"), distrito: v("ed_distrito") }, marca, real);
       const url = URL.createObjectURL(blob);
       if (await confirmarFoto(url)) { state.edFotos.push({ tipo: "nueva", blob, url }); pintarFotosEdicion(); }
       else URL.revokeObjectURL(url);
