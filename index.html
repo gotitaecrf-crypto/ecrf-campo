@@ -238,6 +238,61 @@
     delete: id => apiPost({ tipo: "foto_del", id })
   };
   const fotoUrl = id => "https://drive.google.com/thumbnail?id=" + encodeURIComponent(id) + "&sz=w800";
+  const fotoUrlGrande = id => "https://drive.google.com/thumbnail?id=" + encodeURIComponent(id) + "&sz=w2000";
+  // Fotos de un registro: las del celular (aún no subidas) o las del Drive
+  const urlsLocales = {};
+  function fotosDe(r) {
+    if (r.local && r.fotosBlobs && r.fotosBlobs.length) {
+      if (!urlsLocales[r.id]) urlsLocales[r.id] = r.fotosBlobs.map(b => URL.createObjectURL(b));
+      return urlsLocales[r.id].map(u => ({ mini: u, grande: u }));
+    }
+    return (r.fotos || []).map(id => ({ mini: fotoUrl(id), grande: fotoUrlGrande(id) }));
+  }
+
+  /* ---------------- Visor de fotos a pantalla completa ----------------
+     Tocar una foto la abre grande. Se pasa con las flechas o deslizando; doble toque = acercar. */
+  function abrirVisor(fotos, idx) {
+    if (!fotos.length) return;
+    let i = Math.max(0, Math.min(idx || 0, fotos.length - 1)), zoom = false;
+    let el = document.getElementById("visorFotos");
+    if (!el) { el = document.createElement("div"); el.id = "visorFotos"; document.body.appendChild(el); }
+    el.style.cssText = "position:fixed;inset:0;z-index:98;background:#000;display:flex;flex-direction:column";
+    const pintar = () => {
+      el.innerHTML = `
+        <div style="display:flex;align-items:center;justify-content:space-between;padding:calc(10px + env(safe-area-inset-top,0px)) 14px 10px;color:#fff">
+          <b style="font-size:15px">Foto ${i + 1} de ${fotos.length}</b>
+          <button id="visorCerrar" aria-label="Cerrar" style="background:none;border:0;color:#fff;font-size:26px;width:44px;height:44px">✕</button>
+        </div>
+        <div id="visorArea" style="flex:1;overflow:auto;display:flex;align-items:${zoom ? "flex-start" : "center"};justify-content:${zoom ? "flex-start" : "center"};touch-action:${zoom ? "pan-x pan-y" : "pan-y"}">
+          <img id="visorImg" src="${fotos[i].grande}" alt="Foto ${i + 1}" style="${zoom ? "width:220%;max-width:none;flex-shrink:0" : "max-width:100%;max-height:100%;object-fit:contain"}"
+            onerror="this.onerror=null;this.src='${fotos[i].mini}'">
+        </div>
+        ${fotos.length > 1 ? `
+        <div style="display:flex;justify-content:space-between;padding:10px 14px calc(14px + env(safe-area-inset-bottom,0px))">
+          <button id="visorAnt" style="background:rgba(255,255,255,.15);color:#fff;border:0;border-radius:12px;padding:12px 18px;font-weight:700" ${i === 0 ? "disabled" : ""}>‹ Anterior</button>
+          <button id="visorSig" style="background:rgba(255,255,255,.15);color:#fff;border:0;border-radius:12px;padding:12px 18px;font-weight:700" ${i === fotos.length - 1 ? "disabled" : ""}>Siguiente ›</button>
+        </div>` : `<div style="height:calc(14px + env(safe-area-inset-bottom,0px))"></div>`}
+        <div style="position:absolute;left:0;right:0;bottom:calc(64px + env(safe-area-inset-bottom,0px));text-align:center;color:#C9D8EA;font-size:12px;pointer-events:none">Doble toque para acercar</div>`;
+      el.querySelector("#visorCerrar").onclick = cerrarVisor;
+      const ir = d => { if (i + d >= 0 && i + d < fotos.length) { i += d; zoom = false; pintar(); } };
+      const a = el.querySelector("#visorAnt"), s = el.querySelector("#visorSig");
+      if (a) a.onclick = () => ir(-1); if (s) s.onclick = () => ir(1);
+      const area = el.querySelector("#visorArea");
+      let x0 = null, ultimoToque = 0;
+      area.ontouchstart = e => { if (e.touches.length === 1) x0 = e.touches[0].clientX; };
+      area.ontouchend = e => {
+        const ahora = Date.now();
+        if (ahora - ultimoToque < 300) { zoom = !zoom; pintar(); ultimoToque = 0; return; }
+        ultimoToque = ahora;
+        if (x0 === null || zoom) return;
+        const dx = e.changedTouches[0].clientX - x0; x0 = null;
+        if (Math.abs(dx) > 60) ir(dx < 0 ? 1 : -1);
+      };
+      area.ondblclick = () => { zoom = !zoom; pintar(); };
+    };
+    pintar();
+  }
+  function cerrarVisor() { const el = document.getElementById("visorFotos"); if (el) el.remove(); }
   async function sha256(t) {
     const b = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(t));
     return [...new Uint8Array(b)].map(x => x.toString(16).padStart(2, "0")).join("");
@@ -1000,7 +1055,8 @@
   window.addEventListener("popstate", () => {
     if (!state.operario) return;                                        // en el ingreso, atrás sale normal
     const confirmar = document.querySelector("#cfNo");
-    if (confirmar) confirmar.click();                                    // "foto nueva": atrás = no usarla
+    if (document.getElementById("visorFotos")) cerrarVisor();
+    else if (confirmar) confirmar.click();                               // "foto nueva": atrás = no usarla
     else if (document.getElementById("camOverlay")) cerrarCamara();
     else if (document.getElementById("mapaRuta")) cerrarMapaRuta();
     else if (document.getElementById("panelPdf")) cerrarPanelPdf();
@@ -1703,12 +1759,21 @@
           <span style="color:var(--ink-soft)">Detección ${escA(dmy(r.fechaDeteccion))} · Verificación ${escA(dmy(r.fechaVerificacion))}</span>
         </div>` : `
         <div class="text-sm mt-2" style="color:var(--ink)">Presión: <b>${escA(r.presion)} mca</b> · ${escA(dmy(r.fecha))} ${escA(r.hora)}</div>`}
+        ${fotosDe(r).length ? `<div class="flex gap-2 mt-2 overflow-x-auto">${fotosDe(r).map((f, i) => `
+          <button class="regFoto shrink-0" data-id="${escA(r.id)}" data-i="${i}" aria-label="Ver foto ${i + 1}"
+            style="width:64px;height:64px;border-radius:10px;overflow:hidden;border:1px solid var(--line);padding:0;background:#E8EEF3">
+            <img src="${f.mini}" alt="" loading="lazy" style="width:100%;height:100%;object-fit:cover"
+              onerror="this.replaceWith(Object.assign(document.createElement('span'),{textContent:'📷',style:'font-size:22px'}))">
+          </button>`).join("")}</div>` : ""}
         <div class="text-xs mt-1 flex items-center justify-between" style="color:var(--ink-soft)">
           <span>Operario: ${escA(r.operario)} · ${r.nFotos || 0} foto(s)${r.ediciones && Object.keys(r.ediciones).length ? " · <b>editado</b>" : ""}</span>
           ${state.syncMode === "cloud" ? (r.local || r.editPendiente ? `<span class="badge" style="background:#FFF1C7;color:#6B4A00">Por subir</span>` : `<span class="badge" style="background:#DDF3E7;color:#12613B">Subido</span>`) : ""}
         </div>
       </div>
     `).join("");
+    document.querySelectorAll(".regFoto").forEach(b => b.onclick = () => {
+      const r = state.registros.find(x => x.id === b.dataset.id); if (r) abrirVisor(fotosDe(r), Number(b.dataset.i));
+    });
     document.querySelectorAll(".regEditar").forEach(b => b.onclick = async () => {
       const r = state.registros.find(x => x.id === b.dataset.id); if (!r) return;
       (state.edFotos || []).forEach(f => f.tipo !== "asset" && URL.revokeObjectURL(f.url));
@@ -1822,11 +1887,13 @@
     const g = document.getElementById("edFotos"); if (!g) return;
     g.innerHTML = state.edFotos.map((f, i) => `
       <div class="photo-slot">
-        <img src="${f.url}" alt="Foto ${i + 1}" onerror="this.replaceWith(Object.assign(document.createElement('span'),{textContent:'Sin conexión',style:'font-size:11px;color:#4A5A6E'}))">
+        <img src="${f.url}" alt="Foto ${i + 1}" class="edVer" data-i="${i}" style="cursor:pointer" onerror="this.replaceWith(Object.assign(document.createElement('span'),{textContent:'Sin conexión',style:'font-size:11px;color:#4A5A6E'}))">
         ${f.tipo === "nueva" ? `<span class="absolute bottom-1 left-1 badge" style="background:#E1F3FB;color:#0B4A6B;font-size:10px;padding:2px 6px">nueva</span>` : ""}
         <button data-edq="${i}" class="absolute top-1 right-1 rounded-full text-white text-xs font-bold" style="background:rgba(0,0,0,.65);width:26px;height:26px" aria-label="Quitar foto ${i + 1}">✕</button>
       </div>`).join("") + `
       <button id="edFotoMas" class="photo-slot" aria-label="Agregar foto"><span style="font-size:28px;color:var(--ink-soft)">+</span></button>`;
+    g.querySelectorAll(".edVer").forEach(im => im.onclick = () =>
+      abrirVisor(state.edFotos.map(f => ({ mini: f.url, grande: f.tipo === "asset" ? fotoUrlGrande(f.id) : f.url })), Number(im.dataset.i)));
     g.querySelectorAll("[data-edq]").forEach(b => b.onclick = () => {
       const f = state.edFotos[+b.dataset.edq];
       if (f.tipo === "nueva") URL.revokeObjectURL(f.url);
