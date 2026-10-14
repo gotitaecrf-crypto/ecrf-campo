@@ -283,8 +283,8 @@
     rutaSel: null,
     rutaPara: null,
     editId: null,
-    codigoSgio: "", fechaDeteccion: "", ubicacion: "", caudal: "", fechaVerif: todayISO(), situacion: "Reparada",
-    m: { tecnico: "", cFecha: "", cUbi: "", cPres: "", cCaudal: "", sFecha: todayISO(), sUbi: "", sPres: "", sCaudal: "" },
+    codigoSgio: "", fechaDeteccion: "", ubicacion: "", caudal: "", fechaVerif: todayISO(), horaVerif: nowHM(), situacion: "Reparada",
+    m: { tecnico: "", cFecha: "", cUbi: "", cPres: "", cCaudal: "", sFecha: todayISO(), sHora: nowHM(), sUbi: "", sPres: "", sCaudal: "" },
     edFotos: [],
     edQuitadas: [],
     camDestino: "registro",
@@ -758,13 +758,13 @@
   }
   // Fecha y hora de la marca de agua = las que el operario puso en el formulario:
   //   GPFO0381: fecha y hora de la toma · GPFO0405: fecha de verificación · GPFO0416: fecha SEDAPAL
-  //   (en 0405 y 0416 la hora es la de la foto). Si el campo está vacío, se usa la fecha real de la foto.
+  //   (cada uno con su hora). Si el campo está vacío, se usa la fecha/hora real de la foto.
   function fechaMarca(form, v, real) {
     const f = form === "GPFO0405" ? v.fechaVerificacion : form === "GPFO0416" ? v.fechaSedapal : v.fecha;
     const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(f || ""));
     if (!m) return real;
     let hh = real.getHours(), mm = real.getMinutes(), ss = real.getSeconds();
-    const t = form === "GPFO0381" ? /^(\d{1,2}):(\d{2})/.exec(String(v.hora || "")) : null;
+    const t = /^(\d{1,2}):(\d{2})/.exec(String(v.hora || ""));
     if (t) { hh = +t[1]; mm = +t[2]; }
     return new Date(+m[1], +m[2] - 1, +m[3], hh, mm, ss);
   }
@@ -781,7 +781,8 @@
       }
     }, 300);
   }
-  const valoresFormulario = () => ({ fecha: state.fecha, hora: state.hora, fechaVerificacion: state.fechaVerif, fechaSedapal: state.m && state.m.sFecha });
+  const valoresFormulario = () => ({ fecha: state.fecha, fechaVerificacion: state.fechaVerif, fechaSedapal: state.m && state.m.sFecha,
+    hora: state.form === "GPFO0405" ? state.horaVerif : state.form === "GPFO0416" ? (state.m && state.m.sHora) : state.hora });
 
   async function procesarFoto(fileOrBlob, fecha) {
     if (state.fotos.length >= 5) { toast("Maximo 5 fotos", true); return; }
@@ -896,12 +897,12 @@
           codigoSgio: state.codigoSgio, tecnico: m.tecnico,
           fechaContratista: m.cFecha, ubicacionContratista: m.cUbi, presionContratista: Number(m.cPres), caudalContratista: Number(m.cCaudal),
           fechaSedapal: m.sFecha, ubicacionSedapal: m.sUbi, presionSedapal: Number(m.sPres), caudalSedapal: Number(m.sCaudal),
-          variacion: r.variacion, errorPct: r.error, fecha: m.sFecha, hora: nowHM()
+          variacion: r.variacion, errorPct: r.error, fecha: m.sFecha, hora: m.sHora || nowHM()
         };
       })() : state.form === "GPFO0405" ? {
         codigoSgio: state.codigoSgio, fechaDeteccion: state.fechaDeteccion, ubicacion: state.ubicacion,
         caudal: Number(state.caudal), fechaVerificacion: state.fechaVerif, situacion: state.situacion,
-        fecha: state.fechaVerif, hora: nowHM()
+        fecha: state.fechaVerif, hora: state.horaVerif || nowHM()
       } : {
         presion: Number(state.presion), fecha: state.fecha, hora: state.hora
       }),
@@ -949,8 +950,8 @@
     state.fecha = todayISO();
     state.hora = nowHM();
     state.codigoSgio = ""; state.fechaDeteccion = ""; state.ubicacion = ""; state.caudal = "";
-    state.fechaVerif = todayISO(); state.situacion = "Reparada";
-    state.m = { tecnico: "", cFecha: "", cUbi: "", cPres: "", cCaudal: "", sFecha: todayISO(), sUbi: "", sPres: "", sCaudal: "" };
+    state.fechaVerif = todayISO(); state.horaVerif = nowHM(); state.situacion = "Reparada";
+    state.m = { tecnico: "", cFecha: "", cUbi: "", cPres: "", cCaudal: "", sFecha: todayISO(), sHora: nowHM(), sUbi: "", sPres: "", sCaudal: "" };
   }
 
   /* ---------------- Export ---------------- */
@@ -986,7 +987,33 @@
     else if (!state.form) renderMenu();
     else renderMain();
     renderPreviewOverlay();
+    if (state.operario) armarAtras();
   }
+
+  /* ---------------- Botón "atrás" de Android ----------------
+     Mientras hay sesión se deja una entrada "de reserva" en el historial. Al tocar atrás se cierra lo que esté
+     encima (cámara, mapa, foto, edición…) o se vuelve al menú, en vez de salir de la app.
+     En el menú: el primer "atrás" avisa y el segundo (dentro de 2,5 s) sale. */
+  function armarAtras() { try { if (!(history.state && history.state.ecrf)) history.pushState({ ecrf: 1 }, ""); } catch (e) {} }
+  function volverAlMenu() { state.form = null; sessionStorage.removeItem("ecrf_form"); state.editId = null; state.previewIdx = null; render(); window.scrollTo(0, 0); }
+  let rearmar = null;
+  window.addEventListener("popstate", () => {
+    if (!state.operario) return;                                        // en el ingreso, atrás sale normal
+    const confirmar = document.querySelector("#cfNo");
+    if (confirmar) confirmar.click();                                    // "foto nueva": atrás = no usarla
+    else if (document.getElementById("camOverlay")) cerrarCamara();
+    else if (document.getElementById("mapaRuta")) cerrarMapaRuta();
+    else if (document.getElementById("panelPdf")) cerrarPanelPdf();
+    else if (state.previewIdx !== null && state.previewIdx !== undefined) { state.previewIdx = null; render(); }
+    else if (state.editId) { state.editId = null; renderLista(); }
+    else if (state.form) volverAlMenu();
+    else {                                                               // ya está en el menú principal
+      toast("Presiona atrás otra vez para salir");
+      clearTimeout(rearmar); rearmar = setTimeout(armarAtras, 2500);
+      return;
+    }
+    armarAtras();
+  });
 
   function renderPreviewOverlay() {
     let el = document.getElementById("previewOverlay");
@@ -1188,9 +1215,7 @@
       </div>
       <div class="flex-1 px-4 py-4 pb-24" id="tabContent"></div>
     `;
-    document.getElementById("btnInicio").onclick = () => {
-      state.form = null; sessionStorage.removeItem("ecrf_form"); state.editId = null; render(); window.scrollTo(0, 0);
-    };
+    document.getElementById("btnInicio").onclick = volverAlMenu;
     document.getElementById("btnSalir").onclick = () => {
       localStorage.removeItem("gpfo_operario"); sessionStorage.removeItem("ecrf_form"); state.form = null;
       state.operario = null; state.pinBuffer = "";
@@ -1265,8 +1290,10 @@
       </div>
       <div class="card p-4 mb-4" style="border-left:6px solid var(--brand)">
         <div class="font-bold mb-3">SEDAPAL</div>
-        ${lbl("Fecha *")}
-        <input id="f6sFecha" type="date" class="input mb-3" value="${escA(m.sFecha)}">
+        <div class="grid grid-cols-2 gap-3 mb-3">
+          <div>${lbl("Fecha *")}<input id="f6sFecha" type="date" class="input" value="${escA(m.sFecha)}"></div>
+          <div>${lbl("Hora *")}<input id="f6sHora" type="time" class="input" value="${escA(m.sHora)}"></div>
+        </div>
         ${lbl("Fuga ubicada en *")}
         ${chipsUbicacion(m.sUbi, "f6sUbi")}
         <div class="grid grid-cols-2 gap-3 mt-3">
@@ -1299,6 +1326,7 @@
     document.getElementById("f6Tecnico").onchange = e => { m.tecnico = e.target.value; ok(); };
     document.getElementById("f6cFecha").onchange = e => { m.cFecha = e.target.value; ok(); };
     document.getElementById("f6sFecha").onchange = e => { m.sFecha = e.target.value; ok(); refrescarMarcas(); };
+    document.getElementById("f6sHora").onchange = e => { m.sHora = e.target.value; ok(); refrescarMarcas(); };
     document.querySelectorAll(".f6cUbi").forEach(b => b.onclick = () => {
       m.cUbi = b.dataset.u; if (!m.sUbi) m.sUbi = m.cUbi;    // SEDAPAL parte de lo que indicó la contratista
       const y = window.scrollY; renderNuevo(); window.scrollTo(0, y);
@@ -1322,8 +1350,10 @@
       </div>
       <div class="card p-4 mb-4">
         <div class="font-bold mb-3">Verificación</div>
-        ${lbl("Fecha de verificación *")}
-        <input id="f5FechaVer" type="date" class="input mb-3" value="${escA(state.fechaVerif)}">
+        <div class="grid grid-cols-2 gap-3 mb-3">
+          <div>${lbl("Fecha de verificación *")}<input id="f5FechaVer" type="date" class="input" value="${escA(state.fechaVerif)}"></div>
+          <div>${lbl("Hora *")}<input id="f5HoraVer" type="time" class="input" value="${escA(state.horaVerif)}"></div>
+        </div>
         ${lbl("Situación *")}
         ${toggleSituacion(state.situacion, "f5Sit")}
       </div>`;
@@ -1334,6 +1364,7 @@
     num("f5Codigo", "codigoSgio", 7); num("f5Caudal", "caudal", 6);
     document.getElementById("f5FechaDet").onchange = e => { state.fechaDeteccion = e.target.value; ok(); };
     document.getElementById("f5FechaVer").onchange = e => { state.fechaVerif = e.target.value; ok(); refrescarMarcas(); };
+    document.getElementById("f5HoraVer").onchange = e => { state.horaVerif = e.target.value; ok(); refrescarMarcas(); };
     const re = () => { const y = window.scrollY; renderNuevo(); window.scrollTo(0, y); };
     document.querySelectorAll(".f5Ubi").forEach(b => b.onclick = () => { state.ubicacion = b.dataset.u; re(); });
     document.querySelectorAll(".f5Sit").forEach(b => b.onclick = () => { state.situacion = b.dataset.s; re(); });
@@ -1410,7 +1441,7 @@
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg>
             Subir fotos de la galería
           </button>
-          <div class="text-xs mt-1 text-center" style="color:var(--ink-soft)">Se les pone la marca de agua con la fecha y hora en que se tomó cada foto.</div>
+          <div class="text-xs mt-1 text-center" style="color:var(--ink-soft)">Se les pone la marca de agua con la fecha y hora que pusiste en el formulario.</div>
         ` : ""}
       </div>
 
@@ -1698,7 +1729,7 @@
       document.getElementById("edCancelar").onclick = () => { state.editId = null; renderLista(); };
       const releer = () => {   // conserva lo escrito al cambiar ubicación o situación
         const ids = ["ed_direccion","ed_urb","ed_distrito","ed_sector","ed_codigo","ed_fdet","ed_caudal","ed_fver",
-                     "ed_tec","ed_cfecha","ed_cubi","ed_cpres","ed_ccau","ed_sfecha","ed_subi","ed_spres","ed_scau"];
+                     "ed_tec","ed_cfecha","ed_cubi","ed_cpres","ed_ccau","ed_sfecha","ed_subi","ed_spres","ed_scau","ed_hora"];
         const vals = Object.fromEntries(ids.map(i => [i, (document.getElementById(i) || {}).value]));
         renderLista();
         ids.forEach(i => { const el = document.getElementById(i); if (el && vals[i] !== undefined) el.value = vals[i]; });
@@ -1714,11 +1745,12 @@
           direccion: v("ed_direccion"), urb: v("ed_urb"), distrito: v("ed_distrito"), sector: v("ed_sector"),
           codigoSgio: v("ed_codigo"), tecnico: v("ed_tec"),
           fechaContratista: v("ed_cfecha"), ubicacionContratista: v("ed_cubi"), presionContratista: nn("ed_cpres"), caudalContratista: nn("ed_ccau"),
-          fechaSedapal: v("ed_sfecha"), ubicacionSedapal: v("ed_subi"), presionSedapal: nn("ed_spres"), caudalSedapal: nn("ed_scau")
+          fechaSedapal: v("ed_sfecha"), ubicacionSedapal: v("ed_subi"), presionSedapal: nn("ed_spres"), caudalSedapal: nn("ed_scau"),
+          hora: v("ed_hora")
         } : es405 ? {
           direccion: v("ed_direccion"), urb: v("ed_urb"), distrito: v("ed_distrito"), sector: v("ed_sector"),
           codigoSgio: v("ed_codigo"), fechaDeteccion: v("ed_fdet"), caudal: v("ed_caudal") === "" ? "" : Number(v("ed_caudal")),
-          fechaVerificacion: v("ed_fver"), ubicacion: state.edUbi, situacion: state.edSit
+          fechaVerificacion: v("ed_fver"), ubicacion: state.edUbi, situacion: state.edSit, hora: v("ed_hora")
         } : {
           direccion: v("ed_direccion"), urb: v("ed_urb"), distrito: v("ed_distrito"), sector: v("ed_sector"),
           presion: v("ed_presion") === "" ? "" : Number(v("ed_presion")), fecha: v("ed_fecha"), hora: v("ed_hora") };
@@ -1834,6 +1866,7 @@
         <div class="font-bold text-sm mt-3">SEDAPAL</div>
         <div class="grid grid-cols-2 gap-3">
           <div>${campo("ed_sfecha", "Fecha *", r.fechaSedapal, 'type="date"')}</div>
+          <div>${campo("ed_hora", "Hora *", r.hora, 'type="time"')}</div>
           <div><label class="text-xs font-semibold block mb-1 mt-2" for="ed_subi" style="color:var(--ink-soft)">Fuga ubicada en *</label>
             <select id="ed_subi" class="input">${UBICACIONES_FUGA.map(u => `<option ${u === r.ubicacionSedapal ? "selected" : ""}>${u}</option>`).join("")}</select></div>
           <div>${campo("ed_spres", "Presión (mca) *", r.presionSedapal, 'inputmode="numeric" data-num="3"')}</div>
@@ -1847,6 +1880,7 @@
           <div>${campo("ed_fdet", "Fecha de detección *", r.fechaDeteccion, 'type="date"')}</div>
           <div>${campo("ed_caudal", "Caudal (L/día) *", r.caudal, 'inputmode="numeric" data-num="6"')}</div>
           <div>${campo("ed_fver", "Fecha de verificación *", r.fechaVerificacion, 'type="date"')}</div>
+          <div>${campo("ed_hora", "Hora *", r.hora, 'type="time"')}</div>
         </div>
         <div class="text-xs font-semibold mt-3 mb-1" style="color:var(--ink-soft)">Ubicación de la fuga *</div>
         ${chipsUbicacion(state.edUbi, "edUbi")}
