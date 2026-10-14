@@ -1285,49 +1285,6 @@
     else renderLista();
   }
 
-
-  /* ---------------- Hora escrita a mano + a.m./p.m. (en vez del reloj) ----------------
-     Se ve "9:30" con botones a.m./p.m.; por dentro se guarda en 24 h ("21:30") en un campo oculto con el mismo id,
-     así el resto del código (y la hoja) no cambia. */
-  function horaCampo(id, valor24) {
-    const m = /^(\d{1,2}):(\d{2})/.exec(String(valor24 || ""));
-    let h12 = "", ap = "am";
-    if (m) { const hh = +m[1]; ap = hh >= 12 ? "pm" : "am"; h12 = ((hh % 12) || 12) + ":" + m[2]; }
-    const boton = (v, t) => `<button type="button" class="hora-ap" data-ap="${v}" aria-pressed="${ap === v}"
-      style="flex:1;min-height:40px;border-radius:10px;font-weight:800;font-size:15px;${ap === v ? "background:var(--brand-dark);color:#fff;border:2px solid var(--brand-dark)" : "background:#fff;color:var(--ink);border:1.5px solid #CFD8E3"}">${t}</button>`;
-    return `<div class="hora-campo" data-ap="${ap}">
-      <input type="hidden" id="${id}" value="${escA(m ? m[0] : "")}">
-      <input type="text" class="input hora-txt" inputmode="numeric" maxlength="5" placeholder="hh:mm" value="${escA(h12)}" autocomplete="off" aria-label="Hora">
-      <div style="display:flex;gap:6px;margin-top:6px">${boton("am", "a.m.")}${boton("pm", "p.m.")}</div>
-    </div>`;
-  }
-  function actualizarHora(w) {
-    const txt = w.querySelector(".hora-txt"), oculto = w.querySelector('input[type="hidden"]');
-    const m = /^(\d{1,2}):(\d{2})$/.exec(txt.value);
-    const ok = m && +m[1] >= 1 && +m[1] <= 12 && +m[2] <= 59;
-    txt.style.borderColor = txt.value && !ok ? "var(--danger)" : "";
-    if (!ok) return;
-    let hh = +m[1] % 12; if (w.dataset.ap === "pm") hh += 12;
-    const v = String(hh).padStart(2, "0") + ":" + m[2];
-    if (oculto.value !== v) { oculto.value = v; oculto.dispatchEvent(new Event("change", { bubbles: true })); }
-  }
-  document.addEventListener("input", e => {
-    const t = e.target; if (!t.classList || !t.classList.contains("hora-txt")) return;
-    let d = t.value.replace(/\D/g, "").slice(0, 4);
-    if (d.length >= 3) d = d.slice(0, d.length - 2) + ":" + d.slice(-2);   // 930 -> 9:30 · 1045 -> 10:45
-    t.value = d;
-    actualizarHora(t.closest(".hora-campo"));
-  });
-  document.addEventListener("click", e => {
-    const b = e.target.closest && e.target.closest(".hora-ap"); if (!b) return;
-    const w = b.closest(".hora-campo"); w.dataset.ap = b.dataset.ap;
-    w.querySelectorAll(".hora-ap").forEach(x => {
-      const on = x.dataset.ap === w.dataset.ap; x.setAttribute("aria-pressed", on);
-      x.style.cssText = x.style.cssText.replace(/background:[^;]+;color:[^;]+;border:[^;]+/, on
-        ? "background:var(--brand-dark);color:#fff;border:2px solid var(--brand-dark)" : "background:#fff;color:var(--ink);border:1.5px solid #CFD8E3");
-    });
-    actualizarHora(w);
-  });
   function campos0381() {
     return `      <div class="card p-4 mb-4">
         <label class="text-sm font-semibold block mb-2" style="color:var(--ink-soft)">Presión (mca)</label>
@@ -1341,7 +1298,7 @@
         </div>
         <div class="card p-4">
           <label class="text-sm font-semibold block mb-2" style="color:var(--ink-soft)">Hora</label>
-          ${horaCampo("inpHora", state.hora)}
+          <input id="inpHora" type="time" class="input" value="${state.hora}">
         </div>
       </div>
 
@@ -1391,7 +1348,7 @@
         <div class="font-bold mb-3">SEDAPAL</div>
         <div class="grid grid-cols-2 gap-3 mb-3">
           <div>${lbl("Fecha *")}<input id="f6sFecha" type="date" class="input" value="${escA(m.sFecha)}"></div>
-          <div>${lbl("Hora *")}${horaCampo("f6sHora", m.sHora)}</div>
+          <div>${lbl("Hora *")}<input id="f6sHora" type="time" class="input" value="${escA(m.sHora)}"></div>
         </div>
         ${lbl("Fuga ubicada en *")}
         ${chipsUbicacion(m.sUbi, "f6sUbi")}
@@ -1451,7 +1408,7 @@
         <div class="font-bold mb-3">Verificación</div>
         <div class="grid grid-cols-2 gap-3 mb-3">
           <div>${lbl("Fecha de verificación *")}<input id="f5FechaVer" type="date" class="input" value="${escA(state.fechaVerif)}"></div>
-          <div>${lbl("Hora *")}${horaCampo("f5HoraVer", state.horaVerif)}</div>
+          <div>${lbl("Hora *")}<input id="f5HoraVer" type="time" class="input" value="${escA(state.horaVerif)}"></div>
         </div>
         ${lbl("Situación *")}
         ${toggleSituacion(state.situacion, "f5Sit")}
@@ -1841,7 +1798,6 @@
         const vals = Object.fromEntries(ids.map(i => [i, (document.getElementById(i) || {}).value]));
         renderLista();
         ids.forEach(i => { const el = document.getElementById(i); if (el && vals[i] !== undefined) el.value = vals[i]; });
-        const hc = document.getElementById("ed_hora"); if (hc && vals.ed_hora !== undefined) hc.closest(".hora-campo").outerHTML = horaCampo("ed_hora", vals.ed_hora);
       };
       document.querySelectorAll(".edUbi").forEach(b => b.onclick = () => { state.edUbi = b.dataset.u; releer(); });
       document.querySelectorAll(".edSit").forEach(b => b.onclick = () => { state.edSit = b.dataset.s; releer(); });
@@ -1977,7 +1933,7 @@
         <div class="font-bold text-sm mt-3">SEDAPAL</div>
         <div class="grid grid-cols-2 gap-3">
           <div>${campo("ed_sfecha", "Fecha *", r.fechaSedapal, 'type="date"')}</div>
-          <div><label class="text-xs font-semibold block mb-1 mt-2" style="color:var(--ink-soft)">Hora *</label>${horaCampo("ed_hora", r.hora)}</div>
+          <div>${campo("ed_hora", "Hora *", r.hora, 'type="time"')}</div>
           <div><label class="text-xs font-semibold block mb-1 mt-2" for="ed_subi" style="color:var(--ink-soft)">Fuga ubicada en *</label>
             <select id="ed_subi" class="input">${UBICACIONES_FUGA.map(u => `<option ${u === r.ubicacionSedapal ? "selected" : ""}>${u}</option>`).join("")}</select></div>
           <div>${campo("ed_spres", "Presión (mca) *", r.presionSedapal, 'inputmode="numeric" data-num="3"')}</div>
@@ -1991,7 +1947,7 @@
           <div>${campo("ed_fdet", "Fecha de detección *", r.fechaDeteccion, 'type="date"')}</div>
           <div>${campo("ed_caudal", "Caudal (L/día) *", r.caudal, 'inputmode="numeric" data-num="6"')}</div>
           <div>${campo("ed_fver", "Fecha de verificación *", r.fechaVerificacion, 'type="date"')}</div>
-          <div><label class="text-xs font-semibold block mb-1 mt-2" style="color:var(--ink-soft)">Hora *</label>${horaCampo("ed_hora", r.hora)}</div>
+          <div>${campo("ed_hora", "Hora *", r.hora, 'type="time"')}</div>
         </div>
         <div class="text-xs font-semibold mt-3 mb-1" style="color:var(--ink-soft)">Ubicación de la fuga *</div>
         ${chipsUbicacion(state.edUbi, "edUbi")}
@@ -2001,7 +1957,7 @@
           <div>${campo("ed_sector", "Sector", r.sector, 'inputmode="numeric" data-num="4"')}</div>
           <div>${campo("ed_presion", "Presión (mca) *", r.presion, 'inputmode="numeric" data-num="3"')}</div>
           <div>${campo("ed_fecha", "Fecha *", r.fecha, 'type="date"')}</div>
-          <div><label class="text-xs font-semibold block mb-1 mt-2" style="color:var(--ink-soft)">Hora *</label>${horaCampo("ed_hora", r.hora)}</div>
+          <div>${campo("ed_hora", "Hora *", r.hora, 'type="time"')}</div>
         </div>`}
         <div class="text-xs font-semibold mt-4 mb-1" style="color:var(--ink-soft)">Fotos</div>
         ${r.fotoPendiente ? `<div class="text-xs p-2 rounded-lg" style="background:#FFF1C7;color:#6B4A00">Hay cambios de fotos esperando subirse. Podrás editar las fotos cuando haya internet y se suban.</div>`
