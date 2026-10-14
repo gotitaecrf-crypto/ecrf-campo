@@ -375,6 +375,11 @@
     try {
       const c = await apiGet({ action: "config" });
       if (c.usuarios && c.usuarios.length) localStorage.setItem("ecrf_usuarios", JSON.stringify(c.usuarios.map(u => ({ name: u.nombre, hash: u.hash, rol: u.rol }))));
+      if (Array.isArray(c.modulos) && c.modulos.length) {
+        const antes = localStorage.getItem("ecrf_modulos"), ahora = JSON.stringify(c.modulos);
+        localStorage.setItem("ecrf_modulos", ahora);
+        if (antes !== ahora && state.operario && !state.form && !state.admin) render();   // el menú se actualiza solo
+      }
       let local = null; try { local = await IDB.kget("suministros"); } catch (e) {}
       if (c.suministrosVersion && (!local || local.v !== c.suministrosVersion)) {
         const s = await apiGet({ action: "suministros" });
@@ -530,7 +535,16 @@
     pintarEstadoSync();
   }
 
-  const esSupervisor = () => { const u = listaUsuarios().find(o => o.name === state.operario); return u ? u.rol === "SUPERVISOR" : /supervisor/i.test(state.operario || ""); };
+  // Roles: OPERARIO < SUPERVISOR < ADMINISTRADOR (el administrador ve y puede todo lo del supervisor, y además el panel)
+  function rolDe(nombre) {
+    const u = listaUsuarios().find(o => o.name === nombre);
+    const r = String(u ? u.rol : "").toUpperCase();
+    if (/^ADMIN/.test(r)) return "ADMINISTRADOR";
+    if (/^SUPERV/.test(r) || (!u && /supervisor/i.test(nombre || ""))) return "SUPERVISOR";
+    return "OPERARIO";
+  }
+  const esAdmin = () => rolDe(state.operario) === "ADMINISTRADOR";
+  const esSupervisor = () => rolDe(state.operario) !== "OPERARIO";
   function misPendientes() {
     const hoy = aplicarOrden(state.pendientes);   // orden de "Ordenar por cercanía" si se usó; si no, por fecha de carga
     const delForm = hoy.filter(p => formDe(p) === (state.form || "GPFO0381"));
@@ -1039,6 +1053,7 @@
   /* ================= RENDER ================= */
   function render() {
     if (!state.operario) renderLogin();
+    else if (state.admin) return renderAdmin(), armarAtras();
     else if (!state.form) renderMenu();
     else renderMain();
     renderPreviewOverlay();
@@ -1062,6 +1077,8 @@
     else if (document.getElementById("panelPdf")) cerrarPanelPdf();
     else if (state.previewIdx !== null && state.previewIdx !== undefined) { state.previewIdx = null; render(); }
     else if (state.editId) { state.editId = null; renderLista(); }
+    else if (document.getElementById("admFicha")) document.getElementById("admFicha").querySelector("#admFichaNo").click();
+    else if (state.admin) salirAdmin();
     else if (state.form) volverAlMenu();
     else {                                                               // ya está en el menú principal
       toast("Presiona atrás otra vez para salir");
@@ -1581,7 +1598,7 @@
     const lista = misPendientes();
     const est = estadoBusqueda(q);
     const noEsta = q.length >= 6 && !nisLocal(q) && !["buscando","pendiente"].includes(est);
-    const para = state.rutaPara || (esSupervisor() ? (OPERARIOS.find(o => o.rol !== "SUPERVISOR") || {}).name : state.operario);
+    const para = state.rutaPara || (esSupervisor() ? (OPERARIOS.find(o => rolDe(o.name) === "OPERARIO") || {}).name : state.operario);
     c.innerHTML = `
       <div class="card p-4 mb-4">
         <div class="font-bold mb-1">Preparar ruta</div>
@@ -1600,7 +1617,7 @@
           ${esSupervisor() ? `
             <label class="text-xs font-semibold block mb-1 mt-3" for="rutaPara" style="color:var(--ink-soft)">Asignar a</label>
             <select id="rutaPara" class="input">
-              ${OPERARIOS.filter(o => o.rol !== "SUPERVISOR").map(o => `<option ${o.name === para ? "selected" : ""}>${escA(o.name)}</option>`).join("")}
+              ${OPERARIOS.filter(o => rolDe(o.name) === "OPERARIO").map(o => `<option ${o.name === para ? "selected" : ""}>${escA(o.name)}</option>`).join("")}
             </select>` : ""}
           <button id="rutaAgregar" class="btn-primary w-full mt-4">Agregar a la ruta</button>
         ` : `
@@ -2094,6 +2111,7 @@
 
   function renderMenu() {
     const app = document.getElementById("app");
+    app.classList.add("max-w-md");
     app.innerHTML = `
       <div class="menu-hero">
         <svg class="menu-paisaje" viewBox="0 0 400 220" preserveAspectRatio="xMidYMax slice" aria-hidden="true">
@@ -2127,34 +2145,22 @@
         </div>
       </div>
       <div class="px-4 pt-2 pb-8">
-        <button class="form-card" data-form="GPFO0381">
-          <span class="form-ico">${mano(50, false)}</span>
-          <span class="flex-1 min-w-0"><b class="block text-lg leading-tight">Toma de presiones</b>
-            <span class="text-sm" style="color:var(--ink-soft)">GPFO0381 · conexión domiciliaria</span></span>
-          <span class="text-sm font-semibold" style="color:var(--brand)">${(n => n ? n + " hechos" : "Abrir")(regsVisibles().filter(r => formDe(r) === "GPFO0381").length)}</span>
-        </button>
-        <button class="form-card" data-form="GPFO0405">
-          <span class="form-ico">${ICO_0405}</span>
-          <span class="flex-1 min-w-0"><b class="block text-lg leading-tight">Verificación de reparación</b>
-            <span class="text-sm" style="color:var(--ink-soft)">GPFO0405 · fugas no visibles</span></span>
-          <span class="text-sm font-semibold" style="color:var(--brand)">${(n => n ? n + " hechos" : "Abrir")(regsVisibles().filter(r => formDe(r) === "GPFO0405").length)}</span>
-        </button>
-        <button class="form-card" data-form="GPFO0416">
-          <span class="form-ico">${ICO_0416}</span>
-          <span class="flex-1 min-w-0"><b class="block text-lg leading-tight">Verificación por muestreo</b>
-            <span class="text-sm" style="color:var(--ink-soft)">GPFO0416 · fugas detectadas</span></span>
-          <span class="text-sm font-semibold" style="color:var(--brand)">${(n => n ? n + " hechos" : "Abrir")(regsVisibles().filter(r => formDe(r) === "GPFO0416").length)}</span>
-        </button>
-        <button class="form-card" id="btnPdf" style="background:#E1F3FB;border-color:#7CCBEA">
-          <span class="form-ico" style="display:flex;align-items:center;justify-content:center;color:var(--brand-dark)">
-            <svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><path d="M12 18v-6"/><path d="M9 15l3 3 3-3"/></svg>
-          </span>
-          <span class="flex-1 min-w-0"><b class="block text-lg leading-tight">Generar mis PDF</b>
-            <span class="text-sm" style="color:var(--ink-soft)">Formularios del mes · GPFO0416 por quincena</span></span>
-        </button>
+        ${(() => {
+          const mods = modulosMenu();
+          if (!mods.length) return `<div class="card p-4 text-sm text-center" style="color:var(--ink-soft)">No tienes módulos habilitados. Consulta con el administrador.</div>`;
+          return mods.map(m => tarjetaModulo(m)).join("");
+        })()}
+        ${esAdmin() ? `
+        <button class="form-card" id="btnAdmin" style="background:#03204C;border-color:#03204C;color:#fff">
+          <span class="form-ico" style="display:flex;align-items:center;justify-content:center;background:rgba(255,255,255,.12);color:#fff">${ICO_ADMIN}</span>
+          <span class="flex-1 min-w-0"><b class="block text-lg leading-tight">Panel de administración</b>
+            <span class="text-sm" style="color:#C9D8EA">Módulos del menú · solo administradores</span></span>
+        </button>` : ""}
         <div class="mt-2 flex justify-center"><span id="syncBadge"></span></div>
       </div>`;
-    document.getElementById("btnPdf").onclick = () => abrirPanelPdf();
+    document.querySelectorAll("[data-accion]").forEach(b => b.onclick = () => { const m = MODULOS_APP[b.dataset.accion]; if (m && m.abrir) m.abrir(); });
+    const bAdm = document.getElementById("btnAdmin");
+    if (bAdm) bAdm.onclick = () => { state.admin = true; state.adminMods = null; render(); window.scrollTo(0, 0); };
     document.querySelectorAll(".form-card[data-form]:not(:disabled)").forEach(b => b.onclick = () => {
       state.form = b.dataset.form; sessionStorage.setItem("ecrf_form", state.form); state.tab = "nuevo";
       resetForm(); state.editId = null; state.rutaSel = null; state.rutaQuery = "";
@@ -2166,6 +2172,217 @@
     };
     pintarEstadoSync();
   }
+
+
+  /* ================= MÓDULOS DEL MENÚ =================
+     Cada módulo que existe en la app se registra aquí. Desde el Panel de administración se decide si está activo,
+     su orden, su nombre y para qué roles se ve. Para agregar uno nuevo en el futuro: se suma aquí y aparece en el panel. */
+  const ICO_PDF = `<svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><path d="M12 18v-6"/><path d="M9 15l3 3 3-3"/></svg>`;
+  const ICO_ADMIN = `<svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>`;
+  const ROLES = ["OPERARIO", "SUPERVISOR", "ADMINISTRADOR"];
+  const ROL_TXT = { OPERARIO: "Operario", SUPERVISOR: "Supervisor", ADMINISTRADOR: "Administrador" };
+  const MODULOS_APP = {
+    GPFO0381: { tipo: "form", ico: () => mano(50, false), defecto: { titulo: "Toma de presiones", descripcion: "GPFO0381 · conexión domiciliaria" } },
+    GPFO0405: { tipo: "form", ico: () => ICO_0405, defecto: { titulo: "Verificación de reparación", descripcion: "GPFO0405 · fugas no visibles" } },
+    GPFO0416: { tipo: "form", ico: () => ICO_0416, defecto: { titulo: "Verificación por muestreo", descripcion: "GPFO0416 · fugas detectadas" } },
+    PDF: { tipo: "accion", ico: () => ICO_PDF, abrir: () => abrirPanelPdf(), estilo: "background:#E1F3FB;border-color:#7CCBEA",
+           defecto: { titulo: "Generar mis PDF", descripcion: "Formularios del mes · GPFO0416 por quincena" } }
+  };
+  function modulosConfig() {
+    let c = null; try { c = JSON.parse(localStorage.getItem("ecrf_modulos") || "null"); } catch (e) {}
+    const base = Object.keys(MODULOS_APP).map((id, i) => ({ id, ...MODULOS_APP[id].defecto, activo: true, orden: i + 1, roles: ROLES.slice() }));
+    if (!Array.isArray(c) || !c.length) return base;
+    const porId = Object.fromEntries(c.map(m => [m.id, m]));
+    return base.map(b => porId[b.id] ? { ...b, ...porId[b.id], roles: (porId[b.id].roles || []).slice() } : { ...b, orden: 900 + b.orden })
+      .concat(c.filter(m => !MODULOS_APP[m.id]).map(m => ({ ...m, roles: (m.roles || []).slice() })))   // módulos de una versión futura
+      .sort((a, b) => (a.orden || 0) - (b.orden || 0));
+  }
+  function modulosMenu() {
+    const r = rolDe(state.operario);
+    return modulosConfig().filter(m => MODULOS_APP[m.id] && m.activo !== false && (m.roles || []).includes(r));
+  }
+  function tarjetaModulo(m) {
+    const def = MODULOS_APP[m.id];
+    const n = def.tipo === "form" ? regsVisibles().filter(r => formDe(r) === m.id).length : 0;
+    const icono = def.tipo === "form" && m.id !== "GPFO0381" ? def.ico() : def.ico();
+    return `
+        <button class="form-card" ${def.tipo === "form" ? `data-form="${m.id}"` : `data-accion="${m.id}"`} ${def.estilo ? `style="${def.estilo}"` : ""}>
+          <span class="form-ico" ${def.tipo !== "form" ? 'style="display:flex;align-items:center;justify-content:center;color:var(--brand-dark)"' : ""}>${icono}</span>
+          <span class="flex-1 min-w-0"><b class="block text-lg leading-tight">${escA(m.titulo || def.defecto.titulo)}</b>
+            <span class="text-sm" style="color:var(--ink-soft)">${escA(m.descripcion || "")}</span></span>
+          ${def.tipo === "form" ? `<span class="text-sm font-semibold" style="color:var(--brand)">${n ? n + " hechos" : "Abrir"}</span>` : ""}
+        </button>`;
+  }
+
+  /* ================= PANEL DE ADMINISTRACIÓN =================
+     Solo para ADMINISTRADOR. En PC se ve como tabla con vista previa al lado; en celular, como tarjetas. */
+  function renderAdmin() {
+    if (!esAdmin()) { state.admin = false; return render(); }
+    const app = document.getElementById("app");
+    app.classList.remove("max-w-md");
+    if (!state.adminMods) { state.adminMods = modulosConfig().map((m, i) => ({ ...m, orden: i + 1 })); state.adminDirty = false; }
+    const mods = state.adminMods;
+    const rolVista = state.adminVista || "OPERARIO";
+    const chipRol = (m, r, i) => `<button type="button" class="adm-rol" data-i="${i}" data-r="${r}" aria-pressed="${(m.roles || []).includes(r)}">${ROL_TXT[r]}</button>`;
+    const vista = mods.filter(m => MODULOS_APP[m.id] && m.activo !== false && (m.roles || []).includes(rolVista));
+    app.innerHTML = `
+      <style>
+        .adm-top{background:#03204C;color:#fff;padding:calc(14px + env(safe-area-inset-top,0px)) 16px 16px}
+        .adm-top-in{max-width:1200px;margin:0 auto;display:flex;align-items:center;gap:12px}
+        .adm-wrap{max-width:1200px;margin:0 auto;padding:16px 16px 120px;width:100%}
+        .adm-tabs{display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap}
+        .adm-tab{border-radius:999px;padding:8px 16px;font-weight:700;font-size:14px;border:1.5px solid var(--line);background:#fff;color:var(--ink)}
+        .adm-tab[aria-current="true"]{background:var(--brand-dark);border-color:var(--brand-dark);color:#fff}
+        .adm-tab:disabled{opacity:.55}
+        .adm-grid{display:grid;gap:18px}
+        .adm-head{display:none}
+        .adm-mod{background:#fff;border:1px solid var(--line);border-radius:16px;padding:14px;margin-bottom:12px;display:grid;gap:10px;
+          grid-template-columns:auto 1fr auto;grid-template-areas:"ord ico act" "tit tit tit" "des des des" "rol rol rol"}
+        .adm-mod.off{background:#F6F8FA}
+        .adm-ord{grid-area:ord;display:flex;gap:4px;align-items:center}
+        .adm-ico{grid-area:ico;display:flex;align-items:center;gap:10px;min-width:0}
+        .adm-ico .form-ico{width:46px;height:46px;flex:0 0 46px}
+        .adm-act{grid-area:act;display:flex;align-items:center}
+        .adm-tit{grid-area:tit}.adm-des{grid-area:des}.adm-roles{grid-area:rol;display:flex;gap:6px;flex-wrap:wrap}
+        .adm-flecha{width:34px;height:34px;border-radius:10px;border:1.5px solid var(--line);background:#fff;font-weight:800;color:var(--ink)}
+        .adm-flecha:disabled{opacity:.35}
+        .adm-num{font-weight:800;color:var(--brand-dark);min-width:22px;text-align:center}
+        .adm-rol{border-radius:999px;padding:7px 12px;font-size:13px;font-weight:700;border:1.5px solid var(--line);background:#fff;color:var(--ink-soft)}
+        .adm-rol[aria-pressed="true"]{background:#E1F3FB;border-color:#7CCBEA;color:#0B4A6B}
+        .adm-sw{position:relative;width:52px;height:30px;border-radius:999px;border:0;background:#C9D3DE;transition:background .15s}
+        .adm-sw::after{content:"";position:absolute;top:3px;left:3px;width:24px;height:24px;border-radius:50%;background:#fff;box-shadow:0 1px 3px rgba(0,0,0,.3);transition:left .15s}
+        .adm-sw[aria-checked="true"]{background:#1E8E5A}.adm-sw[aria-checked="true"]::after{left:25px}
+        .adm-lbl{font-size:11px;font-weight:700;color:var(--ink-soft);text-transform:uppercase;letter-spacing:.04em;margin-bottom:3px}
+        .adm-prev{background:#fff;border:1px solid var(--line);border-radius:16px;padding:14px;align-self:start}
+        .adm-prev .form-card{pointer-events:none;margin-bottom:8px}
+        .adm-bar{position:fixed;left:0;right:0;bottom:0;background:#fff;border-top:1px solid var(--line);padding:12px 16px calc(12px + env(safe-area-inset-bottom,0px));z-index:40}
+        .adm-bar-in{max-width:1200px;margin:0 auto;display:flex;gap:10px;align-items:center}
+        @media (min-width: 900px){
+          .adm-grid{grid-template-columns:minmax(0,1fr) 340px}
+          .adm-prev{position:sticky;top:16px}
+          .adm-mod{grid-template-columns:108px 170px minmax(0,1fr) minmax(0,1.2fr) 64px;column-gap:14px;row-gap:8px;
+            grid-template-areas:"ord ico tit des act" "ord ico rol rol act";align-items:center;margin-bottom:10px;padding:12px 16px}
+          .adm-act{justify-content:center}
+        }
+      </style>
+      <div class="adm-top"><div class="adm-top-in">
+        <button id="admVolver" aria-label="Volver al menú" style="background:none;border:0;color:#fff;font-size:26px;width:40px;height:40px">‹</button>
+        <div style="flex:1;min-width:0"><div style="font-size:12px;color:#8FD3F0;font-weight:700">ECRF CAMPO · ${escA(state.operario)}</div>
+          <div style="font-size:22px;font-weight:800;line-height:1.15">Panel de administración</div></div>
+        <span class="logo-chip"><img src="${LOGO_SEDAPAL}" alt="SEDAPAL"></span>
+      </div></div>
+      <div class="adm-wrap">
+        <div class="adm-tabs">
+          <button class="adm-tab" aria-current="true">Módulos del menú</button>
+          <button class="adm-tab" disabled title="Próximamente">Usuarios · próximamente</button>
+          <button class="adm-tab" disabled title="Próximamente">Ajustes · próximamente</button>
+        </div>
+        <div class="text-sm mb-3" style="color:var(--ink-soft)">Activa o desactiva cada módulo, cambia su orden y su nombre, y elige qué roles lo ven en el menú. Los cambios llegan a todos los celulares la próxima vez que abran la app con internet.</div>
+        <div class="adm-grid">
+          <div>
+            ${mods.map((m, i) => {
+              const def = MODULOS_APP[m.id];
+              return `
+              <div class="adm-mod ${m.activo === false ? "off" : ""}">
+                <div class="adm-ord">
+                  <button class="adm-flecha adm-sube" data-i="${i}" aria-label="Subir" ${i === 0 ? "disabled" : ""}>↑</button>
+                  <button class="adm-flecha adm-baja" data-i="${i}" aria-label="Bajar" ${i === mods.length - 1 ? "disabled" : ""}>↓</button>
+                  <span class="adm-num">${i + 1}</span>
+                </div>
+                <div class="adm-ico">
+                  ${def ? `<span class="form-ico" ${def.tipo !== "form" ? 'style="display:flex;align-items:center;justify-content:center;color:var(--brand-dark)"' : ""}>${def.ico()}</span>` : `<span class="form-ico" style="display:flex;align-items:center;justify-content:center">🧩</span>`}
+                  <div class="min-w-0"><div class="text-xs font-bold" style="color:var(--brand)">${escA(m.id)}</div>
+                    <div class="text-xs" style="color:var(--ink-soft)">${def ? (def.tipo === "form" ? "Formulario" : "Herramienta") : "Versión futura"}</div></div>
+                </div>
+                <div class="adm-act"><button class="adm-sw" role="switch" data-i="${i}" aria-checked="${m.activo !== false}" aria-label="Activo"></button></div>
+                <div class="adm-tit"><div class="adm-lbl">Nombre en el menú</div>
+                  <input class="input adm-in" data-i="${i}" data-k="titulo" maxlength="60" value="${escA(m.titulo || "")}"></div>
+                <div class="adm-des"><div class="adm-lbl">Descripción</div>
+                  <input class="input adm-in" data-i="${i}" data-k="descripcion" maxlength="120" value="${escA(m.descripcion || "")}"></div>
+                <div class="adm-roles"><span class="adm-lbl" style="align-self:center;margin:0 4px 0 0">Lo ven:</span>${ROLES.map(r => chipRol(m, r, i)).join("")}</div>
+              </div>`; }).join("")}
+          </div>
+          <div class="adm-prev">
+            <div class="font-bold mb-1">Vista previa del menú</div>
+            <div class="text-xs mb-2" style="color:var(--ink-soft)">Así lo verá cada rol:</div>
+            <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px">
+              ${ROLES.map(r => `<button type="button" class="adm-rol adm-ver" data-r="${r}" aria-pressed="${r === rolVista}">${ROL_TXT[r]}</button>`).join("")}
+            </div>
+            ${vista.length ? vista.map(m => tarjetaModulo(m)).join("") : `<div class="text-sm p-3 rounded-lg" style="background:#FFF1C7;color:#6B4A00">Este rol no verá ningún módulo.</div>`}
+          </div>
+        </div>
+      </div>
+      <div class="adm-bar"><div class="adm-bar-in">
+        <div style="flex:1;font-size:13px;color:${state.adminDirty ? "#6B4A00" : "var(--ink-soft)"}">${state.adminDirty ? "● Hay cambios sin guardar" : "Sin cambios"}</div>
+        <button id="admDeshacer" class="btn-ghost" style="width:auto;padding:0 16px" ${state.adminDirty ? "" : "disabled"}>Deshacer</button>
+        <button id="admGuardar" class="btn-primary" style="width:auto;padding:0 22px" ${state.adminDirty ? "" : "disabled"}>Guardar cambios</button>
+      </div></div>`;
+
+    const cambio = () => { state.adminDirty = true; const y = window.scrollY; renderAdmin(); window.scrollTo(0, y); };
+    document.getElementById("admVolver").onclick = salirAdmin;
+    app.querySelectorAll(".adm-sube").forEach(b => b.onclick = () => { const i = +b.dataset.i; [mods[i - 1], mods[i]] = [mods[i], mods[i - 1]]; cambio(); });
+    app.querySelectorAll(".adm-baja").forEach(b => b.onclick = () => { const i = +b.dataset.i; [mods[i + 1], mods[i]] = [mods[i], mods[i + 1]]; cambio(); });
+    app.querySelectorAll(".adm-sw").forEach(b => b.onclick = () => { const m = mods[+b.dataset.i]; m.activo = m.activo === false; cambio(); });
+    app.querySelectorAll(".adm-rol[data-i]").forEach(b => b.onclick = () => {
+      const m = mods[+b.dataset.i], r = b.dataset.r; m.roles = m.roles || [];
+      m.roles = m.roles.includes(r) ? m.roles.filter(x => x !== r) : m.roles.concat(r); cambio();
+    });
+    app.querySelectorAll(".adm-ver").forEach(b => b.onclick = () => { state.adminVista = b.dataset.r; const y = window.scrollY; renderAdmin(); window.scrollTo(0, y); });
+    app.querySelectorAll(".adm-in").forEach(inp => inp.oninput = () => {
+      mods[+inp.dataset.i][inp.dataset.k] = inp.value;
+      if (!state.adminDirty) { state.adminDirty = true; const bar = app.querySelector(".adm-bar-in > div"); if (bar) { bar.textContent = "● Hay cambios sin guardar"; bar.style.color = "#6B4A00"; }
+        app.querySelector("#admGuardar").disabled = false; app.querySelector("#admDeshacer").disabled = false; }
+    });
+    app.querySelectorAll(".adm-in").forEach(inp => inp.onchange = () => { const y = window.scrollY; renderAdmin(); window.scrollTo(0, y); });
+    document.getElementById("admDeshacer").onclick = () => { state.adminMods = null; renderAdmin(); };
+    document.getElementById("admGuardar").onclick = guardarModulosAdmin;
+  }
+  function salirAdmin() {
+    if (state.adminDirty) toast("Se descartaron los cambios sin guardar");
+    state.admin = false; state.adminMods = null; state.adminDirty = false;
+    document.getElementById("app").classList.add("max-w-md");
+    render(); window.scrollTo(0, 0);
+  }
+  function pedirFicha() {
+    return new Promise(ok => {
+      const el = document.createElement("div");
+      el.id = "admFicha";
+      el.style.cssText = "position:fixed;inset:0;z-index:96;background:rgba(3,32,76,.55);display:flex;align-items:center;justify-content:center;padding:16px";
+      el.innerHTML = `<div style="background:#fff;border-radius:18px;padding:18px;width:100%;max-width:360px">
+        <div class="font-bold text-lg mb-1">Confirma con tu ficha</div>
+        <div class="text-sm mb-3" style="color:var(--ink-soft)">Por seguridad, los cambios del panel se guardan solo con la ficha del administrador.</div>
+        <input id="admFichaIn" class="input" type="password" inputmode="numeric" maxlength="5" placeholder="Ficha (5 dígitos)" autocomplete="off">
+        <div style="display:flex;gap:10px;margin-top:14px">
+          <button id="admFichaNo" class="btn-ghost" style="flex:1">Cancelar</button>
+          <button id="admFichaSi" class="btn-primary" style="flex:1">Guardar</button>
+        </div></div>`;
+      document.body.appendChild(el);
+      const inp = el.querySelector("#admFichaIn"); inp.focus();
+      inp.oninput = () => { inp.value = inp.value.replace(/\D/g, "").slice(0, 5); };
+      const fin = v => { el.remove(); ok(v); };
+      el.querySelector("#admFichaNo").onclick = () => fin(null);
+      el.querySelector("#admFichaSi").onclick = () => fin(inp.value.length === 5 ? inp.value : (toast("La ficha tiene 5 dígitos", true), null));
+      inp.onkeydown = e => { if (e.key === "Enter") el.querySelector("#admFichaSi").click(); };
+    });
+  }
+  async function guardarModulosAdmin() {
+    if (!apiListo() || !enLinea()) { toast("Necesitas internet para guardar", true); return; }
+    const mods = state.adminMods;
+    if (!mods.some(m => MODULOS_APP[m.id] && m.activo !== false && (m.roles || []).includes("OPERARIO")))
+      if (!confirmarSuave("Deja al menos un módulo activo para los operarios")) return;
+    const ficha = await pedirFicha(); if (!ficha) return;
+    const btn = document.getElementById("admGuardar"); if (btn) { btn.disabled = true; btn.textContent = "Guardando…"; }
+    try {
+      const r = await apiPost({ tipo: "modulos", ficha, modulos: mods.map((m, i) => ({ id: m.id, titulo: m.titulo, descripcion: m.descripcion, activo: m.activo !== false, orden: i + 1, roles: m.roles || [] })) });
+      localStorage.setItem("ecrf_modulos", JSON.stringify(r.modulos));
+      state.adminMods = null; state.adminDirty = false;
+      toast("Módulos guardados ✅ Los celulares los verán al abrir la app con internet");
+    } catch (e) {
+      toast(e && e.code === "ficha" ? "Ficha incorrecta" : e && e.code === "permiso" ? "Solo los administradores pueden guardar" : "No se pudo guardar. Revisa tu internet", true);
+    }
+    renderAdmin();
+  }
+  const confirmarSuave = msg => { toast(msg, true); return false; };   // aviso sin diálogo del navegador
 
   /* ---------------- Mapa de la ruta (OpenStreetMap) + navegación en Google Maps ---------------- */
   const FORM_CORTO = { GPFO0381: "0381 Presiones", GPFO0405: "0405 Reparación", GPFO0416: "0416 Muestreo" };
