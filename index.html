@@ -667,6 +667,8 @@
     if (found) {
       state.operario = found.name;
       localStorage.setItem("gpfo_operario", found.name);
+      try { localStorage.removeItem("ecrf_sesion"); } catch (e) {}
+      if (apiListo() && enLinea()) obtenerSesion(ficha).catch(() => {});   // sesión firmada para el reporte diario
       saludar(found.name);
       loadRegistros().then(render);
     } else {
@@ -1054,6 +1056,7 @@
   function render() {
     if (!state.operario) renderLogin();
     else if (state.admin) return renderAdmin(), armarAtras();
+    else if (state.rd) return renderReporteDiario(), armarAtras();
     else if (!state.form) renderMenu();
     else renderMain();
     renderPreviewOverlay();
@@ -1079,6 +1082,9 @@
     else if (state.editId) { state.editId = null; renderLista(); }
     else if (document.getElementById("admFicha")) document.getElementById("admFicha").querySelector("#admFichaNo").click();
     else if (state.admin) salirAdmin();
+    else if (document.getElementById("rdDetalle")) document.getElementById("rdDetalle").remove();
+    else if (state.rd && state.rdCierreId) { state.rdCierreId = null; state.rdCierreRep = null; renderRdHoy(); }
+    else if (state.rd) salirReporteDiario();
     else if (state.form) volverAlMenu();
     else {                                                               // ya está en el menú principal
       toast("Presiona atrás otra vez para salir");
@@ -1290,7 +1296,7 @@
     `;
     document.getElementById("btnInicio").onclick = volverAlMenu;
     document.getElementById("btnSalir").onclick = () => {
-      localStorage.removeItem("gpfo_operario"); sessionStorage.removeItem("ecrf_form"); state.form = null;
+      localStorage.removeItem("gpfo_operario"); localStorage.removeItem("ecrf_sesion"); sessionStorage.removeItem("ecrf_form"); state.form = null;
       state.operario = null; state.pinBuffer = "";
       render();
     };
@@ -2167,8 +2173,8 @@
       render(); window.scrollTo(0, 0);
     });
     document.getElementById("btnSalir").onclick = () => {
-      localStorage.removeItem("gpfo_operario"); sessionStorage.removeItem("ecrf_form");
-      state.operario = null; state.form = null; state.pinBuffer = ""; render();
+      localStorage.removeItem("gpfo_operario"); localStorage.removeItem("ecrf_sesion"); sessionStorage.removeItem("ecrf_form");
+      state.operario = null; state.form = null; state.rd = false; state.pinBuffer = ""; render();
     };
     pintarEstadoSync();
   }
@@ -2186,7 +2192,9 @@
     GPFO0405: { tipo: "form", ico: () => ICO_0405, defecto: { titulo: "Verificación de reparación", descripcion: "GPFO0405 · fugas no visibles" } },
     GPFO0416: { tipo: "form", ico: () => ICO_0416, defecto: { titulo: "Verificación por muestreo", descripcion: "GPFO0416 · fugas detectadas" } },
     PDF: { tipo: "accion", ico: () => ICO_PDF, abrir: () => abrirPanelPdf(), estilo: "background:#E1F3FB;border-color:#7CCBEA",
-           defecto: { titulo: "Generar mis PDF", descripcion: "Formularios del mes · GPFO0416 por quincena" } }
+           defecto: { titulo: "Generar mis PDF", descripcion: "Formularios del mes · GPFO0416 por quincena" } },
+    REPORTE_DIARIO: { tipo: "vista", ico: () => ICO_RD, abrir: () => abrirReporteDiario(), estilo: "background:#EAF6EE;border-color:#9BD3B0",
+           defecto: { titulo: "Reporte diario de actividades", descripcion: "Charla de seguridad, plan del día y cierre" } }
   };
   function modulosConfig() {
     let c = null; try { c = JSON.parse(localStorage.getItem("ecrf_modulos") || "null"); } catch (e) {}
@@ -2223,6 +2231,7 @@
     if (!state.adminMods) { state.adminMods = modulosConfig().map((m, i) => ({ ...m, orden: i + 1 })); state.adminDirty = false; }
     const mods = state.adminMods;
     const rolVista = state.adminVista || "OPERARIO";
+    const tab = state.adminTab || "modulos";
     const chipRol = (m, r, i) => `<button type="button" class="adm-rol" data-i="${i}" data-r="${r}" aria-pressed="${(m.roles || []).includes(r)}">${ROL_TXT[r]}</button>`;
     const vista = mods.filter(m => MODULOS_APP[m.id] && m.activo !== false && (m.roles || []).includes(rolVista));
     app.innerHTML = `
@@ -2273,10 +2282,13 @@
       </div></div>
       <div class="adm-wrap">
         <div class="adm-tabs">
-          <button class="adm-tab" aria-current="true">Módulos del menú</button>
+          <button class="adm-tab" data-admtab="modulos" aria-current="${tab === "modulos"}">Módulos del menú</button>
+          <button class="adm-tab" data-admtab="charlas" aria-current="${tab === "charlas"}">Charlas de seguridad</button>
+          <button class="adm-tab" data-admtab="catalogo" aria-current="${tab === "catalogo"}">Catálogo de actividades</button>
           <button class="adm-tab" disabled title="Próximamente">Usuarios · próximamente</button>
-          <button class="adm-tab" disabled title="Próximamente">Ajustes · próximamente</button>
         </div>
+        ${tab === "charlas" ? `<div class="text-sm mb-3" style="color:var(--ink-soft)">La charla <b>vigente</b> es la que verán todos los trabajadores al iniciar su reporte diario. Solo puede haber una vigente.</div>` + htmlAdminCharlas()
+          : tab === "catalogo" ? `<div class="text-sm mb-3" style="color:var(--ink-soft)">Actividades que los trabajadores eligen al planificar su día. No se borran: se desactivan.</div>` + htmlAdminCatalogo() : `
         <div class="text-sm mb-3" style="color:var(--ink-soft)">Activa o desactiva cada módulo, cambia su orden y su nombre, y elige qué roles lo ven en el menú. Los cambios llegan a todos los celulares la próxima vez que abran la app con internet.</div>
         <div class="adm-grid">
           <div>
@@ -2292,7 +2304,7 @@
                 <div class="adm-ico">
                   ${def ? `<span class="form-ico" ${def.tipo !== "form" ? 'style="display:flex;align-items:center;justify-content:center;color:var(--brand-dark)"' : ""}>${def.ico()}</span>` : `<span class="form-ico" style="display:flex;align-items:center;justify-content:center">🧩</span>`}
                   <div class="min-w-0"><div class="text-xs font-bold" style="color:var(--brand)">${escA(m.id)}</div>
-                    <div class="text-xs" style="color:var(--ink-soft)">${def ? (def.tipo === "form" ? "Formulario" : "Herramienta") : "Versión futura"}</div></div>
+                    <div class="text-xs" style="color:var(--ink-soft)">${def ? (def.tipo === "form" ? "Formulario" : def.tipo === "vista" ? "Módulo" : "Herramienta") : "Versión futura"}</div></div>
                 </div>
                 <div class="adm-act"><button class="adm-sw" role="switch" data-i="${i}" aria-checked="${m.activo !== false}" aria-label="Activo"></button></div>
                 <div class="adm-tit"><div class="adm-lbl">Nombre en el menú</div>
@@ -2310,13 +2322,19 @@
             </div>
             ${vista.length ? vista.map(m => tarjetaModulo(m)).join("") : `<div class="text-sm p-3 rounded-lg" style="background:#FFF1C7;color:#6B4A00">Este rol no verá ningún módulo.</div>`}
           </div>
-        </div>
+        </div>`}
       </div>
-      <div class="adm-bar"><div class="adm-bar-in">
+      ${tab !== "modulos" ? "" : `<div class="adm-bar"><div class="adm-bar-in">
         <div style="flex:1;font-size:13px;color:${state.adminDirty ? "#6B4A00" : "var(--ink-soft)"}">${state.adminDirty ? "● Hay cambios sin guardar" : "Sin cambios"}</div>
         <button id="admDeshacer" class="btn-ghost" style="width:auto;padding:0 16px" ${state.adminDirty ? "" : "disabled"}>Deshacer</button>
         <button id="admGuardar" class="btn-primary" style="width:auto;padding:0 22px" ${state.adminDirty ? "" : "disabled"}>Guardar cambios</button>
-      </div></div>`;
+      </div></div>`}`;
+    app.querySelectorAll("[data-admtab]").forEach(b => b.onclick = () => {
+      if (state.adminTab === b.dataset.admtab) return;
+      if (b.dataset.admtab !== "modulos" && state.adminDirty) { toast("Guarda o deshaz los cambios de módulos primero", true); return; }
+      state.adminTab = b.dataset.admtab; if (state.adminTab !== "modulos") state.adminRd = null; renderAdmin(); window.scrollTo(0, 0);
+    });
+    if (tab !== "modulos") { activarAdminRd(app); return; }
 
     const cambio = () => { state.adminDirty = true; const y = window.scrollY; renderAdmin(); window.scrollTo(0, y); };
     document.getElementById("admVolver").onclick = salirAdmin;
@@ -2339,22 +2357,22 @@
   }
   function salirAdmin() {
     if (state.adminDirty) toast("Se descartaron los cambios sin guardar");
-    state.admin = false; state.adminMods = null; state.adminDirty = false;
+    state.admin = false; state.adminMods = null; state.adminDirty = false; state.adminTab = "modulos"; state.adminRd = null; state.adminCharlaEd = null;
     document.getElementById("app").classList.add("max-w-md");
     render(); window.scrollTo(0, 0);
   }
-  function pedirFicha() {
+  function pedirFicha(titulo, texto, boton) {
     return new Promise(ok => {
       const el = document.createElement("div");
       el.id = "admFicha";
       el.style.cssText = "position:fixed;inset:0;z-index:96;background:rgba(3,32,76,.55);display:flex;align-items:center;justify-content:center;padding:16px";
       el.innerHTML = `<div style="background:#fff;border-radius:18px;padding:18px;width:100%;max-width:360px">
-        <div class="font-bold text-lg mb-1">Confirma con tu ficha</div>
-        <div class="text-sm mb-3" style="color:var(--ink-soft)">Por seguridad, los cambios del panel se guardan solo con la ficha del administrador.</div>
+        <div class="font-bold text-lg mb-1">${escA(titulo || "Confirma con tu ficha")}</div>
+        <div class="text-sm mb-3" style="color:var(--ink-soft)">${escA(texto || "Por seguridad, los cambios del panel se guardan solo con la ficha del administrador.")}</div>
         <input id="admFichaIn" class="input" type="password" inputmode="numeric" maxlength="5" placeholder="Ficha (5 dígitos)" autocomplete="off">
         <div style="display:flex;gap:10px;margin-top:14px">
           <button id="admFichaNo" class="btn-ghost" style="flex:1">Cancelar</button>
-          <button id="admFichaSi" class="btn-primary" style="flex:1">Guardar</button>
+          <button id="admFichaSi" class="btn-primary" style="flex:1">${escA(boton || "Guardar")}</button>
         </div></div>`;
       document.body.appendChild(el);
       const inp = el.querySelector("#admFichaIn"); inp.focus();
@@ -2383,6 +2401,635 @@
     renderAdmin();
   }
   const confirmarSuave = msg => { toast(msg, true); return false; };   // aviso sin diálogo del navegador
+
+
+  /* =====================================================================================
+     MÓDULO «REPORTE DIARIO DE ACTIVIDADES»
+     Mañana: charla de seguridad (YouTube) + actividades planificadas · Tarde: estado de cada actividad y cierre.
+     Todo se guarda en el servidor (hojas RD_*). La identidad sale de una sesión firmada que entrega el servidor
+     tras confirmar la ficha (no del nombre que envía el navegador).
+     ===================================================================================== */
+  const ICO_RD = `<svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="5" y="3" width="14" height="18" rx="2"/><path d="M9 3h6v3H9z"/><path d="M8.5 12l2 2 4.5-4.5"/><path d="M8.5 17h7"/></svg>`;
+  const RD_EST_TXT = { "": "Pendiente de registro", PENDIENTE_REGISTRO: "Pendiente de registro", PENDIENTE_CIERRE: "Pendiente de cierre", CERRADO: "Cerrado" };
+  const RD_EST_COLOR = { "": "#FFF1C7;color:#6B4A00", PENDIENTE_REGISTRO: "#FFF1C7;color:#6B4A00", PENDIENTE_CIERRE: "#E1F3FB;color:#0B4A6B", CERRADO: "#DDF3E7;color:#12613B" };
+  const RD_EJEC_TXT = { EJECUTADA: "Ejecutada", PARCIAL: "Parcialmente ejecutada", NO_EJECUTADA: "No ejecutada" };
+  const RD_VIDEO_TXT = { "": "Sin iniciar", EN_CURSO: "En reproducción", INCOMPLETO: "Incompleto", COMPLETADO: "Completado", ERROR: "Error de reproducción", SIN_CHARLA_CONFIGURADA: "Sin charla configurada" };
+  const horaDe = s => (/\d{2}:\d{2}:\d{2}/.exec(String(s || "")) || [""])[0];
+  const fechaTxt = iso => /^\d{4}-\d{2}-\d{2}$/.test(String(iso || "")) ? String(iso).split("-").reverse().join("/") : String(iso || "");
+  const badgeRd = e => `<span class="badge" style="background:${RD_EST_COLOR[e || ""]}">${RD_EST_TXT[e || ""]}</span>`;
+  const fmtPct = n => n == null || n === "" ? "—" : String(Math.round(Number(n) * 100) / 100).replace(".", ",") + " %";
+  const nuevaClave = () => "k" + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+
+  // ---------- sesión firmada ----------
+  function sesionGuardada() {
+    try { const s = JSON.parse(localStorage.getItem("ecrf_sesion") || "null"); if (s && s.n === state.operario && s.exp > Date.now() + 60000) return s.sesion; } catch (e) {}
+    return null;
+  }
+  async function obtenerSesion(ficha) {
+    const r = await apiPost({ tipo: "sesion", ficha });
+    try { localStorage.setItem("ecrf_sesion", JSON.stringify({ n: state.operario, sesion: r.sesion, exp: r.exp })); } catch (e) {}
+    return r.sesion;
+  }
+  async function asegurarSesion() {
+    const s = sesionGuardada(); if (s) return s;
+    if (!apiListo() || !enLinea()) throw { code: "sin_internet", message: "Necesitas internet para el reporte diario" };
+    const f = await pedirFicha("Confirma tu ficha", "Para el reporte diario confirmamos tu identidad una sola vez en este equipo.", "Continuar");
+    if (!f) throw { code: "cancelado", message: "" };
+    try { return await obtenerSesion(f); }
+    catch (e) { throw { code: e.code === "ficha" ? "ficha" : "red", message: e.code === "ficha" ? "Ficha incorrecta" : "No se pudo confirmar tu ficha. Revisa tu internet" }; }
+  }
+  async function rdApi(tipo, datos) {
+    if (!apiListo() || !enLinea()) throw { code: "sin_internet", message: "Necesitas internet para el reporte diario" };
+    let s = await asegurarSesion();
+    try { return await apiPost({ tipo, sesion: s, ...(datos || {}) }); }
+    catch (e) {
+      if (e && e.code === "sesion") { try { localStorage.removeItem("ecrf_sesion"); } catch (x) {} s = await asegurarSesion(); return await apiPost({ tipo, sesion: s, ...(datos || {}) }); }
+      throw e;
+    }
+  }
+  const msgError = e => (e && e.message) || (e && e.code === "sin_internet" ? "Necesitas internet" : "No se pudo completar. Revisa tu internet e inténtalo otra vez");
+
+  // ---------- borradores en el celular (por si se corta la señal o se cierra la app antes de guardar) ----------
+  const claveBorrador = () => "rd_borr_" + state.operario + "_" + ((state.rdDatos && state.rdDatos.fecha) || "");
+  const leerBorr = k => { try { return JSON.parse(localStorage.getItem(k) || "null"); } catch (e) { return null; } };
+  const guardarBorr = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} };
+  const borrarBorr = k => { try { localStorage.removeItem(k); } catch (e) {} };
+
+  // ---------- vista principal ----------
+  function abrirReporteDiario() { state.rd = true; state.rdTab = "hoy"; state.rdDatos = null; state.rdCierreId = null; render(); window.scrollTo(0, 0); }
+  function salirReporteDiario() { detenerVideo(); state.rd = false; state.rdDatos = null; state.rdCierreId = null; render(); window.scrollTo(0, 0); }
+
+  function renderReporteDiario() {
+    const app = document.getElementById("app");
+    app.classList.remove("max-w-md");
+    app.innerHTML = `
+      <style>
+        .rd-wrap{max-width:860px;margin:0 auto;width:100%}
+        .rd-top{background:var(--brand-dark);color:#fff}
+        .rd-grid{display:grid;gap:14px}
+        @media (min-width: 900px){ .rd-grid.dos{grid-template-columns:minmax(0,1.1fr) minmax(0,1fr);align-items:start} }
+        .rd-step{display:flex;align-items:center;gap:10px;font-weight:800;color:var(--brand-dark);margin-bottom:10px}
+        .rd-step span{width:28px;height:28px;border-radius:50%;background:var(--brand-dark);color:#fff;display:inline-flex;align-items:center;justify-content:center;font-size:14px}
+        .rd-video{position:relative;width:100%;aspect-ratio:16/9;background:#0F1B2D;border-radius:12px;overflow:hidden}
+        .rd-video iframe,.rd-video>div{position:absolute;inset:0;width:100%;height:100%}
+        .rd-barra{height:10px;border-radius:999px;background:#E3EAF1;overflow:hidden}
+        .rd-barra>i{display:block;height:100%;background:linear-gradient(90deg,#33B1E4,#0B5FA5);transition:width .4s}
+        .rd-dato{background:var(--bg,#F2F5F8);border-radius:10px;padding:8px 10px}
+        .rd-dato small{display:block;font-size:11px;color:var(--ink-soft);font-weight:700;text-transform:uppercase;letter-spacing:.03em}
+        .rd-chip{border-radius:12px;padding:10px 8px;font-weight:700;font-size:14px;border:1.5px solid #CFD8E3;background:#fff;color:var(--ink);line-height:1.15}
+        .rd-chip[aria-pressed="true"].e1{background:#1E8E5A;border-color:#1E8E5A;color:#fff}
+        .rd-chip[aria-pressed="true"].e2{background:#D99A00;border-color:#D99A00;color:#fff}
+        .rd-chip[aria-pressed="true"].e3{background:#C0392B;border-color:#C0392B;color:#fff}
+        .rd-err{color:var(--danger);font-size:13px;font-weight:600;margin-top:6px}
+        .rd-bloq{position:relative}
+        .rd-bloq.off>*:not(.rd-candado){opacity:.4;pointer-events:none}
+        .rd-candado{display:none}
+        .rd-bloq.off .rd-candado{display:flex;align-items:center;gap:8px;background:#FFF1C7;color:#6B4A00;border-radius:10px;padding:10px 12px;font-size:14px;font-weight:600;margin-bottom:10px}
+        .rd-pct{font-size:44px;font-weight:900;line-height:1;color:var(--brand-dark)}
+      </style>
+      <div class="rd-top"><div class="rd-wrap px-4 pt-3 pb-3 flex items-center gap-3">
+        <button id="rdVolver" class="text-white font-bold text-xl leading-none px-1" aria-label="Volver al inicio">‹</button>
+        <span class="form-ico" style="display:flex;align-items:center;justify-content:center;background:rgba(255,255,255,.12);color:#fff;width:46px;height:46px">${ICO_RD}</span>
+        <div class="flex-1 min-w-0"><div class="font-extrabold leading-tight">Reporte diario de actividades</div>
+          <div class="text-xs" style="color:#C9D8EA">${escA(state.operario)}</div></div>
+        <span class="logo-chip"><img src="${LOGO_SEDAPAL}" alt="SEDAPAL"></span>
+      </div></div>
+      <div style="background:var(--card);border-bottom:1px solid var(--line)"><div class="rd-wrap flex px-4">
+        <div class="tab-btn ${state.rdTab === "hoy" ? "active" : ""}" data-rdtab="hoy">Hoy</div>
+        <div class="tab-btn ${state.rdTab === "hechos" ? "active" : ""}" data-rdtab="hechos">Hechos</div>
+      </div></div>
+      <div class="rd-wrap px-4 py-4 pb-24" id="rdContent"></div>`;
+    document.getElementById("rdVolver").onclick = salirReporteDiario;
+    document.querySelectorAll("[data-rdtab]").forEach(t => t.onclick = () => { if (state.rdTab !== t.dataset.rdtab) { detenerVideo(); state.rdTab = t.dataset.rdtab; render(); } });
+    if (state.rdTab === "hechos") renderRdHechos(); else renderRdHoy();
+  }
+
+  async function cargarRdHoy() {
+    const c = document.getElementById("rdContent");
+    if (c) c.innerHTML = `<div class="text-center text-sm py-10" style="color:var(--ink-soft)">Cargando tu reporte…</div>`;
+    try {
+      const d = await rdApi("rd_hoy");
+      state.rdDatos = d;
+      try { localStorage.setItem("rd_cache_" + state.operario, JSON.stringify(d)); } catch (e) {}
+    } catch (e) {
+      if (e && e.code === "cancelado") { salirReporteDiario(); return; }
+      const cache = leerBorr("rd_cache_" + state.operario);
+      if (c) c.innerHTML = `<div class="card p-4 text-sm" style="background:#FFF1C7;color:#6B4A00"><b>${escA(msgError(e))}.</b><br>
+        El reporte diario se guarda en el servidor, así que necesitas señal para registrarlo o cerrarlo.
+        ${cache ? `Lo último que se descargó es del ${fechaTxt(cache.fecha)}.` : ""}</div>
+        <button id="rdReintentar" class="btn-primary w-full mt-3">Reintentar</button>`;
+      const b = document.getElementById("rdReintentar"); if (b) b.onclick = () => cargarRdHoy();
+      return;
+    }
+    if (state.rd && state.rdTab === "hoy") renderRdHoy();
+  }
+
+  function renderRdHoy() {
+    const c = document.getElementById("rdContent"); if (!c) return;
+    const d = state.rdDatos;
+    if (!d) { cargarRdHoy(); return; }
+    const cierre = state.rdCierreId ? (state.rdCierreRep || null) : null;
+    const rep = cierre || d.reporte;
+    const estado = rep ? rep.estado : "";
+    c.innerHTML = `
+      ${!cierre && d.pendientesAnteriores && d.pendientesAnteriores.length ? `
+        <div class="card p-3 mb-3" style="background:#FFF1C7;border-color:#F2D27A">
+          <div class="text-sm font-bold mb-2" style="color:#6B4A00">Tienes reportes de días anteriores sin cerrar</div>
+          ${d.pendientesAnteriores.map(p => `<button class="btn-ghost w-full mb-2 rdCerrarAnt" data-id="${escA(p.id)}">Cerrar el reporte del ${fechaTxt(p.fecha)}</button>`).join("")}
+        </div>` : ""}
+      ${cierre ? `<button id="rdVolverHoy" class="text-sm font-semibold mb-3" style="color:var(--brand)">‹ Volver al reporte de hoy</button>` : ""}
+      <div class="card p-4 mb-4">
+        <div class="flex items-center justify-between gap-2 mb-3">
+          <div class="font-bold text-lg">${cierre ? "Reporte del " + fechaTxt(rep.fecha) : "Mi reporte de hoy"}</div>${badgeRd(estado)}
+        </div>
+        <div class="grid grid-cols-2 gap-2 text-sm">
+          <div class="rd-dato" style="grid-column:span 2"><small>Trabajador</small><b>${escA(d.trabajador)}</b></div>
+          <div class="rd-dato"><small>Fecha de la jornada</small><b>${fechaTxt(rep ? rep.fecha : d.fecha)}</b></div>
+          <div class="rd-dato"><small>Hora de inicio</small><b>${rep && rep.inicioEn ? horaDe(rep.inicioEn) : "—"}</b></div>
+          ${rep && rep.mananaEn ? `<div class="rd-dato"><small>Registro de la mañana</small><b>${horaDe(rep.mananaEn)}</b></div>` : ""}
+          ${rep && rep.cerradoEn ? `<div class="rd-dato"><small>Cierre</small><b>${horaDe(rep.cerradoEn)}</b></div>` : ""}
+        </div>
+      </div>
+      <div id="rdEtapa"></div>`;
+    c.querySelectorAll(".rdCerrarAnt").forEach(b => b.onclick = async () => {
+      try { const r = await rdApi("rd_detalle", { id: b.dataset.id }); state.rdCierreId = b.dataset.id; state.rdCierreRep = r.reporte; renderRdHoy(); window.scrollTo(0, 0); }
+      catch (e) { toast(msgError(e), true); }
+    });
+    const vh = document.getElementById("rdVolverHoy"); if (vh) vh.onclick = () => { state.rdCierreId = null; state.rdCierreRep = null; renderRdHoy(); };
+    if (!rep || estado === "PENDIENTE_REGISTRO") renderRdManana(rep);
+    else if (estado === "PENDIENTE_CIERRE") renderRdCierre(rep);
+    else renderRdCerrado(rep);
+  }
+
+  // ---------- ETAPA 1: mañana ----------
+  function renderRdManana(rep) {
+    const d = state.rdDatos, ch = d.charla;
+    const completada = !ch || (rep && rep.charla && rep.charla.estado === "COMPLETADO" && rep.charla.id === ch.id);
+    const borr = leerBorr(claveBorrador()) || { clave: nuevaClave(), acts: [] };
+    if (!leerBorr(claveBorrador())) guardarBorr(claveBorrador(), borr);
+    const ed = state.rdEditando;
+    const cv = rep && rep.charla && rep.charla.id === (ch && ch.id) ? rep.charla : null;
+    document.getElementById("rdEtapa").innerHTML = `
+      <div class="rd-grid dos">
+        <div class="card p-4">
+          <div class="rd-step"><span>1</span>Charla de seguridad</div>
+          ${!ch ? `<div class="text-sm p-3 rounded-lg" style="background:#E1F3FB;color:#0B4A6B">El administrador aún no configuró una charla de seguridad. Puedes registrar tus actividades.</div>` : `
+          <div class="text-xs font-bold" style="color:var(--brand)">${escA(ch.tema)}</div>
+          <div class="font-bold mb-2">${escA(ch.titulo)}</div>
+          ${completada ? `<div class="p-3 rounded-lg text-sm font-semibold mb-2" style="background:#DDF3E7;color:#12613B">✅ Charla completada</div>`
+            : `<div class="rd-video mb-2"><div id="rdPlayer"></div></div>`}
+          <div class="rd-barra mb-1"><i id="rdBarra" style="width:${completada ? 100 : cv && cv.duracion ? Math.min(100, Math.round(cv.visto / cv.duracion * 100)) : 0}%"></i></div>
+          <div class="text-xs mb-2" style="color:var(--ink-soft)" id="rdAvance">${completada ? "Visto al 100 %" : cv && cv.duracion ? `Visto ${Math.min(100, Math.round(cv.visto / cv.duracion * 100))} %` : "Reproduce el video hasta el final"}</div>
+          <div class="grid grid-cols-3 gap-2 text-sm">
+            <div class="rd-dato"><small>Inicio</small><b id="rdVIni">${cv && cv.inicio ? horaDe(cv.inicio) : "—"}</b></div>
+            <div class="rd-dato"><small>Fin</small><b id="rdVFin">${cv && cv.fin ? horaDe(cv.fin) : "—"}</b></div>
+            <div class="rd-dato"><small>Estado</small><b id="rdVEst">${RD_VIDEO_TXT[completada ? "COMPLETADO" : cv ? cv.estado : ""] || "—"}</b></div>
+          </div>
+          <div id="rdVMsg" class="rd-err"></div>`}
+        </div>
+        <div class="card p-4 rd-bloq ${completada ? "" : "off"}">
+          <div class="rd-candado">🔒 Completa la charla de seguridad para registrar tus actividades</div>
+          <div class="rd-step"><span>2</span>Actividades planificadas</div>
+          <label class="text-xs font-semibold block mb-1" for="rdSel" style="color:var(--ink-soft)">Actividad *</label>
+          <select id="rdSel" class="input mb-2">
+            <option value="">Elige una actividad…</option>
+            ${d.catalogo.map(a => `<option value="${escA(a.id)}" ${ed && ed.catalogoId === a.id ? "selected" : ""}>${escA(a.descripcion)}</option>`).join("")}
+            <option value="__otra" ${ed && !ed.catalogoId ? "selected" : ""}>Otra actividad (escribirla)</option>
+          </select>
+          <input id="rdOtra" class="input mb-2" maxlength="300" placeholder="Escribe la actividad" value="${ed && !ed.catalogoId ? escA(ed.descripcion) : ""}" style="${ed && !ed.catalogoId ? "" : "display:none"}">
+          <label class="text-xs font-semibold block mb-1" for="rdCom" style="color:var(--ink-soft)">Comentarios o detalles (opcional)</label>
+          <textarea id="rdCom" class="input mb-2" rows="2" maxlength="1000" placeholder="Ej.: sector, lugar, con quién">${ed ? escA(ed.comentario) : ""}</textarea>
+          <div id="rdActErr" class="rd-err"></div>
+          <div class="flex gap-2 mb-3">
+            ${ed ? `<button id="rdCancelEd" class="btn-ghost flex-1">Cancelar</button>` : ""}
+            <button id="rdAgregar" class="btn-primary flex-1">${ed ? "Guardar cambios" : "+ Agregar actividad"}</button>
+          </div>
+          <div class="text-sm font-bold mb-2">Mis actividades (${borr.acts.length})</div>
+          ${borr.acts.length ? borr.acts.map((a, i) => `
+            <div class="rd-dato mb-2" style="display:flex;gap:10px;align-items:flex-start">
+              <b style="min-width:22px">${i + 1}.</b>
+              <div class="flex-1 min-w-0"><div class="font-semibold">${escA(a.descripcion)}</div>
+                ${a.comentario ? `<div class="text-xs" style="color:var(--ink-soft)">${escA(a.comentario)}</div>` : ""}</div>
+              <button class="text-sm font-semibold rdEd" data-i="${i}" style="color:var(--brand)">Editar</button>
+              <button class="text-sm font-semibold rdQuitar" data-i="${i}" style="color:var(--danger)">Quitar</button>
+            </div>`).join("") : `<div class="text-sm py-3 text-center" style="color:var(--ink-soft)">Aún no agregas actividades</div>`}
+          <button id="rdGuardarM" class="btn-primary w-full mt-3" ${borr.acts.length && completada ? "" : "disabled"}>Guardar reporte de la mañana</button>
+          <div id="rdGuardarErr" class="rd-err"></div>
+        </div>
+      </div>`;
+    const sel = document.getElementById("rdSel"), otra = document.getElementById("rdOtra");
+    sel.onchange = () => { otra.style.display = sel.value === "__otra" ? "" : "none"; if (sel.value === "__otra") otra.focus(); };
+    document.getElementById("rdAgregar").onclick = () => {
+      const err = document.getElementById("rdActErr");
+      let a;
+      if (sel.value === "__otra") { const t = otra.value.trim(); if (!t) { err.textContent = "Escribe la actividad"; return; } a = { catalogoId: "", descripcion: t }; }
+      else if (sel.value) { const cat = d.catalogo.find(x => x.id === sel.value); a = { catalogoId: cat.id, descripcion: cat.descripcion }; }
+      else { err.textContent = "Elige una actividad del catálogo o escribe otra"; return; }
+      a.comentario = document.getElementById("rdCom").value.trim();
+      const b = leerBorr(claveBorrador()) || borr;
+      if (ed) b.acts[ed.i] = a; else b.acts.push(a);
+      guardarBorr(claveBorrador(), b); state.rdEditando = null; renderRdManana(rep);
+    };
+    const ce = document.getElementById("rdCancelEd"); if (ce) ce.onclick = () => { state.rdEditando = null; renderRdManana(rep); };
+    document.querySelectorAll(".rdEd").forEach(b => b.onclick = () => { const i = +b.dataset.i; state.rdEditando = { ...borr.acts[i], i }; renderRdManana(rep); document.getElementById("rdSel").scrollIntoView({ block: "center" }); });
+    document.querySelectorAll(".rdQuitar").forEach(b => b.onclick = () => { borr.acts.splice(+b.dataset.i, 1); guardarBorr(claveBorrador(), borr); state.rdEditando = null; renderRdManana(rep); });
+    document.getElementById("rdGuardarM").onclick = guardarRdManana;
+    if (ch && !completada) montarVideo(ch, cv);
+  }
+
+  async function guardarRdManana() {
+    const btn = document.getElementById("rdGuardarM"), err = document.getElementById("rdGuardarErr");
+    const borr = leerBorr(claveBorrador());
+    if (!borr || !borr.acts.length) { err.textContent = "Registra al menos una actividad"; return; }
+    btn.disabled = true; btn.textContent = "Guardando…"; err.textContent = "";
+    try {
+      const r = await rdApi("rd_manana", { clave: borr.clave, actividades: borr.acts });
+      borrarBorr(claveBorrador());
+      state.rdDatos.reporte = r.reporte;
+      toast("Reporte de la mañana guardado ✅");
+      renderRdHoy(); window.scrollTo(0, 0);
+    } catch (e) {
+      err.textContent = msgError(e) + ". Tus actividades siguen guardadas en el celular; puedes reintentar.";
+      btn.disabled = false; btn.textContent = "Guardar reporte de la mañana";
+      if (e && e.code === "ya_registrado") { borrarBorr(claveBorrador()); state.rdDatos = null; cargarRdHoy(); }
+    }
+  }
+
+  // ---------- reproductor de YouTube con evidencia técnica ----------
+  let ytListo = null, rdPlayer = null, rdTimer = null;
+  function cargarApiYoutube() {
+    if (window.YT && window.YT.Player) return Promise.resolve();
+    if (ytListo) return ytListo;
+    ytListo = new Promise((ok, mal) => {
+      const anterior = window.onYouTubeIframeAPIReady;
+      window.onYouTubeIframeAPIReady = () => { if (anterior) try { anterior(); } catch (e) {} ok(); };
+      const s = document.createElement("script"); s.src = "https://www.youtube.com/iframe_api"; s.onerror = () => { ytListo = null; mal(new Error("yt")); };
+      document.head.appendChild(s);
+      setTimeout(() => { if (!(window.YT && window.YT.Player)) { ytListo = null; mal(new Error("timeout")); } }, 20000);
+    });
+    return ytListo;
+  }
+  function detenerVideo() {
+    clearInterval(rdTimer); rdTimer = null;
+    if (rdPlayer) { try { rdPlayer.destroy(); } catch (e) {} rdPlayer = null; }
+  }
+  async function montarVideo(ch, cv) {
+    detenerVideo();
+    const msg = t => { const m = document.getElementById("rdVMsg"); if (m) m.textContent = t || ""; };
+    const pinta = (visto, dur, est) => {
+      const pct = dur ? Math.min(100, Math.round(visto / dur * 100)) : 0;
+      const b = document.getElementById("rdBarra"); if (b) b.style.width = pct + "%";
+      const a = document.getElementById("rdAvance"); if (a) a.textContent = `Visto ${pct} %` + (dur ? ` · ${Math.floor(visto / 60)}:${String(Math.floor(visto % 60)).padStart(2, "0")} de ${Math.floor(dur / 60)}:${String(Math.floor(dur % 60)).padStart(2, "0")}` : "");
+      if (est) { const e = document.getElementById("rdVEst"); if (e) e.textContent = RD_VIDEO_TXT[est] || est; }
+    };
+    try { await cargarApiYoutube(); }
+    catch (e) { msg("No se pudo cargar el reproductor de YouTube. Revisa tu conexión e inténtalo de nuevo."); return; }
+    if (!document.getElementById("rdPlayer")) return;
+    // "visto" = segundos distintos del video reproducidos de corrido (ver dos veces el mismo tramo no suma, adelantar no cuenta)
+    const cubiertos = new Set();
+    const marca = (a, b) => { if (!(b > a) || b - a > 1.6) return; for (let s = Math.floor(a); s < Math.ceil(b - 0.05); s++) cubiertos.add(s); visto = Math.min(dur || Infinity, cubiertos.size); };
+    let visto = 0, ultimo = null, dur = 0, inicioEnviado = !!(cv && cv.inicio), ultimoEnvio = 0, enviandoFin = false;
+    const enviar = async (evento, extra) => {
+      try {
+        const r = await rdApi("rd_video", { evento, duracion: dur, visto: Math.round(visto), posicion: rdPlayer && rdPlayer.getCurrentTime ? rdPlayer.getCurrentTime() : 0, ...(extra || {}) });
+        if (r.reporte) {
+          state.rdDatos.reporte = { ...(state.rdDatos.reporte || {}), ...r.reporte, actividades: (state.rdDatos.reporte || {}).actividades };
+          const ini = document.getElementById("rdVIni"); if (ini && r.reporte.charla.inicio) ini.textContent = horaDe(r.reporte.charla.inicio);
+          const fin = document.getElementById("rdVFin"); if (fin && r.reporte.charla.fin) fin.textContent = horaDe(r.reporte.charla.fin);
+          pinta(visto, dur, r.reporte.charla.estado);
+        }
+        return r;
+      } catch (e) { msg(msgError(e) + ". El avance del video no se pudo registrar; si vuelve la señal, repite el final del video."); return null; }
+    };
+    rdPlayer = new YT.Player("rdPlayer", {
+      videoId: ch.videoId, width: "100%", height: "100%",
+      playerVars: { rel: 0, modestbranding: 1, playsinline: 1 },
+      events: {
+        onReady: () => { dur = rdPlayer.getDuration() || 0; pinta(visto, dur); },
+        onError: ev => {
+          const t = { 2: "El enlace del video no es válido.", 5: "El video no se puede reproducir en este equipo.", 100: "El video no existe o es privado.", 101: "El dueño del video no permite verlo dentro de la app.", 150: "El dueño del video no permite verlo dentro de la app." }[ev.data] || "No se pudo reproducir el video.";
+          msg(t + " Avisa al administrador. No se registrará la charla como vista.");
+          enviar("error", { codigoError: ev.data });
+        },
+        onStateChange: async ev => {
+          const S = YT.PlayerState;
+          if (ev.data === S.PLAYING) {
+            dur = rdPlayer.getDuration() || dur; msg(""); ultimo = rdPlayer.getCurrentTime();
+            if (!inicioEnviado) { inicioEnviado = true; enviar("inicio"); }
+            if (!rdTimer) rdTimer = setInterval(() => {
+              if (!rdPlayer || !rdPlayer.getPlayerState || rdPlayer.getPlayerState() !== YT.PlayerState.PLAYING) return;
+              const t = rdPlayer.getCurrentTime();
+              if (ultimo !== null) marca(ultimo, t);          // solo cuenta lo reproducido sin saltos
+              ultimo = t; pinta(visto, dur, "EN_CURSO");
+              if (Date.now() - ultimoEnvio > 30000) { ultimoEnvio = Date.now(); enviar("progreso"); }
+            }, 1000);
+          } else if (ev.data === S.PAUSED) { if (ultimo !== null) marca(ultimo, rdPlayer.getCurrentTime()); ultimo = null; enviar("pausa"); }
+          else if (ev.data === S.ENDED) {
+            clearInterval(rdTimer); rdTimer = null;
+            if (ultimo !== null) marca(ultimo, dur || rdPlayer.getDuration()); ultimo = null; pinta(visto, dur);
+            if (enviandoFin) return; enviandoFin = true;
+            const r = await enviar("fin"); enviandoFin = false;
+            if (r && r.reporte && r.reporte.charla.estado === "COMPLETADO") { toast("Charla completada ✅ Ya puedes registrar tus actividades"); detenerVideo(); renderRdHoy(); }
+            else if (r) msg(r.msg || "El video no se vio completo. Vuelve a reproducirlo desde el inicio sin adelantarlo.");
+          }
+        }
+      }
+    });
+  }
+
+  // ---------- ETAPA 2: cierre ----------
+  function renderRdCierre(rep) {
+    const kc = "rd_cierre_" + rep.id;
+    const b = leerBorr(kc) || { clave: nuevaClave(), res: {}, obs: "" };
+    if (!leerBorr(kc)) guardarBorr(kc, b);
+    const errores = state.rdErrores || {};
+    const cuenta = () => {
+      const v = rep.actividades.map(a => (b.res[a.id] || {}).estado);
+      return { ej: v.filter(x => x === "EJECUTADA").length, pa: v.filter(x => x === "PARCIAL").length, no: v.filter(x => x === "NO_EJECUTADA").length, tot: rep.actividades.length };
+    };
+    const k = cuenta(), pct = k.tot ? Math.round(k.ej / k.tot * 10000) / 100 : 0;
+    document.getElementById("rdEtapa").innerHTML = `
+      <div class="rd-grid dos">
+        <div>
+          <div class="rd-step"><span>3</span>Cierre de jornada</div>
+          ${rep.actividades.map(a => {
+            const r = b.res[a.id] || {};
+            const exige = r.estado === "PARCIAL" || r.estado === "NO_EJECUTADA";
+            return `
+            <div class="card p-4 mb-3" id="rdA_${escA(a.id)}">
+              <div class="font-bold">${a.n}. ${escA(a.descripcion)}</div>
+              ${a.comentario ? `<div class="text-xs mt-1" style="color:var(--ink-soft)">Comentario de la mañana: ${escA(a.comentario)}</div>` : ""}
+              <div class="text-xs font-semibold mt-3 mb-1" style="color:var(--ink-soft)">Estado de ejecución *</div>
+              <div class="grid grid-cols-3 gap-2">
+                <button class="rd-chip e1 rdEst" data-id="${escA(a.id)}" data-e="EJECUTADA" aria-pressed="${r.estado === "EJECUTADA"}">Ejecutada</button>
+                <button class="rd-chip e2 rdEst" data-id="${escA(a.id)}" data-e="PARCIAL" aria-pressed="${r.estado === "PARCIAL"}">Parcialmente ejecutada</button>
+                <button class="rd-chip e3 rdEst" data-id="${escA(a.id)}" data-e="NO_EJECUTADA" aria-pressed="${r.estado === "NO_EJECUTADA"}">No ejecutada</button>
+              </div>
+              ${r.estado ? `
+              <label class="text-xs font-semibold block mt-3 mb-1" style="color:var(--ink-soft)">${exige ? (r.estado === "PARCIAL" ? "Sustento: ¿por qué no se completó? *" : "Sustento: ¿por qué no se realizó? *") : "Observación (opcional)"}</label>
+              <textarea class="input rdSus" data-id="${escA(a.id)}" rows="2" maxlength="1000">${escA(r.sustento || "")}</textarea>` : ""}
+              ${errores[a.id] ? `<div class="rd-err">${escA(errores[a.id])}</div>` : ""}
+            </div>`; }).join("")}
+          <div class="card p-4 mb-3">
+            <label class="text-sm font-bold block mb-1" for="rdObs">Observaciones generales del cierre de jornada</label>
+            <div class="text-xs mb-2" style="color:var(--ink-soft)">Opcional: incidencias, restricciones, dificultades u otra información relevante.</div>
+            <textarea id="rdObs" class="input" rows="3" maxlength="2000">${escA(b.obs || "")}</textarea>
+          </div>
+        </div>
+        <div class="card p-4" style="position:sticky;top:12px">
+          <div class="text-sm font-bold mb-1">Cumplimiento</div>
+          <div class="rd-pct" id="rdPct">${fmtPct(pct)}</div>
+          <div class="text-xs mb-3" style="color:var(--ink-soft)">Se calcula solo: ejecutadas ÷ planificadas × 100</div>
+          <div class="grid grid-cols-2 gap-2 text-sm mb-3">
+            <div class="rd-dato"><small>Planificadas</small><b>${k.tot}</b></div>
+            <div class="rd-dato"><small>Ejecutadas</small><b>${k.ej}</b></div>
+            <div class="rd-dato"><small>Parciales</small><b>${k.pa}</b></div>
+            <div class="rd-dato"><small>No ejecutadas</small><b>${k.no}</b></div>
+          </div>
+          <div class="text-xs mb-3" style="color:var(--ink-soft)">Charla: ${escA(RD_VIDEO_TXT[rep.charla.estado] || rep.charla.estado || "—")}${rep.charla.tema ? " · " + escA(rep.charla.tema) : ""}</div>
+          <button id="rdCerrar" class="btn-primary w-full">Cerrar reporte</button>
+          <div id="rdCerrarErr" class="rd-err"></div>
+          <div class="text-xs mt-2" style="color:var(--ink-soft)">Al cerrar, el reporte ya no se puede modificar.</div>
+        </div>
+      </div>`;
+    const guardarLocal = () => guardarBorr(kc, b);
+    document.querySelectorAll(".rdEst").forEach(x => x.onclick = () => {
+      const id = x.dataset.id; b.res[id] = { ...(b.res[id] || {}), estado: x.dataset.e }; guardarLocal();
+      if (state.rdErrores) delete state.rdErrores[id];
+      const y = window.scrollY; renderRdCierre(rep); window.scrollTo(0, y);
+    });
+    document.querySelectorAll(".rdSus").forEach(t => t.oninput = () => { const id = t.dataset.id; b.res[id] = { ...(b.res[id] || {}), sustento: t.value }; guardarLocal(); });
+    document.getElementById("rdObs").oninput = e => { b.obs = e.target.value; guardarLocal(); };
+    document.getElementById("rdCerrar").onclick = async () => {
+      const errs = {};
+      rep.actividades.forEach(a => {
+        const r = b.res[a.id] || {};
+        if (!r.estado) errs[a.id] = "Elige el estado de ejecución";
+        else if (r.estado !== "EJECUTADA" && !String(r.sustento || "").trim()) errs[a.id] = "El sustento es obligatorio";
+      });
+      state.rdErrores = errs;
+      if (Object.keys(errs).length) {
+        const y = window.scrollY; renderRdCierre(rep); window.scrollTo(0, y);
+        document.getElementById("rdCerrarErr").textContent = "Revisa las actividades marcadas en rojo (" + Object.keys(errs).length + ")";
+        const primero = document.getElementById("rdA_" + Object.keys(errs)[0]); if (primero) primero.scrollIntoView({ behavior: "smooth", block: "center" });
+        return;
+      }
+      const btn = document.getElementById("rdCerrar"), err = document.getElementById("rdCerrarErr");
+      btn.disabled = true; btn.textContent = "Cerrando…"; err.textContent = "";
+      try {
+        const r = await rdApi("rd_cerrar", { id: rep.id, clave: b.clave, observaciones: b.obs || "",
+          resultados: rep.actividades.map(a => ({ id: a.id, estado: b.res[a.id].estado, sustento: String(b.res[a.id].sustento || "").trim() })) });
+        borrarBorr(kc); state.rdErrores = null;
+        toast("Reporte cerrado ✅ Cumplimiento " + fmtPct(r.reporte.cumplimiento));
+        if (state.rdCierreId) { state.rdCierreId = null; state.rdCierreRep = null; state.rdDatos = null; cargarRdHoy(); }
+        else { state.rdDatos.reporte = r.reporte; renderRdHoy(); }
+        window.scrollTo(0, 0);
+      } catch (e) {
+        err.textContent = msgError(e) + ". Lo que escribiste sigue guardado en el celular; puedes reintentar.";
+        btn.disabled = false; btn.textContent = "Cerrar reporte";
+        if (e && e.code === "cerrado") { borrarBorr(kc); state.rdDatos = null; cargarRdHoy(); }
+      }
+    };
+  }
+
+  function detalleRdHTML(rep) {
+    return `
+      <div class="grid grid-cols-2 gap-2 text-sm mb-3">
+        <div class="rd-dato"><small>Cumplimiento</small><b>${fmtPct(rep.cumplimiento)}</b></div>
+        <div class="rd-dato"><small>Estado</small><b>${RD_EST_TXT[rep.estado] || rep.estado}</b></div>
+        <div class="rd-dato"><small>Inicio</small><b>${horaDe(rep.inicioEn) || "—"}</b></div>
+        <div class="rd-dato"><small>Mañana registrada</small><b>${horaDe(rep.mananaEn) || "—"}</b></div>
+        <div class="rd-dato"><small>Cierre</small><b>${horaDe(rep.cerradoEn) || "—"}</b></div>
+        <div class="rd-dato"><small>Planif. · Ejec. · Parc. · No</small><b>${rep.nActividades} · ${rep.nEjecutadas} · ${rep.nParciales} · ${rep.nNoEjecutadas}</b></div>
+      </div>
+      <div class="rd-dato mb-3 text-sm"><small>Charla de seguridad</small>
+        ${rep.charla.tema ? `<b>${escA(rep.charla.tema)}</b> · ${escA(rep.charla.titulo)}<br>` : ""}
+        Estado: <b>${escA(RD_VIDEO_TXT[rep.charla.estado] || rep.charla.estado || "—")}</b>
+        ${rep.charla.inicio ? ` · Inicio ${horaDe(rep.charla.inicio)}` : ""}${rep.charla.fin ? ` · Fin ${horaDe(rep.charla.fin)}` : ""}
+        ${rep.charla.duracion ? ` · Visto ${Math.min(100, Math.round(rep.charla.visto / rep.charla.duracion * 100))} % de ${Math.round(rep.charla.duracion)} s` : ""}
+      </div>
+      ${(rep.actividades || []).map(a => `
+        <div class="rd-dato mb-2 text-sm">
+          <div class="flex justify-between gap-2"><b>${a.n}. ${escA(a.descripcion)}</b>
+            ${a.estado ? `<span class="badge" style="background:${a.estado === "EJECUTADA" ? "#DDF3E7;color:#12613B" : a.estado === "PARCIAL" ? "#FFF1C7;color:#6B4A00" : "#FBE0DD;color:#8E2019"}">${RD_EJEC_TXT[a.estado]}</span>` : ""}</div>
+          ${a.comentario ? `<div class="text-xs mt-1" style="color:var(--ink-soft)">Mañana: ${escA(a.comentario)}</div>` : ""}
+          ${a.sustento ? `<div class="text-xs mt-1"><b>${a.estado === "EJECUTADA" ? "Observación" : "Sustento"}:</b> ${escA(a.sustento)}</div>` : ""}
+        </div>`).join("")}
+      ${rep.observaciones ? `<div class="rd-dato text-sm mt-2"><small>Observaciones generales</small>${escA(rep.observaciones)}</div>` : ""}`;
+  }
+  function renderRdCerrado(rep) {
+    document.getElementById("rdEtapa").innerHTML = `<div class="card p-4">
+      <div class="p-3 rounded-lg mb-3 font-semibold" style="background:#DDF3E7;color:#12613B">✅ Tu reporte de hoy está cerrado. ¡Buen trabajo!</div>
+      ${detalleRdHTML(rep)}</div>`;
+  }
+
+  // ---------- Hechos: consulta de reportes ----------
+  function renderRdHechos() {
+    const c = document.getElementById("rdContent"); if (!c) return;
+    const f = state.rdFiltro = state.rdFiltro || { desde: "", hasta: "", estado: "", trabajador: "", pagina: 1 };
+    const sup = esSupervisor();
+    c.innerHTML = `
+      <div class="card p-3 mb-3">
+        <div class="grid grid-cols-2 gap-2">
+          <div><label class="text-xs font-semibold block mb-1" style="color:var(--ink-soft)">Desde</label><input id="rfDesde" type="date" class="input" value="${escA(f.desde)}"></div>
+          <div><label class="text-xs font-semibold block mb-1" style="color:var(--ink-soft)">Hasta</label><input id="rfHasta" type="date" class="input" value="${escA(f.hasta)}"></div>
+          <div ${sup ? "" : 'style="grid-column:span 2"'}><label class="text-xs font-semibold block mb-1" style="color:var(--ink-soft)">Estado</label>
+            <select id="rfEstado" class="input"><option value="">Todos</option>${["PENDIENTE_REGISTRO", "PENDIENTE_CIERRE", "CERRADO"].map(e => `<option value="${e}" ${f.estado === e ? "selected" : ""}>${RD_EST_TXT[e]}</option>`).join("")}</select></div>
+          ${sup ? `<div><label class="text-xs font-semibold block mb-1" style="color:var(--ink-soft)">Trabajador</label>
+            <select id="rfTrab" class="input"><option value="">Todos</option>${OPERARIOS.map(o => `<option ${o.name === f.trabajador ? "selected" : ""}>${escA(o.name)}</option>`).join("")}</select></div>` : ""}
+        </div>
+        <button id="rfBuscar" class="btn-primary w-full mt-3">Buscar</button>
+      </div>
+      <div id="rdLista"><div class="text-center text-sm py-8" style="color:var(--ink-soft)">Cargando…</div></div>`;
+    document.getElementById("rfBuscar").onclick = () => {
+      Object.assign(f, { desde: document.getElementById("rfDesde").value, hasta: document.getElementById("rfHasta").value,
+        estado: document.getElementById("rfEstado").value, trabajador: sup ? document.getElementById("rfTrab").value : "", pagina: 1 });
+      cargarRdLista();
+    };
+    cargarRdLista();
+  }
+  async function cargarRdLista() {
+    const f = state.rdFiltro, l = document.getElementById("rdLista"); if (!l) return;
+    l.innerHTML = `<div class="text-center text-sm py-8" style="color:var(--ink-soft)">Cargando…</div>`;
+    let r;
+    try { r = await rdApi("rd_listar", { ...f, tam: 10 }); }
+    catch (e) { if (e && e.code === "cancelado") { l.innerHTML = ""; return; } l.innerHTML = `<div class="card p-4 text-sm" style="color:var(--danger)">${escA(msgError(e))}</div>`; return; }
+    const paginas = Math.max(1, Math.ceil(r.total / r.tam));
+    l.innerHTML = `
+      <div class="text-xs mb-2" style="color:var(--ink-soft)">${r.total} reporte(s)</div>
+      ${r.items.length ? r.items.map(x => `
+        <button class="card p-4 mb-3 w-full rdItem" data-id="${escA(x.id)}" style="text-align:left;display:block">
+          <div class="flex justify-between items-start gap-2 mb-1"><div class="font-bold">${fechaTxt(x.fecha)} · ${escA(x.trabajador)}</div>${badgeRd(x.estado)}</div>
+          <div class="text-sm" style="color:var(--ink)">Cumplimiento <b>${fmtPct(x.cumplimiento)}</b> · Planificadas ${x.nActividades} · Ejecutadas ${x.nEjecutadas} · Parciales ${x.nParciales} · No ejecutadas ${x.nNoEjecutadas}</div>
+          <div class="text-xs mt-1" style="color:var(--ink-soft)">Inicio ${horaDe(x.inicioEn) || "—"} · Cierre ${horaDe(x.cerradoEn) || "—"}${x.observaciones ? " · " + escA(x.observaciones.slice(0, 80)) : ""}</div>
+        </button>`).join("") : `<div class="text-center text-sm py-8" style="color:var(--ink-soft)">No hay reportes con esos filtros</div>`}
+      ${paginas > 1 ? `<div class="flex items-center justify-between mt-2">
+        <button id="rfAnt" class="btn-ghost" ${r.pagina <= 1 ? "disabled" : ""}>‹ Anterior</button>
+        <span class="text-sm">Página ${r.pagina} de ${paginas}</span>
+        <button id="rfSig" class="btn-ghost" ${r.pagina >= paginas ? "disabled" : ""}>Siguiente ›</button></div>` : ""}`;
+    l.querySelectorAll(".rdItem").forEach(b => b.onclick = () => abrirDetalleRd(b.dataset.id));
+    const a = document.getElementById("rfAnt"), s = document.getElementById("rfSig");
+    if (a) a.onclick = () => { f.pagina--; cargarRdLista(); };
+    if (s) s.onclick = () => { f.pagina++; cargarRdLista(); };
+  }
+  async function abrirDetalleRd(id) {
+    let r;
+    try { r = await rdApi("rd_detalle", { id }); } catch (e) { toast(msgError(e), true); return; }
+    const rep = r.reporte;
+    let el = document.getElementById("rdDetalle");
+    if (!el) { el = document.createElement("div"); el.id = "rdDetalle"; document.body.appendChild(el); }
+    el.style.cssText = "position:fixed;inset:0;z-index:85;background:rgba(3,32,76,.55);display:flex;align-items:flex-end;justify-content:center";
+    el.innerHTML = `<div style="background:#F2F5F8;width:100%;max-width:720px;border-radius:20px 20px 0 0;padding:18px 16px calc(18px + env(safe-area-inset-bottom,0px));max-height:92vh;overflow:auto">
+      <div class="flex items-center justify-between mb-2">
+        <div><div class="font-bold text-lg">${fechaTxt(rep.fecha)} · ${escA(rep.trabajador)}</div>${badgeRd(rep.estado)}</div>
+        <button id="rdDetCerrar" aria-label="Cerrar" style="font-size:24px;width:40px;height:40px">✕</button>
+      </div>${detalleRdHTML(rep)}</div>`;
+    el.onclick = e => { if (e.target === el) el.remove(); };
+    el.querySelector("#rdDetCerrar").onclick = () => el.remove();
+  }
+
+  // ---------- Panel de administración: charlas y catálogo ----------
+  async function cargarAdminRd() {
+    try { state.adminRd = await rdApi("rd_admin_datos"); }
+    catch (e) { state.adminRd = { error: msgError(e) }; }
+    if (state.admin) renderAdmin();
+  }
+  function htmlAdminCharlas() {
+    const d = state.adminRd;
+    if (!d) { cargarAdminRd(); return `<div class="text-sm py-6" style="color:var(--ink-soft)">Cargando…</div>`; }
+    if (d.error) return `<div class="card p-4 text-sm" style="color:var(--danger)">${escA(d.error)}</div>`;
+    const ed = state.adminCharlaEd || {};
+    const vid = idYoutubeCliente(ed.url || "");
+    return `
+      <div class="adm-grid">
+        <div>
+          ${d.charlas.length ? d.charlas.slice().reverse().map(c => `
+            <div class="adm-mod" style="grid-template-areas:none;grid-template-columns:auto 1fr auto;display:grid;align-items:center">
+              <img src="https://img.youtube.com/vi/${escA(c.videoId)}/mqdefault.jpg" alt="" style="width:120px;border-radius:8px" onerror="this.style.visibility='hidden'">
+              <div class="min-w-0">
+                <div class="text-xs font-bold" style="color:var(--brand)">${escA(c.tema)}</div>
+                <div class="font-bold">${escA(c.titulo)}</div>
+                <div class="text-xs" style="color:var(--ink-soft);word-break:break-all">${escA(c.url)}</div>
+                ${c.activa ? `<span class="badge" style="background:#DDF3E7;color:#12613B">Vigente</span>` : `<span class="badge" style="background:#EEF2F6;color:#4A5A6E">Inactiva</span>`}
+                <button class="text-sm font-semibold ml-2 chEd" data-id="${escA(c.id)}" style="color:var(--brand);margin-left:8px">Editar</button>
+              </div>
+              <button class="adm-sw chSw" role="switch" data-id="${escA(c.id)}" aria-checked="${c.activa}" aria-label="Vigente"></button>
+            </div>`).join("") : `<div class="card p-4 text-sm" style="color:var(--ink-soft)">Aún no hay charlas registradas.</div>`}
+        </div>
+        <div class="adm-prev">
+          <div class="font-bold mb-2">${ed.id ? "Editar charla" : "Nueva charla"}</div>
+          <label class="adm-lbl" for="chTema">Tema *</label><input id="chTema" class="input mb-2" maxlength="120" value="${escA(ed.tema || "")}" placeholder="Ej.: Uso de EPP">
+          <label class="adm-lbl" for="chTit">Título o descripción *</label><textarea id="chTit" class="input mb-2" rows="2" maxlength="300">${escA(ed.titulo || "")}</textarea>
+          <label class="adm-lbl" for="chUrl">URL del video de YouTube *</label><input id="chUrl" class="input mb-1" maxlength="300" value="${escA(ed.url || "")}" placeholder="https://www.youtube.com/watch?v=…">
+          <div id="chUrlInfo" class="text-xs mb-2" style="color:${vid ? "#12613B" : "var(--ink-soft)"}">${vid ? "✓ Enlace válido · video " + vid : "Pega el enlace del video (watch, youtu.be o shorts)"}</div>
+          ${vid ? `<img src="https://img.youtube.com/vi/${vid}/mqdefault.jpg" alt="" style="width:100%;border-radius:10px;margin-bottom:8px">` : ""}
+          <label class="flex items-center gap-2 text-sm mb-3"><input id="chAct" type="checkbox" ${ed.activa === false ? "" : "checked"}> Dejarla como charla vigente</label>
+          <div id="chErr" class="rd-err"></div>
+          <div class="flex gap-2">${ed.id ? `<button id="chCancel" class="btn-ghost flex-1">Cancelar</button>` : ""}<button id="chGuardar" class="btn-primary flex-1">Guardar charla</button></div>
+        </div>
+      </div>`;
+  }
+  function htmlAdminCatalogo() {
+    const d = state.adminRd;
+    if (!d) { cargarAdminRd(); return `<div class="text-sm py-6" style="color:var(--ink-soft)">Cargando…</div>`; }
+    if (d.error) return `<div class="card p-4 text-sm" style="color:var(--danger)">${escA(d.error)}</div>`;
+    return `
+      <div class="card p-4 mb-3" style="max-width:760px">
+        <label class="adm-lbl" for="caNueva">Nueva actividad</label>
+        <div class="flex gap-2"><input id="caNueva" class="input" maxlength="300" placeholder="Ej.: Detección acústica de fugas" value="${escA(state.caNueva || "")}"><button id="caAgregar" class="btn-primary" style="width:auto;padding:0 18px">Agregar</button></div>
+        <div id="caErr" class="rd-err"></div>
+      </div>
+      <div style="max-width:760px">
+        <div class="text-xs mb-2" style="color:var(--ink-soft)">${d.catalogo.length} actividad(es) · Las desactivadas no se ofrecen a los trabajadores, pero los reportes anteriores conservan su descripción original.</div>
+        ${d.catalogo.map(a => `
+          <div class="adm-mod ${a.activo ? "" : "off"}" style="grid-template-areas:none;grid-template-columns:1fr auto auto;display:grid;align-items:center">
+            <input class="input caDesc" data-id="${escA(a.id)}" maxlength="300" value="${escA(a.descripcion)}">
+            <button class="btn-ghost caGuardar" data-id="${escA(a.id)}" style="width:auto;padding:8px 12px">Guardar</button>
+            <button class="adm-sw caSw" role="switch" data-id="${escA(a.id)}" aria-checked="${a.activo}" aria-label="Activa"></button>
+          </div>`).join("")}
+      </div>`;
+  }
+  function idYoutubeCliente(url) {
+    const m = String(url || "").trim().match(/(?:youtube\.com\/(?:watch\?(?:.*&)?v=|embed\/|shorts\/|live\/|v\/)|youtu\.be\/)([A-Za-z0-9_-]{11})(?![A-Za-z0-9_-])/);
+    return m ? m[1] : "";
+  }
+  function activarAdminRd(app) {
+    const d = state.adminRd; if (!d || d.error) return;
+    const llamar = async (tipo, datos, errId) => {
+      let error = null;
+      try { state.adminRd = await rdApi(tipo, datos); if (state.adminRd.aviso) toast(state.adminRd.aviso); else toast("Guardado ✅"); }
+      catch (e) { error = msgError(e); }
+      if (!error && errId === "chErr") state.adminCharlaEd = null;
+      if (!error && errId === "caErr") state.caNueva = "";
+      if (state.admin) { const y = window.scrollY; renderAdmin(); window.scrollTo(0, y); }
+      if (error) { const el = errId && document.getElementById(errId); if (el) el.textContent = error; else toast(error, true); }
+      return !error;
+    };
+    if (state.adminTab === "charlas") {
+      const url = document.getElementById("chUrl");
+      if (url) url.oninput = () => { const v = idYoutubeCliente(url.value); const i = document.getElementById("chUrlInfo"); i.style.color = v ? "#12613B" : url.value ? "var(--danger)" : "var(--ink-soft)"; i.textContent = v ? "✓ Enlace válido · video " + v : url.value ? "No parece un enlace de YouTube" : "Pega el enlace del video"; };
+      const g = document.getElementById("chGuardar");
+      if (g) g.onclick = async () => {
+        const datos = { id: (state.adminCharlaEd || {}).id || "", tema: document.getElementById("chTema").value, titulo: document.getElementById("chTit").value, url: url.value, activa: document.getElementById("chAct").checked };
+        const err = document.getElementById("chErr");
+        if (!datos.tema.trim() || !datos.titulo.trim()) { err.textContent = "Completa el tema y el título"; return; }
+        if (!idYoutubeCliente(datos.url)) { err.textContent = "La URL no es un enlace válido de YouTube"; return; }
+        state.adminCharlaEd = datos; g.disabled = true; g.textContent = "Verificando video…";
+        await llamar("rd_admin_charla", datos, "chErr");
+      };
+      const cc = document.getElementById("chCancel"); if (cc) cc.onclick = () => { state.adminCharlaEd = null; renderAdmin(); };
+      app.querySelectorAll(".chEd").forEach(b => b.onclick = () => { state.adminCharlaEd = { ...d.charlas.find(c => c.id === b.dataset.id) }; renderAdmin(); });
+      app.querySelectorAll(".chSw").forEach(b => b.onclick = () => llamar("rd_admin_charla_estado", { id: b.dataset.id, activa: b.getAttribute("aria-checked") !== "true" }));
+    }
+    if (state.adminTab === "catalogo") {
+      const n = document.getElementById("caNueva");
+      n.oninput = () => { state.caNueva = n.value; };
+      document.getElementById("caAgregar").onclick = () => { if (!n.value.trim()) { document.getElementById("caErr").textContent = "Escribe la actividad"; return; } state.caNueva = n.value; llamar("rd_admin_catalogo", { descripcion: n.value }, "caErr"); };
+      n.onkeydown = e => { if (e.key === "Enter") document.getElementById("caAgregar").click(); };
+      app.querySelectorAll(".caGuardar").forEach(b => b.onclick = () => { const a = d.catalogo.find(x => x.id === b.dataset.id); const v = app.querySelector(`.caDesc[data-id="${b.dataset.id}"]`).value; llamar("rd_admin_catalogo", { id: a.id, descripcion: v, activo: a.activo }); });
+      app.querySelectorAll(".caSw").forEach(b => b.onclick = () => { const a = d.catalogo.find(x => x.id === b.dataset.id); llamar("rd_admin_catalogo", { id: a.id, descripcion: a.descripcion, activo: !a.activo }); });
+    }
+  }
 
   /* ---------------- Mapa de la ruta (OpenStreetMap) + navegación en Google Maps ---------------- */
   const FORM_CORTO = { GPFO0381: "0381 Presiones", GPFO0405: "0405 Reparación", GPFO0416: "0416 Muestreo" };
