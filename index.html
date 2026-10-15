@@ -454,7 +454,7 @@
   const enLinea = () => navigator.onLine !== false;
   async function porSubir() {
     if (state.syncMode !== "cloud") return 0;
-    try { return (await IDB.all()).length + (await IDB.fall()).length + leerLS("gpfo_edit_ops", []).length; } catch (e) { return 0; }
+    try { return (await IDB.all()).length + (await IDB.fall()).length + leerLS("gpfo_edit_ops", []).length + leerLS("gpfo_del_ops", []).length; } catch (e) { return 0; }
   }
   async function badgeHTML() {
     if (state.syncMode === "local") return `<span class="badge" style="background:#FFF1C7;color:#6B4A00">● Guardado en el celular</span>`;
@@ -489,6 +489,15 @@
     pintarEstadoSync();
     try {
       await flushPendOps();
+      const dels = leerLS("gpfo_del_ops", []);
+      while (dels.length) {                                 // registros quitados (también los quitados sin internet)
+        try { await apiPost({ tipo: "quitar_registro", id: dels[0].id, fotos: dels[0].fotos || [] }); subidos++; }
+        catch (e) {
+          if (!(e && (e.code === "permiso" || esImposible(e)))) throw e;
+          toast(e.code === "permiso" ? "Solo puedes quitar tus propios registros" : "No se pudo quitar un registro", true);
+        }
+        dels.shift(); guardarLS("gpfo_del_ops", dels);
+      }
       const edits = leerLS("gpfo_edit_ops", []);
       while (edits.length) {
         try {
@@ -604,7 +613,8 @@
                     ediciones: { ...(r.ediciones || {}), [op.ts]: op.nota } } : r;
     });
     const idsLocales = new Set(vistaLocal.map(r => r.id));
-    state.registros = [...vistaLocal, ...nube.filter(r => !idsLocales.has(r.id))];
+    const quitados = new Set(leerLS("gpfo_del_ops", []).map(o => o.id));
+    state.registros = [...vistaLocal, ...nube.filter(r => !idsLocales.has(r.id) && !quitados.has(r.id))];
   }
 
   /* ---------------- Saludo de bienvenida (voz + globo con la mascota) ---------------- */
@@ -1054,7 +1064,7 @@
   let rearmar = null;
   window.addEventListener("popstate", () => {
     if (!state.operario) return;                                        // en el ingreso, atrás sale normal
-    const confirmar = document.querySelector("#cfNo");
+    const confirmar = document.querySelector("#cfNo") || document.querySelector("#cfQuitarNo");
     if (document.getElementById("visorFotos")) cerrarVisor();
     else if (confirmar) confirmar.click();                               // "foto nueva": atrás = no usarla
     else if (document.getElementById("camOverlay")) cerrarCamara();
@@ -1742,7 +1752,9 @@
       <div class="card p-4 mb-3">
         <div class="flex justify-between items-start gap-2 mb-1">
           <div class="font-bold min-w-0">${escA(r.nis)} — ${escA(r.direccion)}</div>
-          ${puedeEditar(r) ? `<button class="regEditar text-sm font-semibold px-2 py-1 shrink-0" data-id="${escA(r.id)}" style="color:var(--brand)">Editar</button>` : ""}
+          ${puedeEditar(r) ? `<span class="flex shrink-0">
+            <button class="regEditar text-sm font-semibold px-2 py-1" data-id="${escA(r.id)}" style="color:var(--brand)">Editar</button>
+            <button class="regQuitar text-sm font-semibold px-2 py-1" data-id="${escA(r.id)}" style="color:var(--danger)">Quitar</button></span>` : ""}
         </div>
         <div class="text-sm" style="color:var(--ink-soft)">${r.urb ? escA(r.urb) + " · " : ""}${escA(r.distrito)}${r.sector ? " · Sector " + escA(r.sector) : ""}</div>
         ${formDe(r) === "GPFO0416" ? `
@@ -1773,6 +1785,9 @@
     `).join("");
     document.querySelectorAll(".regFoto").forEach(b => b.onclick = () => {
       const r = state.registros.find(x => x.id === b.dataset.id); if (r) abrirVisor(fotosDe(r), Number(b.dataset.i));
+    });
+    document.querySelectorAll(".regQuitar").forEach(b => b.onclick = () => {
+      const r = state.registros.find(x => x.id === b.dataset.id); if (r) confirmarQuitar(r);
     });
     document.querySelectorAll(".regEditar").forEach(b => b.onclick = async () => {
       const r = state.registros.find(x => x.id === b.dataset.id); if (!r) return;
@@ -1972,6 +1987,56 @@
           <button id="edGuardar" class="btn-primary">Guardar cambios</button>
         </div>
       </div>`;
+  }
+
+  /* ---------------- Quitar un registro (desde Hechos) ----------------
+     Se pide confirmación. Si el registro aún no se subió, se borra del celular. Si ya se subió, el servidor borra
+     su fila en la hoja del formulario y en FOTOS, y manda sus fotos a la papelera de Drive. Sin internet queda en
+     cola y se completa solo cuando vuelve la señal. */
+  function confirmarQuitar(r) {
+    const el = document.createElement("div");
+    el.id = "cfQuitar";
+    el.style.cssText = "position:fixed;inset:0;z-index:96;background:rgba(3,32,76,.55);display:flex;align-items:center;justify-content:center;padding:16px";
+    const n = r.nFotos || 0;
+    el.innerHTML = `<div style="background:#fff;border-radius:18px;padding:20px;width:100%;max-width:380px">
+      <div class="font-bold text-lg mb-2">¿Estás seguro de que quieres quitar este registro?</div>
+      <div class="p-3 rounded-lg text-sm mb-3" style="background:#F2F5F8">
+        <b>${escA(formDe(r))} · NIS ${escA(r.nis)}</b><br>${escA(r.direccion || "")}<br>
+        <span style="color:var(--ink-soft)">${escA(dmy(r.fecha || r.fechaVerificacion || r.fechaSedapal || ""))} · ${escA(r.operario)} · ${n} foto(s)</span>
+      </div>
+      <div class="text-sm mb-4" style="color:var(--danger)">Se borrará el registro${n ? " y sus " + n + " foto(s)" : ""}. Esta acción no se puede deshacer desde la app.</div>
+      <div style="display:flex;gap:10px">
+        <button id="cfQuitarNo" class="btn-ghost" style="flex:1">Cancelar</button>
+        <button id="cfQuitarSi" class="btn-primary" style="flex:1;background:var(--danger);border-color:var(--danger)">Sí, quitar</button>
+      </div></div>`;
+    document.body.appendChild(el);
+    el.onclick = e => { if (e.target === el) el.remove(); };
+    el.querySelector("#cfQuitarNo").onclick = () => el.remove();
+    el.querySelector("#cfQuitarSi").onclick = async () => {
+      el.querySelector("#cfQuitarSi").disabled = true;
+      try { await quitarRegistro(r); el.remove(); toast("Registro quitado"); }
+      catch (e) { el.remove(); toast("No se pudo quitar el registro", true); }
+      render();
+    };
+  }
+  async function quitarRegistro(r) {
+    const ops = leerLS("gpfo_del_ops", []);
+    if (r.local) {
+      const x = (await IDB.all()).find(y => y.id === r.id);
+      await IDB.del(r.id);
+      // si alcanzó a subir fotos (o se estaba subiendo), el servidor las limpia
+      if (state.syncMode === "cloud" && ((x && x.fotoIds && x.fotoIds.length) || sincronizando))
+        ops.push({ id: r.id, fotos: (x && x.fotoIds) || [] });
+    } else {
+      ops.push({ id: r.id, fotos: [] });
+      guardarLS("gpfo_edit_ops", leerLS("gpfo_edit_ops", []).filter(o => o.id !== r.id));   // correcciones pendientes ya no sirven
+      try { for (const f of await IDB.fall()) if (f.regId === r.id) await IDB.fdel(f.id); } catch (e) {}
+      guardarLS("gpfo_cache_registros", leerLS("gpfo_cache_registros", []).filter(x => x.id !== r.id));
+    }
+    guardarLS("gpfo_del_ops", ops);
+    state.registros = state.registros.filter(x => x.id !== r.id);
+    if (state.editId === r.id) state.editId = null;
+    sincronizar();
   }
 
   async function guardarFotosEdicion(r) {
