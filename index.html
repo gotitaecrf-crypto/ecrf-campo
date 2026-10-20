@@ -1085,6 +1085,7 @@
   }
   function renderPantalla() {
     if (!state.operario) renderLogin();
+    else if (state.gpsEstado !== "ok") return renderGps();
     else if (state.admin) return renderAdmin(), armarAtras();
     else if (state.rd) return renderReporteDiario(), armarAtras();
     else if (state.vista) return renderVistaGis(), armarAtras();
@@ -3262,13 +3263,16 @@
     else if (MODULOS_APP[id] && MODULOS_APP[id].tipo === "form") {
       state.form = id; sessionStorage.setItem("ecrf_form", id); state.tab = "nuevo";
       resetForm(); state.rutaSel = null; state.rutaQuery = "";
-    } else if (["MAPA_NIS", "PLANIFICADOR_RUTAS", "LABORATORIO_ECRF"].includes(id)) { state.vista = id; state.labTab = "vehiculo"; }
+    } else if (["MAPA_NIS", "PLANIFICADOR_RUTAS", "LABORATORIO_ECRF"].includes(id)) {
+      state.vista = id; state.labTab = "vehiculo";
+      if (id === "MAPA_NIS") { state.mnRadio = 50; state.mnCerca = null; state.mnAuto = true; }   // al entrar: radio de 50 m alrededor de donde estás
+    }
     render(); window.scrollTo(0, 0);
   }
 
   function pintarLateral() {
     let el = document.getElementById("lateral");
-    if (!state.operario || !esAdmin()) { if (el) el.remove(); document.body.classList.remove("con-lat"); return; }   // barra lateral: solo administradores
+    if (!state.operario || !esAdmin() || state.gpsEstado !== "ok") { if (el) el.remove(); document.body.classList.remove("con-lat"); return; }   // barra lateral: solo administradores
     document.body.classList.add("con-lat");
     if (!el) { el = document.createElement("aside"); el.id = "lateral"; el.className = "lat"; el.setAttribute("aria-label", "Menú principal"); document.body.appendChild(el); }
     const act = navActual();
@@ -3343,7 +3347,7 @@
     return new Promise(ok => {
       if (!navigator.geolocation) return ok(null);
       navigator.geolocation.getCurrentPosition(p => {
-        state.coords = { lat: p.coords.latitude, lon: p.coords.longitude, alt: null, speed: null }; ok(state.coords);
+        state.coords = { lat: p.coords.latitude, lon: p.coords.longitude, alt: null, speed: null }; state.gpsUltimo = { lat: state.coords.lat, lon: state.coords.lon, en: Date.now() }; ok(state.coords);
       }, () => ok(null), { enableHighAccuracy: true, timeout: 9000 });
     });
   }
@@ -3360,7 +3364,7 @@
     const sel = state.mnSel && (NIS_REMOTO[state.mnSel] || nisLocal(state.mnSel));
     const est = q.length === 7 ? estadoBusqueda(q) : "";
     const hist = leerLS(claveHistNis(), []);
-    const yo = state.coords && state.coords.lat != null ? state.coords : null;
+    const yo = state.coords && state.coords.lat != null ? state.coords : state.gpsUltimo || null;
     const dist = sel && yo && sel.latNis != null ? distKm(yo, { lat: Number(sel.latNis), lon: Number(sel.lonNis) }) : null;
     const operarios = listaUsuarios().filter(u => (u.rol || "OPERARIO") === "OPERARIO");
     document.getElementById("app").innerHTML = `${estilosGis()}
@@ -3378,6 +3382,7 @@
               : est === "sinred" ? "Sin internet: solo se encuentran los NIS consultados antes en este equipo." : q.length && q.length < 7 ? "El NIS tiene 7 dígitos." : "Base de conexiones con coordenadas del GIS."}</div>
             ${hist.length ? `<div class="gis-lbl mt-3">Últimos consultados</div><div class="flex gap-2" style="flex-wrap:wrap">${hist.map(n => `<button class="gis-chip mnHist" data-n="${n}" aria-pressed="${n === state.mnSel}">${n}</button>`).join("")}</div>` : ""}
           </div>
+          ${htmlCercanos()}
           ${sel ? `
           <div class="card p-4 mt-3" id="mnFicha">
             <div class="flex items-center justify-between gap-2"><b class="text-lg" style="color:var(--brand-dark)">NIS ${escA(state.mnSel)}</b>
@@ -3392,6 +3397,12 @@
               ${sel.latNis != null ? `<div class="rd-dato" style="grid-column:1/-1"><small>Coordenadas (WGS84)</small><b style="font-variant-numeric:tabular-nums">${Number(sel.latNis).toFixed(6)}, ${Number(sel.lonNis).toFixed(6)}</b></div>` : ""}
             </div>
             ${sel.latNis != null ? `<a class="btn-primary w-full mt-3" style="display:flex;justify-content:center;text-decoration:none" target="_blank" rel="noopener" href="https://www.google.com/maps/dir/?api=1&destination=${sel.latNis},${sel.lonNis}">▶ Cómo llegar (Google Maps)</a>` : ""}
+            <div class="gis-lbl mt-4">Registrar con este NIS</div>
+            <div class="mn-atajos">
+              <button class="mnAtajo" data-f="GPFO0381"><span>${ICO_LAT.GPFO0381}</span>Toma de presiones</button>
+              <button class="mnAtajo" data-f="GPFO0405"><span>${ICO_LAT.GPFO0405}</span>Verificación de reparación</button>
+              <button class="mnAtajo" data-f="GPFO0416"><span>${ICO_LAT.GPFO0416}</span>Verificación por muestreo</button>
+            </div>
             <div class="gis-lbl mt-4">Agregar a la ruta</div>
             <div class="grid gap-2" style="grid-template-columns:1fr 1fr">
               <select id="mnForm" class="input"><option value="GPFO0381">0381 Presiones</option><option value="GPFO0405">0405 Reparación</option><option value="GPFO0416">0416 Muestreo</option></select>
@@ -3418,6 +3429,7 @@
     inp.onkeydown = e => { if (e.key === "Enter") buscar(); };
     document.getElementById("mnBuscar").onclick = buscar;
     document.querySelectorAll(".mnHist").forEach(b => b.onclick = () => { state.mnQuery = b.dataset.n; state.mnSel = b.dataset.n; if (!nisLocal(b.dataset.n)) buscar(); else renderMapaNis(); });
+    document.querySelectorAll(".mnAtajo").forEach(b => b.onclick = () => irAFormularioConNis(b.dataset.f, state.mnSel));
     document.getElementById("mnRuta").onchange = e => { state.mnVerRuta = e.target.checked; renderMapaNis(); };
     document.getElementById("mnYo").onclick = async () => { toast("Buscando tu ubicación…"); const c = await ubicacionAhora(); if (!c) toast("No se pudo obtener tu ubicación", true); if (state.vista === "MAPA_NIS") renderMapaNis(); };
     const bAg = document.getElementById("mnAgregar");
@@ -3429,7 +3441,93 @@
       toast("NIS " + state.mnSel + " agregado a la ruta" + (para !== state.operario ? " de " + para : ""));
       renderMapaNis();
     };
+    activarCercanos();
     pintarMapaNis(sel, yo);
+    if (state.mnAuto) {
+      state.mnAuto = false;
+      (yo ? Promise.resolve(yo) : ubicacionAhora()).then(c => { if (c && c.lat != null && state.vista === "MAPA_NIS") buscarCercanos(c.lat, c.lon, "gps"); });
+    }
+  }
+  // Ventana de un NIS en el mapa: datos y atajos a los formularios con ese NIS ya cargado
+  function ventanaNis(nis, d, m) {
+    const atajo = (f, t) => `<button class="mnIrForm" data-f="${f}" data-n="${nis}">${t}</button>`;
+    return `<div class="mn-pop">
+      <div class="mn-pop-tit">NIS ${escA(nis)}${m != null ? ` <span>${m} m</span>` : ""}</div>
+      <dl><dt>Dirección</dt><dd>${escA(d.direccion || "—")}</dd><dt>Localidad</dt><dd>${escA(d.urb || "—")}</dd>
+        <dt>Distrito</dt><dd>${escA(d.distrito || "—")}</dd><dt>Sector</dt><dd>${escA(d.sector || "—")}</dd>${d.ccss ? `<dt>CCSS</dt><dd>${escA(d.ccss)}</dd>` : ""}</dl>
+      <div class="mn-pop-at">${atajo("GPFO0381", "Toma de presiones")}${atajo("GPFO0405", "Verificación de reparación")}${atajo("GPFO0416", "Verificación por muestreo")}</div>
+      <button class="mnVerFicha mn-pop-ficha" data-n="${nis}">Ver ficha completa ›</button>
+    </div>`;
+  }
+  // Abre el formulario elegido con el NIS ya cargado (dirección, distrito, sector y coordenadas)
+  function irAFormularioConNis(form, nis) {
+    const d = NIS_REMOTO[nis] || nisLocal(nis); if (!d) return;
+    if (mapaNisL) mapaNisL.closePopup();
+    abrirModulo(form);
+    state.nisSel = { nis, direccion: d.direccion || "", urb: d.urb || "", distrito: d.distrito || "", sector: d.sector || "", ccss: d.ccss || "",
+                     latNis: d.latNis ?? null, lonNis: d.lonNis ?? null, manual: false };
+    state.fecha = todayISO(); state.hora = nowHM(); ensureLocation(); render(); window.scrollTo(0, 0);
+    toast("NIS " + nis + " cargado en " + (FORM_CORTO[form] || form));
+  }
+
+  /* ---------- Conexiones cercanas (radio alrededor de mi ubicación o de un punto del mapa) ---------- */
+  const RADIOS = [25, 50, 100];
+  function htmlCercanos() {
+    const c = state.mnCerca, r = state.mnRadio || 50;
+    const lista = c && c.items ? c.items : [];
+    return `<div class="card p-4 mt-3" id="mnCercaCard">
+      <div class="gis-lbl">Conexiones cercanas</div>
+      <div class="flex gap-2 items-center" style="flex-wrap:wrap">
+        <span class="text-sm" style="font-weight:600">Radio:</span>
+        ${RADIOS.map(x => `<button class="gis-chip mnRadio" data-r="${x}" aria-pressed="${x === r}">${x} m</button>`).join("")}
+      </div>
+      <button id="mnCerca" class="btn-primary w-full mt-3" ${c && c.cargando ? "disabled" : ""}>${c && c.cargando ? "Buscando…" : `◎ NIS a ${r} m de mi ubicación`}</button>
+      <div class="text-xs mt-2" style="color:var(--ink-soft)">También puedes tocar el mapa y buscar alrededor de ese punto.</div>
+      ${c && c.error ? `<div class="rd-err">${escA(c.error)}</div>` : ""}
+      ${c && c.items ? `<div class="text-sm mt-3" style="font-weight:700;color:var(--brand-dark)">${c.total} conexi${c.total === 1 ? "ón" : "ones"} a menos de ${c.r} m ${c.origen === "gps" ? "de tu ubicación" : "del punto elegido"}</div>
+        ${c.total > lista.length ? `<div class="text-xs" style="color:var(--ink-soft)">Se muestran las ${lista.length} más cercanas.</div>` : ""}
+        <div class="mn-cerca-lista">${lista.slice(0, state.mnCercaVer || 30).map(x => `
+          <button class="mn-cerca-item mnCercaNis" data-n="${x.nis}" aria-pressed="${x.nis === state.mnSel}">
+            <span class="mn-m">${x.m} m</span><span class="min-w-0"><b>NIS ${x.nis}</b><small>${escA(legibleBase(x.dir, "dir"))}${x.sec ? " · Sector " + escA(x.sec) : ""}</small></span>
+          </button>`).join("")}</div>
+        ${lista.length > (state.mnCercaVer || 30) ? `<button id="mnCercaMas" class="btn-ghost w-full mt-2">Ver ${Math.min(30, lista.length - (state.mnCercaVer || 30))} más</button>` : ""}` : ""}
+    </div>`;
+  }
+  async function buscarCercanos(lat, lon, origen) {
+    const r = state.mnRadio || 50;
+    if (!apiListo() || !enLinea()) { state.mnCerca = { error: "Necesitas internet para buscar conexiones cercanas" }; return renderMapaNis(); }
+    state.mnCerca = { lat, lon, r, origen, cargando: true, items: state.mnCerca && state.mnCerca.items }; state.mnCercaVer = 30;
+    renderMapaNis();
+    try {
+      const d = await apiGet({ action: "nis_cerca", lat: lat.toFixed(6), lon: lon.toFixed(6), r });
+      // lo encontrado queda guardado como cualquier NIS consultado (sirve sin internet y para los formularios)
+      d.items.forEach(x => { if (NIS_REMOTO[x.nis] === undefined || NIS_REMOTO[x.nis] === null) NIS_REMOTO[x.nis] = desdeServidor(x.nis, { dir: x.dir, urb: x.urb, dist: x.dist, sec: x.sec, ccss: x.ccss, lat: x.lat, lon: x.lon }); });
+      guardarCacheNis();
+      state.mnCerca = { lat, lon, r: d.r, origen, items: d.items, total: d.total };
+    } catch (e) {
+      state.mnCerca = { lat, lon, r, origen, error: e && e.code === "sin_base_geo" ? "Falta cargar la base por ubicación (carpeta ECRF_BASE_GEO) en el Drive" : (e && e.message) || "No se pudo buscar. Revisa tu internet" };
+    }
+    if (state.vista === "MAPA_NIS") renderMapaNis();
+  }
+  function activarCercanos() {
+    document.querySelectorAll(".mnRadio").forEach(b => b.onclick = () => {
+      state.mnRadio = Number(b.dataset.r);
+      const c = state.mnCerca;
+      if (c && c.lat != null && !c.cargando) buscarCercanos(c.lat, c.lon, c.origen); else renderMapaNis();
+    });
+    document.getElementById("mnCerca").onclick = async () => {
+      toast("Buscando tu ubicación…");
+      const c = await ubicacionAhora();
+      if (!c) { state.mnCerca = { error: "No se pudo obtener tu ubicación. Activa el GPS o toca un punto del mapa." }; return renderMapaNis(); }
+      buscarCercanos(c.lat, c.lon, "gps");
+    };
+    document.querySelectorAll(".mnCercaNis").forEach(b => b.onclick = () => elegirCercano(b.dataset.n));
+    const mas = document.getElementById("mnCercaMas"); if (mas) mas.onclick = () => { state.mnCercaVer = (state.mnCercaVer || 30) + 30; renderMapaNis(); };
+  }
+  function elegirCercano(nis) {
+    state.mnSel = nis; state.mnQuery = nis; state.mnCentrarCerca = true;
+    guardarLS(claveHistNis(), [nis].concat(leerLS(claveHistNis(), []).filter(x => x !== nis)).slice(0, 8));
+    renderMapaNis();
   }
   let turnoMapa = 0;                                   // si se vuelve a pintar mientras carga, solo vale el último
   async function pintarMapaNis(sel, yo) {
@@ -3446,15 +3544,87 @@
     });
     if (sel && sel.latNis != null) {
       const ll = [Number(sel.latNis), Number(sel.lonNis)];
-      L.marker(ll, { icon: PIN_NIS() }).addTo(mapaNisL).bindPopup(`<b>NIS ${escA(state.mnSel)}</b><br>${escA(sel.direccion || "")}<br><small>${escA(sel.urb || "")} · ${escA(sel.distrito || "")} · Sector ${escA(sel.sector || "")}</small>`).openPopup();
+      L.marker(ll, { icon: PIN_NIS() }).addTo(mapaNisL).bindPopup(ventanaNis(state.mnSel, sel, null), { maxWidth: 290, minWidth: 240 }).openPopup();
       L.circle(ll, { radius: 50, color: "#33B1E4", weight: 1, fillOpacity: .12 }).addTo(mapaNisL);
       lim.push(ll);
     }
     if (yo) { L.circleMarker([yo.lat, yo.lon], { radius: 8, color: "#fff", weight: 3, fillColor: "#1A73E8", fillOpacity: 1 }).addTo(mapaNisL).bindPopup("Estás aquí"); lim.push([yo.lat, yo.lon]); }
-    if (sel && sel.latNis != null && lim.length === 1) mapaNisL.setView(lim[0], 18);
+    const c = state.mnCerca;
+    if (c && c.lat != null) {                          // radio de búsqueda y conexiones encontradas
+      const centro = [c.lat, c.lon];
+      const aro = L.circle(centro, { radius: c.r, color: "#0B5FA5", weight: 2, dashArray: "6 6", fillColor: "#33B1E4", fillOpacity: .08 }).addTo(mapaNisL);
+      if (c.origen !== "gps") L.circleMarker(centro, { radius: 6, color: "#fff", weight: 2, fillColor: "#0B5FA5", fillOpacity: 1 }).addTo(mapaNisL).bindPopup("Punto elegido");
+      (c.items || []).forEach(x => {
+        if (x.nis === state.mnSel) return;
+        L.circleMarker([x.lat, x.lon], { radius: 7, color: "#fff", weight: 2, fillColor: "#1E8E5A", fillOpacity: .95, bubblingMouseEvents: false }).addTo(mapaNisL)
+          .bindPopup(() => ventanaNis(x.nis, NIS_REMOTO[x.nis] || desdeServidor(x.nis, { dir: x.dir, urb: x.urb, dist: x.dist, sec: x.sec, ccss: x.ccss, lat: x.lat, lon: x.lon }), x.m), { maxWidth: 290, minWidth: 240 });
+      });
+      if (!state.mnCentrarCerca || !(sel && sel.latNis != null)) { mapaNisL.fitBounds(L.latLng(centro).toBounds(c.r * 2), { padding: [30, 30], maxZoom: 19 }); lim.length = 0; }
+      state.mnCentrarCerca = false;
+    }
+    // tocar el mapa: buscar alrededor de ese punto
+    mapaNisL.on("click", ev => {
+      const r = state.mnRadio || 50;
+      L.popup().setLatLng(ev.latlng).setContent(`<button class="mnAqui" style="color:#0B5FA5;font-weight:700">◎ Buscar NIS a ${r} m de aquí</button>`).openOn(mapaNisL);
+    });
+    mapaNisL.getContainer().onclick = e => {
+      const a = e.target.closest(".mnAqui"); if (a) { const p = mapaNisL._popup && mapaNisL._popup.getLatLng(); if (p) buscarCercanos(p.lat, p.lng, "mapa"); return; }
+      const v = e.target.closest(".mnVerFicha"); if (v) { mapaNisL.closePopup(); elegirCercano(v.dataset.n); return; }
+      const f = e.target.closest(".mnIrForm"); if (f) irAFormularioConNis(f.dataset.f, f.dataset.n);
+    };
+    if (c && c.lat != null && lim.length === 0) { /* ya se encuadró en el radio */ }
+    else if (sel && sel.latNis != null && lim.length === 1) mapaNisL.setView(lim[0], 18);
     else if (lim.length) mapaNisL.fitBounds(lim, { padding: [40, 40], maxZoom: 18 });
     else mapaNisL.setView([-12.06, -77.04], 11);
     setTimeout(() => mapaNisL && mapaNisL.invalidateSize(), 150);
+  }
+
+  /* ---------------- GPS OBLIGATORIO ----------------
+     Al abrir la app (con sesión) se pide la ubicación y no se continúa hasta tenerla. Luego se sigue el GPS
+     en segundo plano para que el mapa, la marca de agua y «NIS cercanos» usen la posición actual. */
+  let vigiaGps = null;
+  function pedirGps() {
+    if (!navigator.geolocation) { state.gpsEstado = "no_soportado"; return render(); }
+    state.gpsEstado = "buscando"; render();
+    navigator.geolocation.getCurrentPosition(p => {
+      state.coords = { lat: p.coords.latitude, lon: p.coords.longitude, alt: typeof p.coords.altitude === "number" ? p.coords.altitude : null, speed: null, prec: p.coords.accuracy };
+      state.gpsUltimo = { lat: state.coords.lat, lon: state.coords.lon, en: Date.now() };
+      state.gpsEstado = "ok";
+      if (vigiaGps === null) vigiaGps = navigator.geolocation.watchPosition(q => {
+        state.coords = { lat: q.coords.latitude, lon: q.coords.longitude, alt: typeof q.coords.altitude === "number" ? q.coords.altitude : null, speed: typeof q.coords.speed === "number" ? q.coords.speed : null, prec: q.coords.accuracy };
+        state.gpsUltimo = { lat: state.coords.lat, lon: state.coords.lon, en: Date.now() };
+      }, () => {}, { enableHighAccuracy: true, maximumAge: 15000 });
+      render();
+    }, e => { state.gpsEstado = e && e.code === 1 ? "denegado" : "sin_senal"; render(); },
+    { enableHighAccuracy: true, timeout: 20000, maximumAge: 60000 });
+  }
+  function renderGps() {
+    const app = document.getElementById("app");
+    app.classList.add("max-w-md");
+    const e = state.gpsEstado || "";
+    if (!e) { setTimeout(pedirGps, 0); }
+    const txt = {
+      "": ["Activando tu ubicación…", "La app necesita el GPS para las fotos, el mapa y los NIS cercanos."],
+      buscando: ["Buscando tu ubicación…", "Si el celular te pregunta, elige «Permitir». Puede tardar unos segundos."],
+      denegado: ["La ubicación está bloqueada", "Permite la ubicación para esta página: toca el candado o los ⋮ del navegador → Permisos del sitio → Ubicación → Permitir. Luego toca «Volver a intentar»."],
+      sin_senal: ["No se pudo obtener tu ubicación", "Activa el GPS (Ubicación) del celular desde la barra de ajustes rápidos y toca «Volver a intentar». Si estás bajo techo, acércate a una ventana."],
+      no_soportado: ["Este navegador no tiene ubicación", "Abre la app en Chrome o Safari actualizados."]
+    }[e] || ["", ""];
+    app.innerHTML = `
+      <div class="px-4 py-10 flex flex-col items-center text-center gap-3" style="min-height:100vh;justify-content:center">
+        <div style="width:96px;height:96px;border-radius:50%;background:#E1F3FB;color:var(--brand-dark);display:grid;place-items:center">${ICO_MAPA}</div>
+        <b class="text-xl" style="color:var(--brand-dark)">${txt[0]}</b>
+        <div class="text-sm" style="color:var(--ink-soft);max-width:340px">${txt[1]}</div>
+        ${e === "buscando" || e === "" ? `<div class="rd-barra" style="width:200px;height:6px;border-radius:6px;background:#E3EAF1;overflow:hidden"><i style="display:block;height:100%;width:40%;background:#33B1E4;animation:gpsBarra 1.2s ease-in-out infinite alternate"></i></div>`
+          : `<button id="gpsReintentar" class="btn-primary w-full" style="max-width:320px">Volver a intentar</button>`}
+        <button id="gpsSalir" class="text-sm font-semibold mt-4" style="color:var(--danger)">Salir (${escA(state.operario)})</button>
+        <style>@keyframes gpsBarra{from{transform:translateX(0)}to{transform:translateX(150%)}} @media (prefers-reduced-motion: reduce){#app i{animation:none}}</style>
+      </div>`;
+    const r = document.getElementById("gpsReintentar"); if (r) r.onclick = pedirGps;
+    document.getElementById("gpsSalir").onclick = () => {
+      localStorage.removeItem("gpfo_operario"); localStorage.removeItem("ecrf_sesion"); sessionStorage.removeItem("ecrf_form");
+      state.operario = null; state.form = null; state.rd = false; state.admin = false; state.vista = null; state.pinBuffer = ""; render();
+    };
   }
 
   /* ---------------- PLANIFICADOR DE RUTAS ---------------- */
@@ -3466,7 +3636,7 @@
   function renderPlanificador() {
     const todas = paradasPlan();
     const con = todas.filter(p => p.lat != null && p.lon != null), sin = todas.filter(p => p.lat == null || p.lon == null);
-    const yo = state.coords && state.coords.lat != null ? state.coords : null;
+    const yo = state.coords && state.coords.lat != null ? state.coords : state.gpsUltimo || null;
     let total = 0; con.forEach((p, i) => { if (i) total += distKm(con[i - 1], p); else if (yo) total += distKm(yo, p); });
     const tramos = []; for (let i = 0; i < con.length; i += PARADAS_TRAMO) tramos.push(con.slice(i, i + PARADAS_TRAMO));
     const q = state.plQuery || "", r = q.length === 7 ? (NIS_REMOTO[q] || nisLocal(q)) : null, est = q.length === 7 ? estadoBusqueda(q) : "";
@@ -3831,6 +4001,19 @@
       .rd-dato small{display:block;font-size:11px;color:var(--ink-soft);font-weight:700;text-transform:uppercase;letter-spacing:.03em}
       .rd-err{color:var(--danger);font-size:13px;font-weight:600;margin-top:6px}
       .btn-primary:disabled{opacity:.5}
+      .mn-pop{font:14px Roboto,Arial,sans-serif;color:#0F1B2D}
+      .mn-pop-tit{font-weight:800;font-size:16px;color:#03204C;margin-bottom:6px}.mn-pop-tit span{font-size:12px;font-weight:700;color:#12613B;background:#DDF3E7;border-radius:6px;padding:2px 6px;margin-left:4px}
+      .mn-pop dl{display:grid;grid-template-columns:auto 1fr;gap:3px 10px;margin:0 0 8px}.mn-pop dt{color:#4A5A6E;font-size:12px;font-weight:700}.mn-pop dd{margin:0;font-weight:600}
+      .mn-pop-at{display:grid;gap:5px}.mn-pop-at button{background:#0B5FA5;color:#fff;border-radius:9px;padding:8px 10px;font-weight:700;font-size:13px;text-align:left}
+      .mn-pop-ficha{margin-top:8px;color:#0B5FA5;font-weight:700;font-size:13px}
+      .mn-atajos{display:grid;gap:8px;grid-template-columns:repeat(3,minmax(0,1fr))}
+      .mnAtajo{display:flex;flex-direction:column;align-items:center;gap:6px;text-align:center;border:1.5px solid #7CCBEA;background:#E1F3FB;color:#03204C;border-radius:12px;padding:10px 6px;font-weight:700;font-size:12px;line-height:1.2}
+      .mnAtajo span svg{width:24px;height:24px}
+      .mn-cerca-lista{display:grid;gap:6px;margin-top:8px;max-height:340px;overflow:auto}
+      .mn-cerca-item{display:flex;gap:10px;align-items:center;text-align:left;border:1px solid var(--line);border-radius:12px;padding:8px 10px;background:#fff;width:100%}
+      .mn-cerca-item[aria-pressed="true"]{border-color:#7CCBEA;background:#E1F3FB}
+      .mn-cerca-item b{display:block;font-size:14px}.mn-cerca-item small{display:block;font-size:12px;color:var(--ink-soft)}
+      .mn-m{flex:0 0 52px;text-align:center;font-weight:800;font-size:13px;color:#12613B;background:#DDF3E7;border-radius:8px;padding:4px 0;font-variant-numeric:tabular-nums}
       .pl-lista{display:grid;gap:8px}
       .pl-item{display:flex;gap:10px;align-items:flex-start;background:#fff;border:1px solid var(--line);border-radius:14px;padding:10px}
       .pl-num{width:30px;height:30px;border-radius:50%;color:#fff;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:13px;flex:0 0 30px}
