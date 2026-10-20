@@ -152,6 +152,32 @@
                border: 1.5px solid var(--line); border-radius: 18px; padding: 14px; margin-bottom: 12px; }
   .form-card:not(:disabled):active { transform: scale(.99); }
   .form-card:disabled { opacity: .78; }
+  .menu-grupo { font-size: 12px; font-weight: 800; text-transform: uppercase; letter-spacing: .06em; color: #5B6B7F; margin: 18px 4px 8px; }
+  .menu-grupo:first-child { margin-top: 4px; }
+  /* Barra lateral (solo PC) */
+  .lat { position: fixed; top: 0; bottom: 0; left: 0; width: 280px; background: #fff; border-right: 1px solid var(--line); z-index: 60; display: none; flex-direction: column; overflow-y: auto; }
+  @media (min-width: 1024px) { body.con-lat { padding-left: 280px; } body.con-lat .lat { display: flex; } }
+  .lat-marca { display: flex; align-items: center; gap: 10px; padding: calc(14px + env(safe-area-inset-top,0px)) 16px 14px; background: var(--brand-dark); color: #fff; }
+  .lat-marca b { display: block; font-size: 17px; font-weight: 900; line-height: 1.1; }
+  .lat-marca small { display: block; font-size: 11px; color: #C9D8EA; }
+  .lat-inicio { display: block; width: calc(100% - 24px); margin: 12px 12px 4px; text-align: left; border: 1px solid var(--line); border-radius: 12px; padding: 10px 12px; background: #F6F9FC; }
+  .lat-inicio span { display: block; font-weight: 800; font-size: 14px; color: var(--brand-dark); }
+  .lat-inicio small { font-size: 11px; color: var(--ink-soft); }
+  .lat-inicio[aria-current="true"] { border-color: #7CCBEA; background: #E1F3FB; }
+  .lat-grupos { padding: 6px 12px 12px; display: grid; gap: 14px; flex: 1; align-content: start; }
+  .lat-gtit { font-size: 11px; font-weight: 800; color: #8A97A8; text-transform: uppercase; letter-spacing: .07em; padding: 0 6px; margin-bottom: 6px; }
+  .lat-item { width: 100%; display: flex; align-items: flex-start; gap: 10px; padding: 8px 10px; border-radius: 12px; text-align: left; color: var(--ink); background: transparent; border: 0; }
+  .lat-item:hover { background: #F1F5F9; }
+  .lat-item:focus-visible, .lat-inicio:focus-visible { outline: 3px solid #33B1E4; outline-offset: 1px; }
+  .lat-item[aria-current="true"] { background: #00639E; color: #fff; box-shadow: 0 2px 6px rgba(0,99,158,.25); }
+  .lat-item b { display: block; font-size: 13px; font-weight: 800; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .lat-item small { display: block; font-size: 11px; color: var(--ink-soft); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .lat-item[aria-current="true"] small { color: #CFE8F7; }
+  .lat-ico { width: 32px; height: 32px; border-radius: 9px; display: grid; place-items: center; flex: 0 0 32px; color: var(--brand-dark); }
+  .lat-ico svg { width: 18px; height: 18px; }
+  .lat-item[aria-current="true"] .lat-ico { background: rgba(255,255,255,.2) !important; color: #fff; }
+  .lat-pie { display: flex; align-items: center; justify-content: space-between; padding: 12px 16px calc(12px + env(safe-area-inset-bottom,0px)); border-top: 1px solid var(--line); font-size: 12px; color: var(--ink-soft); background: #F8FAFC; }
+  .lat-pie button { color: var(--danger); font-weight: 700; }
   .form-ico { width: 64px; height: 64px; border-radius: 16px; background: #E1F3FB; display: grid; place-items: center; flex-shrink: 0; }
   .preview-overlay {
     position: fixed; inset: 0; background: rgba(0,0,0,.92); z-index: 60;
@@ -375,6 +401,11 @@
     try {
       const c = await apiGet({ action: "config" });
       if (c.usuarios && c.usuarios.length) localStorage.setItem("ecrf_usuarios", JSON.stringify(c.usuarios.map(u => ({ name: u.nombre, hash: u.hash, rol: u.rol }))));
+      if (Array.isArray(c.modulos) && c.modulos.length) {
+        const antes = localStorage.getItem("ecrf_modulos"), ahora = JSON.stringify(c.modulos);
+        localStorage.setItem("ecrf_modulos", ahora);
+        if (antes !== ahora && state.operario && !state.form && !state.admin) render();   // el menú se actualiza solo
+      }
       let local = null; try { local = await IDB.kget("suministros"); } catch (e) {}
       if (c.suministrosVersion && (!local || local.v !== c.suministrosVersion)) {
         const s = await apiGet({ action: "suministros" });
@@ -530,7 +561,16 @@
     pintarEstadoSync();
   }
 
-  const esSupervisor = () => { const u = listaUsuarios().find(o => o.name === state.operario); return u ? u.rol === "SUPERVISOR" : /supervisor/i.test(state.operario || ""); };
+  // Roles: OPERARIO < SUPERVISOR < ADMINISTRADOR (el administrador ve y puede todo lo del supervisor, y además el panel)
+  function rolDe(nombre) {
+    const u = listaUsuarios().find(o => o.name === nombre);
+    const r = String(u ? u.rol : "").toUpperCase();
+    if (/^ADMIN/.test(r)) return "ADMINISTRADOR";
+    if (/^SUPERV/.test(r) || (!u && /supervisor/i.test(nombre || ""))) return "SUPERVISOR";
+    return "OPERARIO";
+  }
+  const esAdmin = () => rolDe(state.operario) === "ADMINISTRADOR";
+  const esSupervisor = () => rolDe(state.operario) !== "OPERARIO";
   function misPendientes() {
     const hoy = aplicarOrden(state.pendientes);   // orden de "Ordenar por cercanía" si se usó; si no, por fecha de carga
     const delForm = hoy.filter(p => formDe(p) === (state.form || "GPFO0381"));
@@ -653,6 +693,8 @@
     if (found) {
       state.operario = found.name;
       localStorage.setItem("gpfo_operario", found.name);
+      try { localStorage.removeItem("ecrf_sesion"); } catch (e) {}
+      if (apiListo() && enLinea()) obtenerSesion(ficha).catch(() => {});   // sesión firmada para el reporte diario
       saludar(found.name);
       loadRegistros().then(render);
     } else {
@@ -1038,7 +1080,14 @@
 
   /* ================= RENDER ================= */
   function render() {
+    renderPantalla();
+    if (typeof pintarLateral === "function") try { pintarLateral(); } catch (e) {}
+  }
+  function renderPantalla() {
     if (!state.operario) renderLogin();
+    else if (state.admin) return renderAdmin(), armarAtras();
+    else if (state.rd) return renderReporteDiario(), armarAtras();
+    else if (state.vista) return renderVistaGis(), armarAtras();
     else if (!state.form) renderMenu();
     else renderMain();
     renderPreviewOverlay();
@@ -1062,6 +1111,13 @@
     else if (document.getElementById("panelPdf")) cerrarPanelPdf();
     else if (state.previewIdx !== null && state.previewIdx !== undefined) { state.previewIdx = null; render(); }
     else if (state.editId) { state.editId = null; renderLista(); }
+    else if (document.getElementById("admFicha")) document.getElementById("admFicha").querySelector("#admFichaNo").click();
+    else if (state.admin) salirAdmin();
+    else if (document.getElementById("rdDetalle")) document.getElementById("rdDetalle").remove();
+    else if (state.rd && state.rdCierreId) { state.rdCierreId = null; state.rdCierreRep = null; renderRdHoy(); }
+    else if (state.rd) salirReporteDiario();
+    else if (document.getElementById("labDetalle")) document.getElementById("labDetalle").remove();
+    else if (state.vista) salirVistaGis();
     else if (state.form) volverAlMenu();
     else {                                                               // ya está en el menú principal
       toast("Presiona atrás otra vez para salir");
@@ -1273,7 +1329,7 @@
     `;
     document.getElementById("btnInicio").onclick = volverAlMenu;
     document.getElementById("btnSalir").onclick = () => {
-      localStorage.removeItem("gpfo_operario"); sessionStorage.removeItem("ecrf_form"); state.form = null;
+      localStorage.removeItem("gpfo_operario"); localStorage.removeItem("ecrf_sesion"); sessionStorage.removeItem("ecrf_form"); state.form = null;
       state.operario = null; state.pinBuffer = "";
       render();
     };
@@ -1581,7 +1637,7 @@
     const lista = misPendientes();
     const est = estadoBusqueda(q);
     const noEsta = q.length >= 6 && !nisLocal(q) && !["buscando","pendiente"].includes(est);
-    const para = state.rutaPara || (esSupervisor() ? (OPERARIOS.find(o => o.rol !== "SUPERVISOR") || {}).name : state.operario);
+    const para = state.rutaPara || (esSupervisor() ? (OPERARIOS.find(o => rolDe(o.name) === "OPERARIO") || {}).name : state.operario);
     c.innerHTML = `
       <div class="card p-4 mb-4">
         <div class="font-bold mb-1">Preparar ruta</div>
@@ -1600,7 +1656,7 @@
           ${esSupervisor() ? `
             <label class="text-xs font-semibold block mb-1 mt-3" for="rutaPara" style="color:var(--ink-soft)">Asignar a</label>
             <select id="rutaPara" class="input">
-              ${OPERARIOS.filter(o => o.rol !== "SUPERVISOR").map(o => `<option ${o.name === para ? "selected" : ""}>${escA(o.name)}</option>`).join("")}
+              ${OPERARIOS.filter(o => rolDe(o.name) === "OPERARIO").map(o => `<option ${o.name === para ? "selected" : ""}>${escA(o.name)}</option>`).join("")}
             </select>` : ""}
           <button id="rutaAgregar" class="btn-primary w-full mt-4">Agregar a la ruta</button>
         ` : `
@@ -2094,6 +2150,7 @@
 
   function renderMenu() {
     const app = document.getElementById("app");
+    app.classList.add("max-w-md");
     app.innerHTML = `
       <div class="menu-hero">
         <svg class="menu-paisaje" viewBox="0 0 400 220" preserveAspectRatio="xMidYMax slice" aria-hidden="true">
@@ -2123,48 +2180,902 @@
           <span class="menu-elige-num" aria-hidden="true">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M9 11l3 3 8-8"/><path d="M20 12v7a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h9"/></svg>
           </span>
-          Elige el formulario que vas a registrar
+          ${esAdmin() ? "Elige qué vas a hacer" : "Elige el formulario que vas a registrar"}
         </div>
       </div>
       <div class="px-4 pt-2 pb-8">
-        <button class="form-card" data-form="GPFO0381">
-          <span class="form-ico">${mano(50, false)}</span>
-          <span class="flex-1 min-w-0"><b class="block text-lg leading-tight">Toma de presiones</b>
-            <span class="text-sm" style="color:var(--ink-soft)">GPFO0381 · conexión domiciliaria</span></span>
-          <span class="text-sm font-semibold" style="color:var(--brand)">${(n => n ? n + " hechos" : "Abrir")(regsVisibles().filter(r => formDe(r) === "GPFO0381").length)}</span>
-        </button>
-        <button class="form-card" data-form="GPFO0405">
-          <span class="form-ico">${ICO_0405}</span>
-          <span class="flex-1 min-w-0"><b class="block text-lg leading-tight">Verificación de reparación</b>
-            <span class="text-sm" style="color:var(--ink-soft)">GPFO0405 · fugas no visibles</span></span>
-          <span class="text-sm font-semibold" style="color:var(--brand)">${(n => n ? n + " hechos" : "Abrir")(regsVisibles().filter(r => formDe(r) === "GPFO0405").length)}</span>
-        </button>
-        <button class="form-card" data-form="GPFO0416">
-          <span class="form-ico">${ICO_0416}</span>
-          <span class="flex-1 min-w-0"><b class="block text-lg leading-tight">Verificación por muestreo</b>
-            <span class="text-sm" style="color:var(--ink-soft)">GPFO0416 · fugas detectadas</span></span>
-          <span class="text-sm font-semibold" style="color:var(--brand)">${(n => n ? n + " hechos" : "Abrir")(regsVisibles().filter(r => formDe(r) === "GPFO0416").length)}</span>
-        </button>
-        <button class="form-card" id="btnPdf" style="background:#E1F3FB;border-color:#7CCBEA">
-          <span class="form-ico" style="display:flex;align-items:center;justify-content:center;color:var(--brand-dark)">
-            <svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><path d="M12 18v-6"/><path d="M9 15l3 3 3-3"/></svg>
-          </span>
-          <span class="flex-1 min-w-0"><b class="block text-lg leading-tight">Generar mis PDF</b>
-            <span class="text-sm" style="color:var(--ink-soft)">Formularios del mes · GPFO0416 por quincena</span></span>
-        </button>
+        ${(() => {
+          if (!esAdmin()) {                        // operarios y supervisores: el menú de siempre, sin grupos
+            const mods = modulosMenu();
+            if (!mods.length) return `<div class="card p-4 text-sm text-center" style="color:var(--ink-soft)">No tienes módulos habilitados. Consulta con el administrador.</div>`;
+            return mods.map(m => tarjetaModulo(m)).join("");
+          }
+          const grupos = navAgrupado();
+          if (!grupos.length) return `<div class="card p-4 text-sm text-center" style="color:var(--ink-soft)">No tienes módulos habilitados. Consulta con el administrador.</div>`;
+          return grupos.map(g => `<p class="menu-grupo">${escA(g.nombre)}</p>` + g.items.map(m => m.id === "ADMIN" ? `
+        <button class="form-card" id="btnAdmin" style="background:#03204C;border-color:#03204C;color:#fff">
+          <span class="form-ico" style="display:flex;align-items:center;justify-content:center;background:rgba(255,255,255,.12);color:#fff">${ICO_ADMIN}</span>
+          <span class="flex-1 min-w-0"><b class="block text-lg leading-tight">Panel de administración</b>
+            <span class="text-sm" style="color:#C9D8EA">Módulos, charlas, catálogo y vehículo · solo administradores</span></span>
+        </button>` : tarjetaModulo(m)).join("")).join("");
+        })()}
         <div class="mt-2 flex justify-center"><span id="syncBadge"></span></div>
       </div>`;
-    document.getElementById("btnPdf").onclick = () => abrirPanelPdf();
-    document.querySelectorAll(".form-card[data-form]:not(:disabled)").forEach(b => b.onclick = () => {
-      state.form = b.dataset.form; sessionStorage.setItem("ecrf_form", state.form); state.tab = "nuevo";
-      resetForm(); state.editId = null; state.rutaSel = null; state.rutaQuery = "";
-      render(); window.scrollTo(0, 0);
-    });
+    document.querySelectorAll("[data-accion]").forEach(b => b.onclick = () => { const m = MODULOS_APP[b.dataset.accion]; if (m && m.abrir) m.abrir(); });
+    const bAdm = document.getElementById("btnAdmin");
+    if (bAdm) bAdm.onclick = () => abrirModulo("ADMIN");
+    document.querySelectorAll("#app .form-card[data-form]:not(:disabled)").forEach(b => b.onclick = () => abrirModulo(b.dataset.form));
     document.getElementById("btnSalir").onclick = () => {
-      localStorage.removeItem("gpfo_operario"); sessionStorage.removeItem("ecrf_form");
-      state.operario = null; state.form = null; state.pinBuffer = ""; render();
+      localStorage.removeItem("gpfo_operario"); localStorage.removeItem("ecrf_sesion"); sessionStorage.removeItem("ecrf_form");
+      state.operario = null; state.form = null; state.rd = false; state.pinBuffer = ""; render();
     };
     pintarEstadoSync();
+  }
+
+
+  /* ================= MÓDULOS DEL MENÚ =================
+     Cada módulo que existe en la app se registra aquí. Desde el Panel de administración se decide si está activo,
+     su orden, su nombre y para qué roles se ve. Para agregar uno nuevo en el futuro: se suma aquí y aparece en el panel. */
+  const ICO_PDF = `<svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><path d="M12 18v-6"/><path d="M9 15l3 3 3-3"/></svg>`;
+  const ICO_ADMIN = `<svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>`;
+  const ROLES = ["OPERARIO", "SUPERVISOR", "ADMINISTRADOR"];
+  const ROL_TXT = { OPERARIO: "Operario", SUPERVISOR: "Supervisor", ADMINISTRADOR: "Administrador" };
+  const MODULOS_APP = {
+    GPFO0381: { tipo: "form", ico: () => mano(50, false), defecto: { titulo: "Toma de presiones", descripcion: "GPFO0381 · conexión domiciliaria" } },
+    GPFO0405: { tipo: "form", ico: () => ICO_0405, defecto: { titulo: "Verificación de reparación", descripcion: "GPFO0405 · fugas no visibles" } },
+    GPFO0416: { tipo: "form", ico: () => ICO_0416, defecto: { titulo: "Verificación por muestreo", descripcion: "GPFO0416 · fugas detectadas" } },
+    PDF: { tipo: "accion", ico: () => ICO_PDF, abrir: () => abrirPanelPdf(), estilo: "background:#E1F3FB;border-color:#7CCBEA",
+           defecto: { titulo: "Generar mis PDF", descripcion: "Formularios del mes · GPFO0416 por quincena" } },
+    REPORTE_DIARIO: { tipo: "vista", soloAdmin: true, ico: () => ICO_RD, abrir: () => abrirReporteDiario(), estilo: "background:#EAF6EE;border-color:#9BD3B0",
+           defecto: { titulo: "Reporte diario de actividades", descripcion: "Charla de seguridad, plan del día y cierre" } },
+    MAPA_NIS: { tipo: "vista", soloAdmin: true, ico: () => ICO_MAPA, abrir: () => abrirModulo("MAPA_NIS"), estilo: "background:#E6F6EF;border-color:#9BD3B0",
+           defecto: { titulo: "Mapa de NIS", descripcion: "Ubica un NIS de la base en el mapa" } },
+    PLANIFICADOR_RUTAS: { tipo: "vista", soloAdmin: true, ico: () => ICO_RUTA, abrir: () => abrirModulo("PLANIFICADOR_RUTAS"), estilo: "background:#E6F6EF;border-color:#9BD3B0",
+           defecto: { titulo: "Planificador de rutas", descripcion: "Ordena tus NIS por cercanía" } },
+    LABORATORIO_ECRF: { tipo: "vista", soloAdmin: true, ico: () => ICO_LAB, abrir: () => abrirModulo("LABORATORIO_ECRF"), estilo: "background:#E6F6EF;border-color:#9BD3B0",
+           defecto: { titulo: "Laboratorio ECRF", descripcion: "Ficha del vehículo y recorridos" } }
+  };
+  function modulosConfig() {
+    let c = null; try { c = JSON.parse(localStorage.getItem("ecrf_modulos") || "null"); } catch (e) {}
+    // los módulos nuevos empiezan solo para administradores (igual que en el servidor) hasta que el panel diga otra cosa
+    const base = Object.keys(MODULOS_APP).map((id, i) => ({ id, ...MODULOS_APP[id].defecto, activo: true, orden: i + 1, roles: MODULOS_APP[id].soloAdmin ? ["ADMINISTRADOR"] : ROLES.slice() }));
+    if (!Array.isArray(c) || !c.length) return base;
+    const porId = Object.fromEntries(c.map(m => [m.id, m]));
+    return base.map(b => porId[b.id] ? { ...b, ...porId[b.id], roles: (porId[b.id].roles || []).slice() } : { ...b, orden: 900 + b.orden })
+      .concat(c.filter(m => !MODULOS_APP[m.id]).map(m => ({ ...m, roles: (m.roles || []).slice() })))   // módulos de una versión futura
+      .sort((a, b) => (a.orden || 0) - (b.orden || 0));
+  }
+  function modulosMenu() {
+    const r = rolDe(state.operario);
+    return modulosConfig().filter(m => MODULOS_APP[m.id] && m.activo !== false && (m.roles || []).includes(r));
+  }
+  function tarjetaModulo(m) {
+    const def = MODULOS_APP[m.id];
+    const n = def.tipo === "form" ? regsVisibles().filter(r => formDe(r) === m.id).length : 0;
+    const icono = def.tipo === "form" && m.id !== "GPFO0381" ? def.ico() : def.ico();
+    return `
+        <button class="form-card" ${def.tipo === "form" ? `data-form="${m.id}"` : `data-accion="${m.id}"`} ${def.estilo ? `style="${def.estilo}"` : ""}>
+          <span class="form-ico" ${def.tipo !== "form" ? 'style="display:flex;align-items:center;justify-content:center;color:var(--brand-dark)"' : ""}>${icono}</span>
+          <span class="flex-1 min-w-0"><b class="block text-lg leading-tight">${escA(m.titulo || def.defecto.titulo)}</b>
+            <span class="text-sm" style="color:var(--ink-soft)">${escA(m.descripcion || "")}</span></span>
+          ${def.tipo === "form" ? `<span class="text-sm font-semibold" style="color:var(--brand)">${n ? n + " hechos" : "Abrir"}</span>` : ""}
+        </button>`;
+  }
+
+  /* ================= PANEL DE ADMINISTRACIÓN =================
+     Solo para ADMINISTRADOR. En PC se ve como tabla con vista previa al lado; en celular, como tarjetas. */
+  function renderAdmin() {
+    if (!esAdmin()) { state.admin = false; return render(); }
+    const app = document.getElementById("app");
+    app.classList.remove("max-w-md");
+    if (!state.adminMods) { state.adminMods = modulosConfig().map((m, i) => ({ ...m, orden: i + 1 })); state.adminDirty = false; }
+    const mods = state.adminMods;
+    const rolVista = state.adminVista || "OPERARIO";
+    const tab = state.adminTab || "modulos";
+    const chipRol = (m, r, i) => `<button type="button" class="adm-rol" data-i="${i}" data-r="${r}" aria-pressed="${(m.roles || []).includes(r)}">${ROL_TXT[r]}</button>`;
+    const ordenGrupo = m => GRUPOS_NAV.findIndex(g => g.id === (GRUPO_DE[m.id] || "FORM"));   // la vista previa sigue los grupos del menú
+    const vista = mods.filter(m => MODULOS_APP[m.id] && m.activo !== false && (m.roles || []).includes(rolVista))
+      .map((m, i) => ({ m, i })).sort((a, b) => ordenGrupo(a.m) - ordenGrupo(b.m) || a.i - b.i).map(x => x.m);
+    app.innerHTML = `
+      <style>
+        .adm-top{background:#03204C;color:#fff;padding:calc(14px + env(safe-area-inset-top,0px)) 16px 16px}
+        .adm-top-in{max-width:1200px;margin:0 auto;display:flex;align-items:center;gap:12px}
+        .adm-wrap{max-width:1200px;margin:0 auto;padding:16px 16px 120px;width:100%}
+        .adm-tabs{display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap}
+        .adm-tab{border-radius:999px;padding:8px 16px;font-weight:700;font-size:14px;border:1.5px solid var(--line);background:#fff;color:var(--ink)}
+        .adm-tab[aria-current="true"]{background:var(--brand-dark);border-color:var(--brand-dark);color:#fff}
+        .adm-tab:disabled{opacity:.55}
+        .adm-grid{display:grid;gap:18px}
+        .adm-head{display:none}
+        .adm-mod{background:#fff;border:1px solid var(--line);border-radius:16px;padding:14px;margin-bottom:12px;display:grid;gap:10px;
+          grid-template-columns:auto 1fr auto;grid-template-areas:"ord ico act" "tit tit tit" "des des des" "rol rol rol"}
+        .adm-mod.off{background:#F6F8FA}
+        .adm-ord{grid-area:ord;display:flex;gap:4px;align-items:center}
+        .adm-ico{grid-area:ico;display:flex;align-items:center;gap:10px;min-width:0}
+        .adm-ico .form-ico{width:46px;height:46px;flex:0 0 46px}
+        .adm-act{grid-area:act;display:flex;align-items:center}
+        .adm-tit{grid-area:tit}.adm-des{grid-area:des}.adm-roles{grid-area:rol;display:flex;gap:6px;flex-wrap:wrap}
+        .adm-flecha{width:34px;height:34px;border-radius:10px;border:1.5px solid var(--line);background:#fff;font-weight:800;color:var(--ink)}
+        .adm-flecha:disabled{opacity:.35}
+        .adm-num{font-weight:800;color:var(--brand-dark);min-width:22px;text-align:center}
+        .adm-rol{border-radius:999px;padding:7px 12px;font-size:13px;font-weight:700;border:1.5px solid var(--line);background:#fff;color:var(--ink-soft)}
+        .adm-rol[aria-pressed="true"]{background:#E1F3FB;border-color:#7CCBEA;color:#0B4A6B}
+        .adm-sw{position:relative;width:52px;height:30px;border-radius:999px;border:0;background:#C9D3DE;transition:background .15s}
+        .adm-sw::after{content:"";position:absolute;top:3px;left:3px;width:24px;height:24px;border-radius:50%;background:#fff;box-shadow:0 1px 3px rgba(0,0,0,.3);transition:left .15s}
+        .adm-sw[aria-checked="true"]{background:#1E8E5A}.adm-sw[aria-checked="true"]::after{left:25px}
+        .adm-lbl{font-size:11px;font-weight:700;color:var(--ink-soft);text-transform:uppercase;letter-spacing:.04em;margin-bottom:3px}
+        .adm-prev{background:#fff;border:1px solid var(--line);border-radius:16px;padding:14px;align-self:start}
+        .adm-prev .form-card{pointer-events:none;margin-bottom:8px}
+        .adm-bar{position:fixed;left:0;right:0;bottom:0;background:#fff;border-top:1px solid var(--line);padding:12px 16px calc(12px + env(safe-area-inset-bottom,0px));z-index:40}
+        .adm-bar-in{max-width:1200px;margin:0 auto;display:flex;gap:10px;align-items:center}
+        @media (min-width: 900px){
+          .adm-grid{grid-template-columns:minmax(0,1fr) 340px}
+          .adm-prev{position:sticky;top:16px}
+          .adm-mod{grid-template-columns:108px 170px minmax(0,1fr) minmax(0,1.2fr) 64px;column-gap:14px;row-gap:8px;
+            grid-template-areas:"ord ico tit des act" "ord ico rol rol act";align-items:center;margin-bottom:10px;padding:12px 16px}
+          .adm-act{justify-content:center}
+        }
+      </style>
+      <div class="adm-top"><div class="adm-top-in">
+        <button id="admVolver" aria-label="Volver al menú" style="background:none;border:0;color:#fff;font-size:26px;width:40px;height:40px">‹</button>
+        <div style="flex:1;min-width:0"><div style="font-size:12px;color:#8FD3F0;font-weight:700">ECRF CAMPO · ${escA(state.operario)}</div>
+          <div style="font-size:22px;font-weight:800;line-height:1.15">Panel de administración</div></div>
+        <span class="logo-chip"><img src="${LOGO_SEDAPAL}" alt="SEDAPAL"></span>
+      </div></div>
+      <div class="adm-wrap">
+        <div class="adm-tabs">
+          <button class="adm-tab" data-admtab="modulos" aria-current="${tab === "modulos"}">Módulos del menú</button>
+          <button class="adm-tab" data-admtab="charlas" aria-current="${tab === "charlas"}">Charlas de seguridad</button>
+          <button class="adm-tab" data-admtab="catalogo" aria-current="${tab === "catalogo"}">Catálogo de actividades</button>
+          <button class="adm-tab" data-admtab="vehiculo" aria-current="${tab === "vehiculo"}">Laboratorio (vehículo)</button>
+          <button class="adm-tab" disabled title="Próximamente">Usuarios · próximamente</button>
+        </div>
+        ${tab === "charlas" ? `<div class="text-sm mb-3" style="color:var(--ink-soft)">La charla <b>vigente</b> es la que verán todos los trabajadores al iniciar su reporte diario. Solo puede haber una vigente.</div>` + htmlAdminCharlas()
+          : tab === "catalogo" ? `<div class="text-sm mb-3" style="color:var(--ink-soft)">Actividades que los trabajadores eligen al planificar su día. No se borran: se desactivan.</div>` + htmlAdminCatalogo()
+          : tab === "vehiculo" ? `<div class="text-sm mb-3" style="color:var(--ink-soft)">Ficha del vehículo laboratorio que ven todos en «Laboratorio ECRF». Las fechas de SOAT, revisión técnica y mantenimiento generan las alertas de vencimiento.</div>` + htmlAdminVehiculo() : `
+        <div class="text-sm mb-3" style="color:var(--ink-soft)">Activa o desactiva cada módulo, cambia su orden y su nombre, y elige qué roles lo ven en el menú. Los cambios llegan a todos los celulares la próxima vez que abran la app con internet.</div>
+        <div class="adm-grid">
+          <div>
+            ${mods.map((m, i) => {
+              const def = MODULOS_APP[m.id];
+              return `
+              <div class="adm-mod ${m.activo === false ? "off" : ""}">
+                <div class="adm-ord">
+                  <button class="adm-flecha adm-sube" data-i="${i}" aria-label="Subir" ${i === 0 ? "disabled" : ""}>↑</button>
+                  <button class="adm-flecha adm-baja" data-i="${i}" aria-label="Bajar" ${i === mods.length - 1 ? "disabled" : ""}>↓</button>
+                  <span class="adm-num">${i + 1}</span>
+                </div>
+                <div class="adm-ico">
+                  ${def ? `<span class="form-ico" ${def.tipo !== "form" ? 'style="display:flex;align-items:center;justify-content:center;color:var(--brand-dark)"' : ""}>${def.ico()}</span>` : `<span class="form-ico" style="display:flex;align-items:center;justify-content:center">🧩</span>`}
+                  <div class="min-w-0"><div class="text-xs font-bold" style="color:var(--brand)">${escA(m.id)}</div>
+                    <div class="text-xs" style="color:var(--ink-soft)">${def ? (def.tipo === "form" ? "Formulario" : def.tipo === "vista" ? "Módulo" : "Herramienta") : "Versión futura"}</div></div>
+                </div>
+                <div class="adm-act"><button class="adm-sw" role="switch" data-i="${i}" aria-checked="${m.activo !== false}" aria-label="Activo"></button></div>
+                <div class="adm-tit"><div class="adm-lbl">Nombre en el menú</div>
+                  <input class="input adm-in" data-i="${i}" data-k="titulo" maxlength="60" value="${escA(m.titulo || "")}"></div>
+                <div class="adm-des"><div class="adm-lbl">Descripción</div>
+                  <input class="input adm-in" data-i="${i}" data-k="descripcion" maxlength="120" value="${escA(m.descripcion || "")}"></div>
+                <div class="adm-roles"><span class="adm-lbl" style="align-self:center;margin:0 4px 0 0">Lo ven:</span>${ROLES.map(r => chipRol(m, r, i)).join("")}</div>
+              </div>`; }).join("")}
+          </div>
+          <div class="adm-prev">
+            <div class="font-bold mb-1">Vista previa del menú</div>
+            <div class="text-xs mb-2" style="color:var(--ink-soft)">Así lo verá cada rol:</div>
+            <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px">
+              ${ROLES.map(r => `<button type="button" class="adm-rol adm-ver" data-r="${r}" aria-pressed="${r === rolVista}">${ROL_TXT[r]}</button>`).join("")}
+            </div>
+            ${vista.length ? vista.map(m => tarjetaModulo(m)).join("") : `<div class="text-sm p-3 rounded-lg" style="background:#FFF1C7;color:#6B4A00">Este rol no verá ningún módulo.</div>`}
+          </div>
+        </div>`}
+      </div>
+      ${tab !== "modulos" ? "" : `<div class="adm-bar"><div class="adm-bar-in">
+        <div style="flex:1;font-size:13px;color:${state.adminDirty ? "#6B4A00" : "var(--ink-soft)"}">${state.adminDirty ? "● Hay cambios sin guardar" : "Sin cambios"}</div>
+        <button id="admDeshacer" class="btn-ghost" style="width:auto;padding:0 16px" ${state.adminDirty ? "" : "disabled"}>Deshacer</button>
+        <button id="admGuardar" class="btn-primary" style="width:auto;padding:0 22px" ${state.adminDirty ? "" : "disabled"}>Guardar cambios</button>
+      </div></div>`}`;
+    app.querySelectorAll("[data-admtab]").forEach(b => b.onclick = () => {
+      if (state.adminTab === b.dataset.admtab) return;
+      if (b.dataset.admtab !== "modulos" && state.adminDirty) { toast("Guarda o deshaz los cambios de módulos primero", true); return; }
+      state.adminTab = b.dataset.admtab; if (state.adminTab !== "modulos") state.adminRd = null;
+      if (state.adminTab === "vehiculo") { state.labDatos = null; state.adminVeh = null; }
+      renderAdmin(); window.scrollTo(0, 0);
+    });
+    if (tab === "vehiculo") { document.getElementById("admVolver").onclick = salirAdmin; activarAdminVehiculo(app); return; }
+    if (tab !== "modulos") { activarAdminRd(app); return; }
+
+    const cambio = () => { state.adminDirty = true; const y = window.scrollY; renderAdmin(); window.scrollTo(0, y); };
+    document.getElementById("admVolver").onclick = salirAdmin;
+    app.querySelectorAll(".adm-sube").forEach(b => b.onclick = () => { const i = +b.dataset.i; [mods[i - 1], mods[i]] = [mods[i], mods[i - 1]]; cambio(); });
+    app.querySelectorAll(".adm-baja").forEach(b => b.onclick = () => { const i = +b.dataset.i; [mods[i + 1], mods[i]] = [mods[i], mods[i + 1]]; cambio(); });
+    app.querySelectorAll(".adm-sw").forEach(b => b.onclick = () => { const m = mods[+b.dataset.i]; m.activo = m.activo === false; cambio(); });
+    app.querySelectorAll(".adm-rol[data-i]").forEach(b => b.onclick = () => {
+      const m = mods[+b.dataset.i], r = b.dataset.r; m.roles = m.roles || [];
+      m.roles = m.roles.includes(r) ? m.roles.filter(x => x !== r) : m.roles.concat(r); cambio();
+    });
+    app.querySelectorAll(".adm-ver").forEach(b => b.onclick = () => { state.adminVista = b.dataset.r; const y = window.scrollY; renderAdmin(); window.scrollTo(0, y); });
+    app.querySelectorAll(".adm-in").forEach(inp => inp.oninput = () => {
+      mods[+inp.dataset.i][inp.dataset.k] = inp.value;
+      if (!state.adminDirty) { state.adminDirty = true; const bar = app.querySelector(".adm-bar-in > div"); if (bar) { bar.textContent = "● Hay cambios sin guardar"; bar.style.color = "#6B4A00"; }
+        app.querySelector("#admGuardar").disabled = false; app.querySelector("#admDeshacer").disabled = false; }
+    });
+    app.querySelectorAll(".adm-in").forEach(inp => inp.onchange = () => { const y = window.scrollY; renderAdmin(); window.scrollTo(0, y); });
+    document.getElementById("admDeshacer").onclick = () => { state.adminMods = null; renderAdmin(); };
+    document.getElementById("admGuardar").onclick = guardarModulosAdmin;
+  }
+  function salirAdmin() {
+    if (state.adminDirty) toast("Se descartaron los cambios sin guardar");
+    state.admin = false; state.adminMods = null; state.adminDirty = false; state.adminTab = "modulos"; state.adminRd = null; state.adminCharlaEd = null;
+    document.getElementById("app").classList.add("max-w-md");
+    render(); window.scrollTo(0, 0);
+  }
+  function pedirFicha(titulo, texto, boton) {
+    return new Promise(ok => {
+      const el = document.createElement("div");
+      el.id = "admFicha";
+      el.style.cssText = "position:fixed;inset:0;z-index:96;background:rgba(3,32,76,.55);display:flex;align-items:center;justify-content:center;padding:16px";
+      el.innerHTML = `<div style="background:#fff;border-radius:18px;padding:18px;width:100%;max-width:360px">
+        <div class="font-bold text-lg mb-1">${escA(titulo || "Confirma con tu ficha")}</div>
+        <div class="text-sm mb-3" style="color:var(--ink-soft)">${escA(texto || "Por seguridad, los cambios del panel se guardan solo con la ficha del administrador.")}</div>
+        <input id="admFichaIn" class="input" type="password" inputmode="numeric" maxlength="5" placeholder="Ficha (5 dígitos)" autocomplete="off">
+        <div style="display:flex;gap:10px;margin-top:14px">
+          <button id="admFichaNo" class="btn-ghost" style="flex:1">Cancelar</button>
+          <button id="admFichaSi" class="btn-primary" style="flex:1">${escA(boton || "Guardar")}</button>
+        </div></div>`;
+      document.body.appendChild(el);
+      const inp = el.querySelector("#admFichaIn"); inp.focus();
+      inp.oninput = () => { inp.value = inp.value.replace(/\D/g, "").slice(0, 5); };
+      const fin = v => { el.remove(); ok(v); };
+      el.querySelector("#admFichaNo").onclick = () => fin(null);
+      el.querySelector("#admFichaSi").onclick = () => fin(inp.value.length === 5 ? inp.value : (toast("La ficha tiene 5 dígitos", true), null));
+      inp.onkeydown = e => { if (e.key === "Enter") el.querySelector("#admFichaSi").click(); };
+    });
+  }
+  async function guardarModulosAdmin() {
+    if (!apiListo() || !enLinea()) { toast("Necesitas internet para guardar", true); return; }
+    const mods = state.adminMods;
+    if (!mods.some(m => MODULOS_APP[m.id] && m.activo !== false && (m.roles || []).includes("OPERARIO")))
+      if (!confirmarSuave("Deja al menos un módulo activo para los operarios")) return;
+    const ficha = await pedirFicha(); if (!ficha) return;
+    const btn = document.getElementById("admGuardar"); if (btn) { btn.disabled = true; btn.textContent = "Guardando…"; }
+    try {
+      const r = await apiPost({ tipo: "modulos", ficha, modulos: mods.map((m, i) => ({ id: m.id, titulo: m.titulo, descripcion: m.descripcion, activo: m.activo !== false, orden: i + 1, roles: m.roles || [] })) });
+      localStorage.setItem("ecrf_modulos", JSON.stringify(r.modulos));
+      state.adminMods = null; state.adminDirty = false;
+      toast("Módulos guardados ✅ Los celulares los verán al abrir la app con internet");
+    } catch (e) {
+      toast(e && e.code === "ficha" ? "Ficha incorrecta" : e && e.code === "permiso" ? "Solo los administradores pueden guardar" : "No se pudo guardar. Revisa tu internet", true);
+    }
+    renderAdmin();
+  }
+  const confirmarSuave = msg => { toast(msg, true); return false; };   // aviso sin diálogo del navegador
+
+
+  /* =====================================================================================
+     MÓDULO «REPORTE DIARIO DE ACTIVIDADES»
+     Mañana: charla de seguridad (YouTube) + actividades planificadas · Tarde: estado de cada actividad y cierre.
+     Todo se guarda en el servidor (hojas RD_*). La identidad sale de una sesión firmada que entrega el servidor
+     tras confirmar la ficha (no del nombre que envía el navegador).
+     ===================================================================================== */
+  const ICO_RD = `<svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="5" y="3" width="14" height="18" rx="2"/><path d="M9 3h6v3H9z"/><path d="M8.5 12l2 2 4.5-4.5"/><path d="M8.5 17h7"/></svg>`;
+  const RD_EST_TXT = { "": "Pendiente de registro", PENDIENTE_REGISTRO: "Pendiente de registro", PENDIENTE_CIERRE: "Pendiente de cierre", CERRADO: "Cerrado" };
+  const RD_EST_COLOR = { "": "#FFF1C7;color:#6B4A00", PENDIENTE_REGISTRO: "#FFF1C7;color:#6B4A00", PENDIENTE_CIERRE: "#E1F3FB;color:#0B4A6B", CERRADO: "#DDF3E7;color:#12613B" };
+  const RD_EJEC_TXT = { EJECUTADA: "Ejecutada", PARCIAL: "Parcialmente ejecutada", NO_EJECUTADA: "No ejecutada" };
+  const RD_VIDEO_TXT = { "": "Sin iniciar", EN_CURSO: "En reproducción", INCOMPLETO: "Incompleto", COMPLETADO: "Completado", ERROR: "Error de reproducción", SIN_CHARLA_CONFIGURADA: "Sin charla configurada" };
+  const horaDe = s => (/\d{2}:\d{2}:\d{2}/.exec(String(s || "")) || [""])[0];
+  const fechaTxt = iso => /^\d{4}-\d{2}-\d{2}$/.test(String(iso || "")) ? String(iso).split("-").reverse().join("/") : String(iso || "");
+  const badgeRd = e => `<span class="badge" style="background:${RD_EST_COLOR[e || ""]}">${RD_EST_TXT[e || ""]}</span>`;
+  const fmtPct = n => n == null || n === "" ? "—" : String(Math.round(Number(n) * 100) / 100).replace(".", ",") + " %";
+  const nuevaClave = () => "k" + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+
+  // ---------- sesión firmada ----------
+  function sesionGuardada() {
+    try { const s = JSON.parse(localStorage.getItem("ecrf_sesion") || "null"); if (s && s.n === state.operario && s.exp > Date.now() + 60000) return s.sesion; } catch (e) {}
+    return null;
+  }
+  async function obtenerSesion(ficha) {
+    const r = await apiPost({ tipo: "sesion", ficha });
+    try { localStorage.setItem("ecrf_sesion", JSON.stringify({ n: state.operario, sesion: r.sesion, exp: r.exp })); } catch (e) {}
+    return r.sesion;
+  }
+  async function asegurarSesion() {
+    const s = sesionGuardada(); if (s) return s;
+    if (!apiListo() || !enLinea()) throw { code: "sin_internet", message: "Necesitas internet para el reporte diario" };
+    const f = await pedirFicha("Confirma tu ficha", "Para el reporte diario confirmamos tu identidad una sola vez en este equipo.", "Continuar");
+    if (!f) throw { code: "cancelado", message: "" };
+    try { return await obtenerSesion(f); }
+    catch (e) { throw { code: e.code === "ficha" ? "ficha" : "red", message: e.code === "ficha" ? "Ficha incorrecta" : "No se pudo confirmar tu ficha. Revisa tu internet" }; }
+  }
+  async function rdApi(tipo, datos) {
+    if (!apiListo() || !enLinea()) throw { code: "sin_internet", message: "Necesitas internet para el reporte diario" };
+    let s = await asegurarSesion();
+    try { return await apiPost({ tipo, sesion: s, ...(datos || {}) }); }
+    catch (e) {
+      if (e && e.code === "sesion") { try { localStorage.removeItem("ecrf_sesion"); } catch (x) {} s = await asegurarSesion(); return await apiPost({ tipo, sesion: s, ...(datos || {}) }); }
+      throw e;
+    }
+  }
+  const msgError = e => (e && e.message) || (e && e.code === "sin_internet" ? "Necesitas internet" : "No se pudo completar. Revisa tu internet e inténtalo otra vez");
+
+  // ---------- borradores en el celular (por si se corta la señal o se cierra la app antes de guardar) ----------
+  const claveBorrador = () => "rd_borr_" + state.operario + "_" + ((state.rdDatos && state.rdDatos.fecha) || "");
+  const leerBorr = k => { try { return JSON.parse(localStorage.getItem(k) || "null"); } catch (e) { return null; } };
+  const guardarBorr = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} };
+  const borrarBorr = k => { try { localStorage.removeItem(k); } catch (e) {} };
+
+  // ---------- vista principal ----------
+  function abrirReporteDiario() { state.rd = true; state.rdTab = "hoy"; state.rdDatos = null; state.rdCierreId = null; render(); window.scrollTo(0, 0); }
+  function salirReporteDiario() { detenerVideo(); state.rd = false; state.rdDatos = null; state.rdCierreId = null; render(); window.scrollTo(0, 0); }
+
+  function renderReporteDiario() {
+    const app = document.getElementById("app");
+    app.classList.remove("max-w-md");
+    app.innerHTML = `
+      <style>
+        .rd-wrap{max-width:860px;margin:0 auto;width:100%}
+        .rd-top{background:var(--brand-dark);color:#fff}
+        .rd-grid{display:grid;gap:14px}
+        @media (min-width: 900px){ .rd-grid.dos{grid-template-columns:minmax(0,1.1fr) minmax(0,1fr);align-items:start} }
+        .rd-step{display:flex;align-items:center;gap:10px;font-weight:800;color:var(--brand-dark);margin-bottom:10px}
+        .rd-step span{width:28px;height:28px;border-radius:50%;background:var(--brand-dark);color:#fff;display:inline-flex;align-items:center;justify-content:center;font-size:14px}
+        .rd-video{position:relative;width:100%;aspect-ratio:16/9;background:#0F1B2D;border-radius:12px;overflow:hidden}
+        .rd-video iframe,.rd-video>div{position:absolute;inset:0;width:100%;height:100%}
+        .rd-barra{height:10px;border-radius:999px;background:#E3EAF1;overflow:hidden}
+        .rd-barra>i{display:block;height:100%;background:linear-gradient(90deg,#33B1E4,#0B5FA5);transition:width .4s}
+        .rd-dato{background:var(--bg,#F2F5F8);border-radius:10px;padding:8px 10px}
+        .rd-dato small{display:block;font-size:11px;color:var(--ink-soft);font-weight:700;text-transform:uppercase;letter-spacing:.03em}
+        .rd-chip{border-radius:12px;padding:10px 8px;font-weight:700;font-size:14px;border:1.5px solid #CFD8E3;background:#fff;color:var(--ink);line-height:1.15}
+        .rd-chip[aria-pressed="true"].e1{background:#1E8E5A;border-color:#1E8E5A;color:#fff}
+        .rd-chip[aria-pressed="true"].e2{background:#D99A00;border-color:#D99A00;color:#fff}
+        .rd-chip[aria-pressed="true"].e3{background:#C0392B;border-color:#C0392B;color:#fff}
+        .rd-err{color:var(--danger);font-size:13px;font-weight:600;margin-top:6px}
+        .rd-bloq{position:relative}
+        .rd-bloq.off>*:not(.rd-candado){opacity:.4;pointer-events:none}
+        .rd-candado{display:none}
+        .rd-bloq.off .rd-candado{display:flex;align-items:center;gap:8px;background:#FFF1C7;color:#6B4A00;border-radius:10px;padding:10px 12px;font-size:14px;font-weight:600;margin-bottom:10px}
+        .rd-pct{font-size:44px;font-weight:900;line-height:1;color:var(--brand-dark)}
+      </style>
+      <div class="rd-top"><div class="rd-wrap px-4 pt-3 pb-3 flex items-center gap-3">
+        <button id="rdVolver" class="text-white font-bold text-xl leading-none px-1" aria-label="Volver al inicio">‹</button>
+        <span class="form-ico" style="display:flex;align-items:center;justify-content:center;background:rgba(255,255,255,.12);color:#fff;width:46px;height:46px">${ICO_RD}</span>
+        <div class="flex-1 min-w-0"><div class="font-extrabold leading-tight">Reporte diario de actividades</div>
+          <div class="text-xs" style="color:#C9D8EA">${escA(state.operario)}</div></div>
+        <span class="logo-chip"><img src="${LOGO_SEDAPAL}" alt="SEDAPAL"></span>
+      </div></div>
+      <div style="background:var(--card);border-bottom:1px solid var(--line)"><div class="rd-wrap flex px-4">
+        <div class="tab-btn ${state.rdTab === "hoy" ? "active" : ""}" data-rdtab="hoy">Hoy</div>
+        <div class="tab-btn ${state.rdTab === "hechos" ? "active" : ""}" data-rdtab="hechos">Hechos</div>
+      </div></div>
+      <div class="rd-wrap px-4 py-4 pb-24" id="rdContent"></div>`;
+    document.getElementById("rdVolver").onclick = salirReporteDiario;
+    document.querySelectorAll("[data-rdtab]").forEach(t => t.onclick = () => { if (state.rdTab !== t.dataset.rdtab) { detenerVideo(); state.rdTab = t.dataset.rdtab; render(); } });
+    if (state.rdTab === "hechos") renderRdHechos(); else renderRdHoy();
+  }
+
+  async function cargarRdHoy() {
+    const c = document.getElementById("rdContent");
+    if (c) c.innerHTML = `<div class="text-center text-sm py-10" style="color:var(--ink-soft)">Cargando tu reporte…</div>`;
+    try {
+      const d = await rdApi("rd_hoy");
+      state.rdDatos = d;
+      try { localStorage.setItem("rd_cache_" + state.operario, JSON.stringify(d)); } catch (e) {}
+    } catch (e) {
+      if (e && e.code === "cancelado") { salirReporteDiario(); return; }
+      const cache = leerBorr("rd_cache_" + state.operario);
+      if (c) c.innerHTML = `<div class="card p-4 text-sm" style="background:#FFF1C7;color:#6B4A00"><b>${escA(msgError(e))}.</b><br>
+        El reporte diario se guarda en el servidor, así que necesitas señal para registrarlo o cerrarlo.
+        ${cache ? `Lo último que se descargó es del ${fechaTxt(cache.fecha)}.` : ""}</div>
+        <button id="rdReintentar" class="btn-primary w-full mt-3">Reintentar</button>`;
+      const b = document.getElementById("rdReintentar"); if (b) b.onclick = () => cargarRdHoy();
+      return;
+    }
+    if (state.rd && state.rdTab === "hoy") renderRdHoy();
+  }
+
+  function renderRdHoy() {
+    const c = document.getElementById("rdContent"); if (!c) return;
+    const d = state.rdDatos;
+    if (!d) { cargarRdHoy(); return; }
+    const cierre = state.rdCierreId ? (state.rdCierreRep || null) : null;
+    const rep = cierre || d.reporte;
+    const estado = rep ? rep.estado : "";
+    c.innerHTML = `
+      ${!cierre && d.pendientesAnteriores && d.pendientesAnteriores.length ? `
+        <div class="card p-3 mb-3" style="background:#FFF1C7;border-color:#F2D27A">
+          <div class="text-sm font-bold mb-2" style="color:#6B4A00">Tienes reportes de días anteriores sin cerrar</div>
+          ${d.pendientesAnteriores.map(p => `<button class="btn-ghost w-full mb-2 rdCerrarAnt" data-id="${escA(p.id)}">Cerrar el reporte del ${fechaTxt(p.fecha)}</button>`).join("")}
+        </div>` : ""}
+      ${cierre ? `<button id="rdVolverHoy" class="text-sm font-semibold mb-3" style="color:var(--brand)">‹ Volver al reporte de hoy</button>` : ""}
+      <div class="card p-4 mb-4">
+        <div class="flex items-center justify-between gap-2 mb-3">
+          <div class="font-bold text-lg">${cierre ? "Reporte del " + fechaTxt(rep.fecha) : "Mi reporte de hoy"}</div>${badgeRd(estado)}
+        </div>
+        <div class="grid grid-cols-2 gap-2 text-sm">
+          <div class="rd-dato" style="grid-column:span 2"><small>Trabajador</small><b>${escA(d.trabajador)}</b></div>
+          <div class="rd-dato"><small>Fecha de la jornada</small><b>${fechaTxt(rep ? rep.fecha : d.fecha)}</b></div>
+          <div class="rd-dato"><small>Hora de inicio</small><b>${rep && rep.inicioEn ? horaDe(rep.inicioEn) : "—"}</b></div>
+          ${rep && rep.mananaEn ? `<div class="rd-dato"><small>Registro de la mañana</small><b>${horaDe(rep.mananaEn)}</b></div>` : ""}
+          ${rep && rep.cerradoEn ? `<div class="rd-dato"><small>Cierre</small><b>${horaDe(rep.cerradoEn)}</b></div>` : ""}
+        </div>
+      </div>
+      <div id="rdEtapa"></div>`;
+    c.querySelectorAll(".rdCerrarAnt").forEach(b => b.onclick = async () => {
+      try { const r = await rdApi("rd_detalle", { id: b.dataset.id }); state.rdCierreId = b.dataset.id; state.rdCierreRep = r.reporte; renderRdHoy(); window.scrollTo(0, 0); }
+      catch (e) { toast(msgError(e), true); }
+    });
+    const vh = document.getElementById("rdVolverHoy"); if (vh) vh.onclick = () => { state.rdCierreId = null; state.rdCierreRep = null; renderRdHoy(); };
+    if (!rep || estado === "PENDIENTE_REGISTRO") renderRdManana(rep);
+    else if (estado === "PENDIENTE_CIERRE") renderRdCierre(rep);
+    else renderRdCerrado(rep);
+  }
+
+  // ---------- ETAPA 1: mañana ----------
+  function renderRdManana(rep) {
+    const d = state.rdDatos, ch = d.charla;
+    const completada = !ch || (rep && rep.charla && rep.charla.estado === "COMPLETADO" && rep.charla.id === ch.id);
+    const borr = leerBorr(claveBorrador()) || { clave: nuevaClave(), acts: [] };
+    if (!leerBorr(claveBorrador())) guardarBorr(claveBorrador(), borr);
+    const ed = state.rdEditando;
+    const cv = rep && rep.charla && rep.charla.id === (ch && ch.id) ? rep.charla : null;
+    document.getElementById("rdEtapa").innerHTML = `
+      <div class="rd-grid dos">
+        <div class="card p-4">
+          <div class="rd-step"><span>1</span>Charla de seguridad</div>
+          ${!ch ? `<div class="text-sm p-3 rounded-lg" style="background:#E1F3FB;color:#0B4A6B">El administrador aún no configuró una charla de seguridad. Puedes registrar tus actividades.</div>` : `
+          <div class="text-xs font-bold" style="color:var(--brand)">${escA(ch.tema)}</div>
+          <div class="font-bold mb-2">${escA(ch.titulo)}</div>
+          ${completada ? `<div class="p-3 rounded-lg text-sm font-semibold mb-2" style="background:#DDF3E7;color:#12613B">✅ Charla completada</div>`
+            : `<div class="rd-video mb-2"><div id="rdPlayer"></div></div>`}
+          <div class="rd-barra mb-1"><i id="rdBarra" style="width:${completada ? 100 : cv && cv.duracion ? Math.min(100, Math.round(cv.visto / cv.duracion * 100)) : 0}%"></i></div>
+          <div class="text-xs mb-2" style="color:var(--ink-soft)" id="rdAvance">${completada ? "Visto al 100 %" : cv && cv.duracion ? `Visto ${Math.min(100, Math.round(cv.visto / cv.duracion * 100))} %` : "Reproduce el video hasta el final"}</div>
+          <div class="grid grid-cols-3 gap-2 text-sm">
+            <div class="rd-dato"><small>Inicio</small><b id="rdVIni">${cv && cv.inicio ? horaDe(cv.inicio) : "—"}</b></div>
+            <div class="rd-dato"><small>Fin</small><b id="rdVFin">${cv && cv.fin ? horaDe(cv.fin) : "—"}</b></div>
+            <div class="rd-dato"><small>Estado</small><b id="rdVEst">${RD_VIDEO_TXT[completada ? "COMPLETADO" : cv ? cv.estado : ""] || "—"}</b></div>
+          </div>
+          <div id="rdVMsg" class="rd-err"></div>`}
+        </div>
+        <div class="card p-4 rd-bloq ${completada ? "" : "off"}">
+          <div class="rd-candado">🔒 Completa la charla de seguridad para registrar tus actividades</div>
+          <div class="rd-step"><span>2</span>Actividades planificadas</div>
+          <label class="text-xs font-semibold block mb-1" for="rdSel" style="color:var(--ink-soft)">Actividad *</label>
+          <select id="rdSel" class="input mb-2">
+            <option value="">Elige una actividad…</option>
+            ${d.catalogo.map(a => `<option value="${escA(a.id)}" ${ed && ed.catalogoId === a.id ? "selected" : ""}>${escA(a.descripcion)}</option>`).join("")}
+            <option value="__otra" ${ed && !ed.catalogoId ? "selected" : ""}>Otra actividad (escribirla)</option>
+          </select>
+          <input id="rdOtra" class="input mb-2" maxlength="300" placeholder="Escribe la actividad" value="${ed && !ed.catalogoId ? escA(ed.descripcion) : ""}" style="${ed && !ed.catalogoId ? "" : "display:none"}">
+          <label class="text-xs font-semibold block mb-1" for="rdCom" style="color:var(--ink-soft)">Comentarios o detalles (opcional)</label>
+          <textarea id="rdCom" class="input mb-2" rows="2" maxlength="1000" placeholder="Ej.: sector, lugar, con quién">${ed ? escA(ed.comentario) : ""}</textarea>
+          <div id="rdActErr" class="rd-err"></div>
+          <div class="flex gap-2 mb-3">
+            ${ed ? `<button id="rdCancelEd" class="btn-ghost flex-1">Cancelar</button>` : ""}
+            <button id="rdAgregar" class="btn-primary flex-1">${ed ? "Guardar cambios" : "+ Agregar actividad"}</button>
+          </div>
+          <div class="text-sm font-bold mb-2">Mis actividades (${borr.acts.length})</div>
+          ${borr.acts.length ? borr.acts.map((a, i) => `
+            <div class="rd-dato mb-2" style="display:flex;gap:10px;align-items:flex-start">
+              <b style="min-width:22px">${i + 1}.</b>
+              <div class="flex-1 min-w-0"><div class="font-semibold">${escA(a.descripcion)}</div>
+                ${a.comentario ? `<div class="text-xs" style="color:var(--ink-soft)">${escA(a.comentario)}</div>` : ""}</div>
+              <button class="text-sm font-semibold rdEd" data-i="${i}" style="color:var(--brand)">Editar</button>
+              <button class="text-sm font-semibold rdQuitar" data-i="${i}" style="color:var(--danger)">Quitar</button>
+            </div>`).join("") : `<div class="text-sm py-3 text-center" style="color:var(--ink-soft)">Aún no agregas actividades</div>`}
+          <button id="rdGuardarM" class="btn-primary w-full mt-3" ${borr.acts.length && completada ? "" : "disabled"}>Guardar reporte de la mañana</button>
+          <div id="rdGuardarErr" class="rd-err"></div>
+        </div>
+      </div>`;
+    const sel = document.getElementById("rdSel"), otra = document.getElementById("rdOtra");
+    sel.onchange = () => { otra.style.display = sel.value === "__otra" ? "" : "none"; if (sel.value === "__otra") otra.focus(); };
+    document.getElementById("rdAgregar").onclick = () => {
+      const err = document.getElementById("rdActErr");
+      let a;
+      if (sel.value === "__otra") { const t = otra.value.trim(); if (!t) { err.textContent = "Escribe la actividad"; return; } a = { catalogoId: "", descripcion: t }; }
+      else if (sel.value) { const cat = d.catalogo.find(x => x.id === sel.value); a = { catalogoId: cat.id, descripcion: cat.descripcion }; }
+      else { err.textContent = "Elige una actividad del catálogo o escribe otra"; return; }
+      a.comentario = document.getElementById("rdCom").value.trim();
+      const b = leerBorr(claveBorrador()) || borr;
+      if (ed) b.acts[ed.i] = a; else b.acts.push(a);
+      guardarBorr(claveBorrador(), b); state.rdEditando = null; renderRdManana(rep);
+    };
+    const ce = document.getElementById("rdCancelEd"); if (ce) ce.onclick = () => { state.rdEditando = null; renderRdManana(rep); };
+    document.querySelectorAll(".rdEd").forEach(b => b.onclick = () => { const i = +b.dataset.i; state.rdEditando = { ...borr.acts[i], i }; renderRdManana(rep); document.getElementById("rdSel").scrollIntoView({ block: "center" }); });
+    document.querySelectorAll(".rdQuitar").forEach(b => b.onclick = () => { borr.acts.splice(+b.dataset.i, 1); guardarBorr(claveBorrador(), borr); state.rdEditando = null; renderRdManana(rep); });
+    document.getElementById("rdGuardarM").onclick = guardarRdManana;
+    if (ch && !completada) montarVideo(ch, cv);
+  }
+
+  async function guardarRdManana() {
+    const btn = document.getElementById("rdGuardarM"), err = document.getElementById("rdGuardarErr");
+    const borr = leerBorr(claveBorrador());
+    if (!borr || !borr.acts.length) { err.textContent = "Registra al menos una actividad"; return; }
+    btn.disabled = true; btn.textContent = "Guardando…"; err.textContent = "";
+    try {
+      const r = await rdApi("rd_manana", { clave: borr.clave, actividades: borr.acts });
+      borrarBorr(claveBorrador());
+      state.rdDatos.reporte = r.reporte;
+      toast("Reporte de la mañana guardado ✅");
+      renderRdHoy(); window.scrollTo(0, 0);
+    } catch (e) {
+      err.textContent = msgError(e) + ". Tus actividades siguen guardadas en el celular; puedes reintentar.";
+      btn.disabled = false; btn.textContent = "Guardar reporte de la mañana";
+      if (e && e.code === "ya_registrado") { borrarBorr(claveBorrador()); state.rdDatos = null; cargarRdHoy(); }
+    }
+  }
+
+  // ---------- reproductor de YouTube con evidencia técnica ----------
+  let ytListo = null, rdPlayer = null, rdTimer = null;
+  function cargarApiYoutube() {
+    if (window.YT && window.YT.Player) return Promise.resolve();
+    if (ytListo) return ytListo;
+    ytListo = new Promise((ok, mal) => {
+      const anterior = window.onYouTubeIframeAPIReady;
+      window.onYouTubeIframeAPIReady = () => { if (anterior) try { anterior(); } catch (e) {} ok(); };
+      const s = document.createElement("script"); s.src = "https://www.youtube.com/iframe_api"; s.onerror = () => { ytListo = null; mal(new Error("yt")); };
+      document.head.appendChild(s);
+      setTimeout(() => { if (!(window.YT && window.YT.Player)) { ytListo = null; mal(new Error("timeout")); } }, 20000);
+    });
+    return ytListo;
+  }
+  function detenerVideo() {
+    clearInterval(rdTimer); rdTimer = null;
+    if (rdPlayer) { try { rdPlayer.destroy(); } catch (e) {} rdPlayer = null; }
+  }
+  async function montarVideo(ch, cv) {
+    detenerVideo();
+    const msg = t => { const m = document.getElementById("rdVMsg"); if (m) m.textContent = t || ""; };
+    const pinta = (visto, dur, est) => {
+      const pct = dur ? Math.min(100, Math.round(visto / dur * 100)) : 0;
+      const b = document.getElementById("rdBarra"); if (b) b.style.width = pct + "%";
+      const a = document.getElementById("rdAvance"); if (a) a.textContent = `Visto ${pct} %` + (dur ? ` · ${Math.floor(visto / 60)}:${String(Math.floor(visto % 60)).padStart(2, "0")} de ${Math.floor(dur / 60)}:${String(Math.floor(dur % 60)).padStart(2, "0")}` : "");
+      if (est) { const e = document.getElementById("rdVEst"); if (e) e.textContent = RD_VIDEO_TXT[est] || est; }
+    };
+    try { await cargarApiYoutube(); }
+    catch (e) { msg("No se pudo cargar el reproductor de YouTube. Revisa tu conexión e inténtalo de nuevo."); return; }
+    if (!document.getElementById("rdPlayer")) return;
+    // "visto" = segundos distintos del video reproducidos de corrido (ver dos veces el mismo tramo no suma, adelantar no cuenta)
+    const cubiertos = new Set();
+    const marca = (a, b) => { if (!(b > a) || b - a > 1.6) return; for (let s = Math.floor(a); s < Math.ceil(b - 0.05); s++) cubiertos.add(s); visto = Math.min(dur || Infinity, cubiertos.size); };
+    let visto = 0, ultimo = null, dur = 0, inicioEnviado = !!(cv && cv.inicio), ultimoEnvio = 0, enviandoFin = false;
+    const enviar = async (evento, extra) => {
+      try {
+        const r = await rdApi("rd_video", { evento, duracion: dur, visto: Math.round(visto), posicion: rdPlayer && rdPlayer.getCurrentTime ? rdPlayer.getCurrentTime() : 0, ...(extra || {}) });
+        if (r.reporte) {
+          state.rdDatos.reporte = { ...(state.rdDatos.reporte || {}), ...r.reporte, actividades: (state.rdDatos.reporte || {}).actividades };
+          const ini = document.getElementById("rdVIni"); if (ini && r.reporte.charla.inicio) ini.textContent = horaDe(r.reporte.charla.inicio);
+          const fin = document.getElementById("rdVFin"); if (fin && r.reporte.charla.fin) fin.textContent = horaDe(r.reporte.charla.fin);
+          pinta(visto, dur, r.reporte.charla.estado);
+        }
+        return r;
+      } catch (e) { msg(msgError(e) + ". El avance del video no se pudo registrar; si vuelve la señal, repite el final del video."); return null; }
+    };
+    rdPlayer = new YT.Player("rdPlayer", {
+      videoId: ch.videoId, width: "100%", height: "100%",
+      playerVars: { rel: 0, modestbranding: 1, playsinline: 1 },
+      events: {
+        onReady: () => { dur = rdPlayer.getDuration() || 0; pinta(visto, dur); },
+        onError: ev => {
+          const t = { 2: "El enlace del video no es válido.", 5: "El video no se puede reproducir en este equipo.", 100: "El video no existe o es privado.", 101: "El dueño del video no permite verlo dentro de la app.", 150: "El dueño del video no permite verlo dentro de la app." }[ev.data] || "No se pudo reproducir el video.";
+          msg(t + " Avisa al administrador. No se registrará la charla como vista.");
+          enviar("error", { codigoError: ev.data });
+        },
+        onStateChange: async ev => {
+          const S = YT.PlayerState;
+          if (ev.data === S.PLAYING) {
+            dur = rdPlayer.getDuration() || dur; msg(""); ultimo = rdPlayer.getCurrentTime();
+            if (!inicioEnviado) { inicioEnviado = true; enviar("inicio"); }
+            if (!rdTimer) rdTimer = setInterval(() => {
+              if (!rdPlayer || !rdPlayer.getPlayerState || rdPlayer.getPlayerState() !== YT.PlayerState.PLAYING) return;
+              const t = rdPlayer.getCurrentTime();
+              if (ultimo !== null) marca(ultimo, t);          // solo cuenta lo reproducido sin saltos
+              ultimo = t; pinta(visto, dur, "EN_CURSO");
+              if (Date.now() - ultimoEnvio > 30000) { ultimoEnvio = Date.now(); enviar("progreso"); }
+            }, 1000);
+          } else if (ev.data === S.PAUSED) { if (ultimo !== null) marca(ultimo, rdPlayer.getCurrentTime()); ultimo = null; enviar("pausa"); }
+          else if (ev.data === S.ENDED) {
+            clearInterval(rdTimer); rdTimer = null;
+            if (ultimo !== null) marca(ultimo, dur || rdPlayer.getDuration()); ultimo = null; pinta(visto, dur);
+            if (enviandoFin) return; enviandoFin = true;
+            const r = await enviar("fin"); enviandoFin = false;
+            if (r && r.reporte && r.reporte.charla.estado === "COMPLETADO") { toast("Charla completada ✅ Ya puedes registrar tus actividades"); detenerVideo(); renderRdHoy(); }
+            else if (r) msg(r.msg || "El video no se vio completo. Vuelve a reproducirlo desde el inicio sin adelantarlo.");
+          }
+        }
+      }
+    });
+  }
+
+  // ---------- ETAPA 2: cierre ----------
+  function renderRdCierre(rep) {
+    const kc = "rd_cierre_" + rep.id;
+    const b = leerBorr(kc) || { clave: nuevaClave(), res: {}, obs: "" };
+    if (!leerBorr(kc)) guardarBorr(kc, b);
+    const errores = state.rdErrores || {};
+    const cuenta = () => {
+      const v = rep.actividades.map(a => (b.res[a.id] || {}).estado);
+      return { ej: v.filter(x => x === "EJECUTADA").length, pa: v.filter(x => x === "PARCIAL").length, no: v.filter(x => x === "NO_EJECUTADA").length, tot: rep.actividades.length };
+    };
+    const k = cuenta(), pct = k.tot ? Math.round(k.ej / k.tot * 10000) / 100 : 0;
+    document.getElementById("rdEtapa").innerHTML = `
+      <div class="rd-grid dos">
+        <div>
+          <div class="rd-step"><span>3</span>Cierre de jornada</div>
+          ${rep.actividades.map(a => {
+            const r = b.res[a.id] || {};
+            const exige = r.estado === "PARCIAL" || r.estado === "NO_EJECUTADA";
+            return `
+            <div class="card p-4 mb-3" id="rdA_${escA(a.id)}">
+              <div class="font-bold">${a.n}. ${escA(a.descripcion)}</div>
+              ${a.comentario ? `<div class="text-xs mt-1" style="color:var(--ink-soft)">Comentario de la mañana: ${escA(a.comentario)}</div>` : ""}
+              <div class="text-xs font-semibold mt-3 mb-1" style="color:var(--ink-soft)">Estado de ejecución *</div>
+              <div class="grid grid-cols-3 gap-2">
+                <button class="rd-chip e1 rdEst" data-id="${escA(a.id)}" data-e="EJECUTADA" aria-pressed="${r.estado === "EJECUTADA"}">Ejecutada</button>
+                <button class="rd-chip e2 rdEst" data-id="${escA(a.id)}" data-e="PARCIAL" aria-pressed="${r.estado === "PARCIAL"}">Parcialmente ejecutada</button>
+                <button class="rd-chip e3 rdEst" data-id="${escA(a.id)}" data-e="NO_EJECUTADA" aria-pressed="${r.estado === "NO_EJECUTADA"}">No ejecutada</button>
+              </div>
+              ${r.estado ? `
+              <label class="text-xs font-semibold block mt-3 mb-1" style="color:var(--ink-soft)">${exige ? (r.estado === "PARCIAL" ? "Sustento: ¿por qué no se completó? *" : "Sustento: ¿por qué no se realizó? *") : "Observación (opcional)"}</label>
+              <textarea class="input rdSus" data-id="${escA(a.id)}" rows="2" maxlength="1000">${escA(r.sustento || "")}</textarea>` : ""}
+              ${errores[a.id] ? `<div class="rd-err">${escA(errores[a.id])}</div>` : ""}
+            </div>`; }).join("")}
+          <div class="card p-4 mb-3">
+            <label class="text-sm font-bold block mb-1" for="rdObs">Observaciones generales del cierre de jornada</label>
+            <div class="text-xs mb-2" style="color:var(--ink-soft)">Opcional: incidencias, restricciones, dificultades u otra información relevante.</div>
+            <textarea id="rdObs" class="input" rows="3" maxlength="2000">${escA(b.obs || "")}</textarea>
+          </div>
+        </div>
+        <div class="card p-4" style="position:sticky;top:12px">
+          <div class="text-sm font-bold mb-1">Cumplimiento</div>
+          <div class="rd-pct" id="rdPct">${fmtPct(pct)}</div>
+          <div class="text-xs mb-3" style="color:var(--ink-soft)">Se calcula solo: ejecutadas ÷ planificadas × 100</div>
+          <div class="grid grid-cols-2 gap-2 text-sm mb-3">
+            <div class="rd-dato"><small>Planificadas</small><b>${k.tot}</b></div>
+            <div class="rd-dato"><small>Ejecutadas</small><b>${k.ej}</b></div>
+            <div class="rd-dato"><small>Parciales</small><b>${k.pa}</b></div>
+            <div class="rd-dato"><small>No ejecutadas</small><b>${k.no}</b></div>
+          </div>
+          <div class="text-xs mb-3" style="color:var(--ink-soft)">Charla: ${escA(RD_VIDEO_TXT[rep.charla.estado] || rep.charla.estado || "—")}${rep.charla.tema ? " · " + escA(rep.charla.tema) : ""}</div>
+          <button id="rdCerrar" class="btn-primary w-full">Cerrar reporte</button>
+          <div id="rdCerrarErr" class="rd-err"></div>
+          <div class="text-xs mt-2" style="color:var(--ink-soft)">Al cerrar, el reporte ya no se puede modificar.</div>
+        </div>
+      </div>`;
+    const guardarLocal = () => guardarBorr(kc, b);
+    document.querySelectorAll(".rdEst").forEach(x => x.onclick = () => {
+      const id = x.dataset.id; b.res[id] = { ...(b.res[id] || {}), estado: x.dataset.e }; guardarLocal();
+      if (state.rdErrores) delete state.rdErrores[id];
+      const y = window.scrollY; renderRdCierre(rep); window.scrollTo(0, y);
+    });
+    document.querySelectorAll(".rdSus").forEach(t => t.oninput = () => { const id = t.dataset.id; b.res[id] = { ...(b.res[id] || {}), sustento: t.value }; guardarLocal(); });
+    document.getElementById("rdObs").oninput = e => { b.obs = e.target.value; guardarLocal(); };
+    document.getElementById("rdCerrar").onclick = async () => {
+      const errs = {};
+      rep.actividades.forEach(a => {
+        const r = b.res[a.id] || {};
+        if (!r.estado) errs[a.id] = "Elige el estado de ejecución";
+        else if (r.estado !== "EJECUTADA" && !String(r.sustento || "").trim()) errs[a.id] = "El sustento es obligatorio";
+      });
+      state.rdErrores = errs;
+      if (Object.keys(errs).length) {
+        const y = window.scrollY; renderRdCierre(rep); window.scrollTo(0, y);
+        document.getElementById("rdCerrarErr").textContent = "Revisa las actividades marcadas en rojo (" + Object.keys(errs).length + ")";
+        const primero = document.getElementById("rdA_" + Object.keys(errs)[0]); if (primero) primero.scrollIntoView({ behavior: "smooth", block: "center" });
+        return;
+      }
+      const btn = document.getElementById("rdCerrar"), err = document.getElementById("rdCerrarErr");
+      btn.disabled = true; btn.textContent = "Cerrando…"; err.textContent = "";
+      try {
+        const r = await rdApi("rd_cerrar", { id: rep.id, clave: b.clave, observaciones: b.obs || "",
+          resultados: rep.actividades.map(a => ({ id: a.id, estado: b.res[a.id].estado, sustento: String(b.res[a.id].sustento || "").trim() })) });
+        borrarBorr(kc); state.rdErrores = null;
+        toast("Reporte cerrado ✅ Cumplimiento " + fmtPct(r.reporte.cumplimiento));
+        if (state.rdCierreId) { state.rdCierreId = null; state.rdCierreRep = null; state.rdDatos = null; cargarRdHoy(); }
+        else { state.rdDatos.reporte = r.reporte; renderRdHoy(); }
+        window.scrollTo(0, 0);
+      } catch (e) {
+        err.textContent = msgError(e) + ". Lo que escribiste sigue guardado en el celular; puedes reintentar.";
+        btn.disabled = false; btn.textContent = "Cerrar reporte";
+        if (e && e.code === "cerrado") { borrarBorr(kc); state.rdDatos = null; cargarRdHoy(); }
+      }
+    };
+  }
+
+  function detalleRdHTML(rep) {
+    return `
+      <div class="grid grid-cols-2 gap-2 text-sm mb-3">
+        <div class="rd-dato"><small>Cumplimiento</small><b>${fmtPct(rep.cumplimiento)}</b></div>
+        <div class="rd-dato"><small>Estado</small><b>${RD_EST_TXT[rep.estado] || rep.estado}</b></div>
+        <div class="rd-dato"><small>Inicio</small><b>${horaDe(rep.inicioEn) || "—"}</b></div>
+        <div class="rd-dato"><small>Mañana registrada</small><b>${horaDe(rep.mananaEn) || "—"}</b></div>
+        <div class="rd-dato"><small>Cierre</small><b>${horaDe(rep.cerradoEn) || "—"}</b></div>
+        <div class="rd-dato"><small>Planif. · Ejec. · Parc. · No</small><b>${rep.nActividades} · ${rep.nEjecutadas} · ${rep.nParciales} · ${rep.nNoEjecutadas}</b></div>
+      </div>
+      <div class="rd-dato mb-3 text-sm"><small>Charla de seguridad</small>
+        ${rep.charla.tema ? `<b>${escA(rep.charla.tema)}</b> · ${escA(rep.charla.titulo)}<br>` : ""}
+        Estado: <b>${escA(RD_VIDEO_TXT[rep.charla.estado] || rep.charla.estado || "—")}</b>
+        ${rep.charla.inicio ? ` · Inicio ${horaDe(rep.charla.inicio)}` : ""}${rep.charla.fin ? ` · Fin ${horaDe(rep.charla.fin)}` : ""}
+        ${rep.charla.duracion ? ` · Visto ${Math.min(100, Math.round(rep.charla.visto / rep.charla.duracion * 100))} % de ${Math.round(rep.charla.duracion)} s` : ""}
+      </div>
+      ${(rep.actividades || []).map(a => `
+        <div class="rd-dato mb-2 text-sm">
+          <div class="flex justify-between gap-2"><b>${a.n}. ${escA(a.descripcion)}</b>
+            ${a.estado ? `<span class="badge" style="background:${a.estado === "EJECUTADA" ? "#DDF3E7;color:#12613B" : a.estado === "PARCIAL" ? "#FFF1C7;color:#6B4A00" : "#FBE0DD;color:#8E2019"}">${RD_EJEC_TXT[a.estado]}</span>` : ""}</div>
+          ${a.comentario ? `<div class="text-xs mt-1" style="color:var(--ink-soft)">Mañana: ${escA(a.comentario)}</div>` : ""}
+          ${a.sustento ? `<div class="text-xs mt-1"><b>${a.estado === "EJECUTADA" ? "Observación" : "Sustento"}:</b> ${escA(a.sustento)}</div>` : ""}
+        </div>`).join("")}
+      ${rep.observaciones ? `<div class="rd-dato text-sm mt-2"><small>Observaciones generales</small>${escA(rep.observaciones)}</div>` : ""}`;
+  }
+  function renderRdCerrado(rep) {
+    document.getElementById("rdEtapa").innerHTML = `<div class="card p-4">
+      <div class="p-3 rounded-lg mb-3 font-semibold" style="background:#DDF3E7;color:#12613B">✅ Tu reporte de hoy está cerrado. ¡Buen trabajo!</div>
+      ${detalleRdHTML(rep)}</div>`;
+  }
+
+  // ---------- Hechos: consulta de reportes ----------
+  function renderRdHechos() {
+    const c = document.getElementById("rdContent"); if (!c) return;
+    const f = state.rdFiltro = state.rdFiltro || { desde: "", hasta: "", estado: "", trabajador: "", pagina: 1 };
+    const sup = esSupervisor();
+    c.innerHTML = `
+      <div class="card p-3 mb-3">
+        <div class="grid grid-cols-2 gap-2">
+          <div><label class="text-xs font-semibold block mb-1" style="color:var(--ink-soft)">Desde</label><input id="rfDesde" type="date" class="input" value="${escA(f.desde)}"></div>
+          <div><label class="text-xs font-semibold block mb-1" style="color:var(--ink-soft)">Hasta</label><input id="rfHasta" type="date" class="input" value="${escA(f.hasta)}"></div>
+          <div ${sup ? "" : 'style="grid-column:span 2"'}><label class="text-xs font-semibold block mb-1" style="color:var(--ink-soft)">Estado</label>
+            <select id="rfEstado" class="input"><option value="">Todos</option>${["PENDIENTE_REGISTRO", "PENDIENTE_CIERRE", "CERRADO"].map(e => `<option value="${e}" ${f.estado === e ? "selected" : ""}>${RD_EST_TXT[e]}</option>`).join("")}</select></div>
+          ${sup ? `<div><label class="text-xs font-semibold block mb-1" style="color:var(--ink-soft)">Trabajador</label>
+            <select id="rfTrab" class="input"><option value="">Todos</option>${OPERARIOS.map(o => `<option ${o.name === f.trabajador ? "selected" : ""}>${escA(o.name)}</option>`).join("")}</select></div>` : ""}
+        </div>
+        <button id="rfBuscar" class="btn-primary w-full mt-3">Buscar</button>
+      </div>
+      <div id="rdLista"><div class="text-center text-sm py-8" style="color:var(--ink-soft)">Cargando…</div></div>`;
+    document.getElementById("rfBuscar").onclick = () => {
+      Object.assign(f, { desde: document.getElementById("rfDesde").value, hasta: document.getElementById("rfHasta").value,
+        estado: document.getElementById("rfEstado").value, trabajador: sup ? document.getElementById("rfTrab").value : "", pagina: 1 });
+      cargarRdLista();
+    };
+    cargarRdLista();
+  }
+  async function cargarRdLista() {
+    const f = state.rdFiltro, l = document.getElementById("rdLista"); if (!l) return;
+    l.innerHTML = `<div class="text-center text-sm py-8" style="color:var(--ink-soft)">Cargando…</div>`;
+    let r;
+    try { r = await rdApi("rd_listar", { ...f, tam: 10 }); }
+    catch (e) { if (e && e.code === "cancelado") { l.innerHTML = ""; return; } l.innerHTML = `<div class="card p-4 text-sm" style="color:var(--danger)">${escA(msgError(e))}</div>`; return; }
+    const paginas = Math.max(1, Math.ceil(r.total / r.tam));
+    l.innerHTML = `
+      <div class="text-xs mb-2" style="color:var(--ink-soft)">${r.total} reporte(s)</div>
+      ${r.items.length ? r.items.map(x => `
+        <button class="card p-4 mb-3 w-full rdItem" data-id="${escA(x.id)}" style="text-align:left;display:block">
+          <div class="flex justify-between items-start gap-2 mb-1"><div class="font-bold">${fechaTxt(x.fecha)} · ${escA(x.trabajador)}</div>${badgeRd(x.estado)}</div>
+          <div class="text-sm" style="color:var(--ink)">Cumplimiento <b>${fmtPct(x.cumplimiento)}</b> · Planificadas ${x.nActividades} · Ejecutadas ${x.nEjecutadas} · Parciales ${x.nParciales} · No ejecutadas ${x.nNoEjecutadas}</div>
+          <div class="text-xs mt-1" style="color:var(--ink-soft)">Inicio ${horaDe(x.inicioEn) || "—"} · Cierre ${horaDe(x.cerradoEn) || "—"}${x.observaciones ? " · " + escA(x.observaciones.slice(0, 80)) : ""}</div>
+        </button>`).join("") : `<div class="text-center text-sm py-8" style="color:var(--ink-soft)">No hay reportes con esos filtros</div>`}
+      ${paginas > 1 ? `<div class="flex items-center justify-between mt-2">
+        <button id="rfAnt" class="btn-ghost" ${r.pagina <= 1 ? "disabled" : ""}>‹ Anterior</button>
+        <span class="text-sm">Página ${r.pagina} de ${paginas}</span>
+        <button id="rfSig" class="btn-ghost" ${r.pagina >= paginas ? "disabled" : ""}>Siguiente ›</button></div>` : ""}`;
+    l.querySelectorAll(".rdItem").forEach(b => b.onclick = () => abrirDetalleRd(b.dataset.id));
+    const a = document.getElementById("rfAnt"), s = document.getElementById("rfSig");
+    if (a) a.onclick = () => { f.pagina--; cargarRdLista(); };
+    if (s) s.onclick = () => { f.pagina++; cargarRdLista(); };
+  }
+  async function abrirDetalleRd(id) {
+    let r;
+    try { r = await rdApi("rd_detalle", { id }); } catch (e) { toast(msgError(e), true); return; }
+    const rep = r.reporte;
+    let el = document.getElementById("rdDetalle");
+    if (!el) { el = document.createElement("div"); el.id = "rdDetalle"; document.body.appendChild(el); }
+    el.style.cssText = "position:fixed;inset:0;z-index:85;background:rgba(3,32,76,.55);display:flex;align-items:flex-end;justify-content:center";
+    el.innerHTML = `<div style="background:#F2F5F8;width:100%;max-width:720px;border-radius:20px 20px 0 0;padding:18px 16px calc(18px + env(safe-area-inset-bottom,0px));max-height:92vh;overflow:auto">
+      <div class="flex items-center justify-between mb-2">
+        <div><div class="font-bold text-lg">${fechaTxt(rep.fecha)} · ${escA(rep.trabajador)}</div>${badgeRd(rep.estado)}</div>
+        <button id="rdDetCerrar" aria-label="Cerrar" style="font-size:24px;width:40px;height:40px">✕</button>
+      </div>${detalleRdHTML(rep)}</div>`;
+    el.onclick = e => { if (e.target === el) el.remove(); };
+    el.querySelector("#rdDetCerrar").onclick = () => el.remove();
+  }
+
+  // ---------- Panel de administración: charlas y catálogo ----------
+  async function cargarAdminRd() {
+    try { state.adminRd = await rdApi("rd_admin_datos"); }
+    catch (e) { state.adminRd = { error: msgError(e) }; }
+    if (state.admin) renderAdmin();
+  }
+  function htmlAdminCharlas() {
+    const d = state.adminRd;
+    if (!d) { cargarAdminRd(); return `<div class="text-sm py-6" style="color:var(--ink-soft)">Cargando…</div>`; }
+    if (d.error) return `<div class="card p-4 text-sm" style="color:var(--danger)">${escA(d.error)}</div>`;
+    const ed = state.adminCharlaEd || {};
+    const vid = idYoutubeCliente(ed.url || "");
+    return `
+      <div class="adm-grid">
+        <div>
+          ${d.charlas.length ? d.charlas.slice().reverse().map(c => `
+            <div class="adm-mod" style="grid-template-areas:none;grid-template-columns:auto 1fr auto;display:grid;align-items:center">
+              <img src="https://img.youtube.com/vi/${escA(c.videoId)}/mqdefault.jpg" alt="" style="width:120px;border-radius:8px" onerror="this.style.visibility='hidden'">
+              <div class="min-w-0">
+                <div class="text-xs font-bold" style="color:var(--brand)">${escA(c.tema)}</div>
+                <div class="font-bold">${escA(c.titulo)}</div>
+                <div class="text-xs" style="color:var(--ink-soft);word-break:break-all">${escA(c.url)}</div>
+                ${c.activa ? `<span class="badge" style="background:#DDF3E7;color:#12613B">Vigente</span>` : `<span class="badge" style="background:#EEF2F6;color:#4A5A6E">Inactiva</span>`}
+                <button class="text-sm font-semibold ml-2 chEd" data-id="${escA(c.id)}" style="color:var(--brand);margin-left:8px">Editar</button>
+              </div>
+              <button class="adm-sw chSw" role="switch" data-id="${escA(c.id)}" aria-checked="${c.activa}" aria-label="Vigente"></button>
+            </div>`).join("") : `<div class="card p-4 text-sm" style="color:var(--ink-soft)">Aún no hay charlas registradas.</div>`}
+        </div>
+        <div class="adm-prev">
+          <div class="font-bold mb-2">${ed.id ? "Editar charla" : "Nueva charla"}</div>
+          <label class="adm-lbl" for="chTema">Tema *</label><input id="chTema" class="input mb-2" maxlength="120" value="${escA(ed.tema || "")}" placeholder="Ej.: Uso de EPP">
+          <label class="adm-lbl" for="chTit">Título o descripción *</label><textarea id="chTit" class="input mb-2" rows="2" maxlength="300">${escA(ed.titulo || "")}</textarea>
+          <label class="adm-lbl" for="chUrl">URL del video de YouTube *</label><input id="chUrl" class="input mb-1" maxlength="300" value="${escA(ed.url || "")}" placeholder="https://www.youtube.com/watch?v=…">
+          <div id="chUrlInfo" class="text-xs mb-2" style="color:${vid ? "#12613B" : "var(--ink-soft)"}">${vid ? "✓ Enlace válido · video " + vid : "Pega el enlace del video (watch, youtu.be o shorts)"}</div>
+          ${vid ? `<img src="https://img.youtube.com/vi/${vid}/mqdefault.jpg" alt="" style="width:100%;border-radius:10px;margin-bottom:8px">` : ""}
+          <label class="flex items-center gap-2 text-sm mb-3"><input id="chAct" type="checkbox" ${ed.activa === false ? "" : "checked"}> Dejarla como charla vigente</label>
+          <div id="chErr" class="rd-err"></div>
+          <div class="flex gap-2">${ed.id ? `<button id="chCancel" class="btn-ghost flex-1">Cancelar</button>` : ""}<button id="chGuardar" class="btn-primary flex-1">Guardar charla</button></div>
+        </div>
+      </div>`;
+  }
+  function htmlAdminCatalogo() {
+    const d = state.adminRd;
+    if (!d) { cargarAdminRd(); return `<div class="text-sm py-6" style="color:var(--ink-soft)">Cargando…</div>`; }
+    if (d.error) return `<div class="card p-4 text-sm" style="color:var(--danger)">${escA(d.error)}</div>`;
+    return `
+      <div class="card p-4 mb-3" style="max-width:760px">
+        <label class="adm-lbl" for="caNueva">Nueva actividad</label>
+        <div class="flex gap-2"><input id="caNueva" class="input" maxlength="300" placeholder="Ej.: Detección acústica de fugas" value="${escA(state.caNueva || "")}"><button id="caAgregar" class="btn-primary" style="width:auto;padding:0 18px">Agregar</button></div>
+        <div id="caErr" class="rd-err"></div>
+      </div>
+      <div style="max-width:760px">
+        <div class="text-xs mb-2" style="color:var(--ink-soft)">${d.catalogo.length} actividad(es) · Las desactivadas no se ofrecen a los trabajadores, pero los reportes anteriores conservan su descripción original.</div>
+        ${d.catalogo.map(a => `
+          <div class="adm-mod ${a.activo ? "" : "off"}" style="grid-template-areas:none;grid-template-columns:1fr auto auto;display:grid;align-items:center">
+            <input class="input caDesc" data-id="${escA(a.id)}" maxlength="300" value="${escA(a.descripcion)}">
+            <button class="btn-ghost caGuardar" data-id="${escA(a.id)}" style="width:auto;padding:8px 12px">Guardar</button>
+            <button class="adm-sw caSw" role="switch" data-id="${escA(a.id)}" aria-checked="${a.activo}" aria-label="Activa"></button>
+          </div>`).join("")}
+      </div>`;
+  }
+  function idYoutubeCliente(url) {
+    const m = String(url || "").trim().match(/(?:youtube\.com\/(?:watch\?(?:.*&)?v=|embed\/|shorts\/|live\/|v\/)|youtu\.be\/)([A-Za-z0-9_-]{11})(?![A-Za-z0-9_-])/);
+    return m ? m[1] : "";
+  }
+  function activarAdminRd(app) {
+    const d = state.adminRd; if (!d || d.error) return;
+    const llamar = async (tipo, datos, errId) => {
+      let error = null;
+      try { state.adminRd = await rdApi(tipo, datos); if (state.adminRd.aviso) toast(state.adminRd.aviso); else toast("Guardado ✅"); }
+      catch (e) { error = msgError(e); }
+      if (!error && errId === "chErr") state.adminCharlaEd = null;
+      if (!error && errId === "caErr") state.caNueva = "";
+      if (state.admin) { const y = window.scrollY; renderAdmin(); window.scrollTo(0, y); }
+      if (error) { const el = errId && document.getElementById(errId); if (el) el.textContent = error; else toast(error, true); }
+      return !error;
+    };
+    if (state.adminTab === "charlas") {
+      const url = document.getElementById("chUrl");
+      if (url) url.oninput = () => { const v = idYoutubeCliente(url.value); const i = document.getElementById("chUrlInfo"); i.style.color = v ? "#12613B" : url.value ? "var(--danger)" : "var(--ink-soft)"; i.textContent = v ? "✓ Enlace válido · video " + v : url.value ? "No parece un enlace de YouTube" : "Pega el enlace del video"; };
+      const g = document.getElementById("chGuardar");
+      if (g) g.onclick = async () => {
+        const datos = { id: (state.adminCharlaEd || {}).id || "", tema: document.getElementById("chTema").value, titulo: document.getElementById("chTit").value, url: url.value, activa: document.getElementById("chAct").checked };
+        const err = document.getElementById("chErr");
+        if (!datos.tema.trim() || !datos.titulo.trim()) { err.textContent = "Completa el tema y el título"; return; }
+        if (!idYoutubeCliente(datos.url)) { err.textContent = "La URL no es un enlace válido de YouTube"; return; }
+        state.adminCharlaEd = datos; g.disabled = true; g.textContent = "Verificando video…";
+        await llamar("rd_admin_charla", datos, "chErr");
+      };
+      const cc = document.getElementById("chCancel"); if (cc) cc.onclick = () => { state.adminCharlaEd = null; renderAdmin(); };
+      app.querySelectorAll(".chEd").forEach(b => b.onclick = () => { state.adminCharlaEd = { ...d.charlas.find(c => c.id === b.dataset.id) }; renderAdmin(); });
+      app.querySelectorAll(".chSw").forEach(b => b.onclick = () => llamar("rd_admin_charla_estado", { id: b.dataset.id, activa: b.getAttribute("aria-checked") !== "true" }));
+    }
+    if (state.adminTab === "catalogo") {
+      const n = document.getElementById("caNueva");
+      n.oninput = () => { state.caNueva = n.value; };
+      document.getElementById("caAgregar").onclick = () => { if (!n.value.trim()) { document.getElementById("caErr").textContent = "Escribe la actividad"; return; } state.caNueva = n.value; llamar("rd_admin_catalogo", { descripcion: n.value }, "caErr"); };
+      n.onkeydown = e => { if (e.key === "Enter") document.getElementById("caAgregar").click(); };
+      app.querySelectorAll(".caGuardar").forEach(b => b.onclick = () => { const a = d.catalogo.find(x => x.id === b.dataset.id); const v = app.querySelector(`.caDesc[data-id="${b.dataset.id}"]`).value; llamar("rd_admin_catalogo", { id: a.id, descripcion: v, activo: a.activo }); });
+      app.querySelectorAll(".caSw").forEach(b => b.onclick = () => { const a = d.catalogo.find(x => x.id === b.dataset.id); llamar("rd_admin_catalogo", { id: a.id, descripcion: a.descripcion, activo: !a.activo }); });
+    }
   }
 
   /* ---------------- Mapa de la ruta (OpenStreetMap) + navegación en Google Maps ---------------- */
@@ -2305,6 +3216,656 @@
     if (limites.length) mapaL.fitBounds(limites, { padding: [36, 36], maxZoom: 17 });
     else mapaL.setView([-12.06, -77.04], 11);
     setTimeout(() => mapaL && mapaL.invalidateSize(), 150);
+  }
+
+  /* =====================================================================================
+     BARRA LATERAL Y MÓDULOS «GIS & LOGÍSTICA» (Mapa de NIS, Planificador de rutas, Laboratorio ECRF)
+     La barra lateral se ve fija en PC (≥ 1024 px). En el celular, el menú de inicio muestra los mismos grupos.
+     ===================================================================================== */
+  const ICS = p => `<svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${p}</svg>`;
+  const ICO_MAPA = ICS(`<path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z"/><circle cx="12" cy="10" r="3"/>`);
+  const ICO_RUTA = ICS(`<circle cx="6" cy="19" r="3"/><path d="M9 19h8.5a3.5 3.5 0 0 0 0-7h-11a3.5 3.5 0 0 1 0-7H15"/><circle cx="18" cy="5" r="3"/>`);
+  const ICO_LAB = ICS(`<path d="M14 18V6a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2v11a1 1 0 0 0 1 1h2"/><path d="M15 18H9"/><path d="M19 18h2a1 1 0 0 0 1-1v-3.65a1 1 0 0 0-.22-.62l-3.48-4.35A1 1 0 0 0 17.52 8H14"/><circle cx="17" cy="18" r="2"/><circle cx="7" cy="18" r="2"/>`);
+  const ICO_LAT = {
+    GPFO0381: ICS(`<path d="m12 14 4-4"/><path d="M3.34 19a10 10 0 1 1 17.32 0"/>`),
+    GPFO0405: ICS(`<path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/>`),
+    GPFO0416: ICS(`<circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/><path d="m8 11 2 2 4-4"/>`),
+    MAPA_NIS: ICO_MAPA, PLANIFICADOR_RUTAS: ICO_RUTA, LABORATORIO_ECRF: ICO_LAB
+  };
+  const GRUPOS_NAV = [
+    { id: "OPER", nombre: "Operaciones diarias", color: "#EAF6EE" },
+    { id: "FORM", nombre: "Formularios ECRF", color: "#E1F3FB" },
+    { id: "GIS", nombre: "GIS & Logística", color: "#E6F6EF" },
+    { id: "GESTION", nombre: "Gestión & Reportes", color: "#FFF4DB" }
+  ];
+  const GRUPO_DE = { REPORTE_DIARIO: "OPER", GPFO0381: "FORM", GPFO0405: "FORM", GPFO0416: "FORM", PDF: "FORM",
+                     MAPA_NIS: "GIS", PLANIFICADOR_RUTAS: "GIS", LABORATORIO_ECRF: "GIS" };
+  // Los elementos que se ven en el menú, agrupados (respeta lo que configuró el administrador)
+  function navAgrupado() {
+    const mods = modulosMenu();
+    const grupos = GRUPOS_NAV.map(g => ({ ...g, items: mods.filter(m => (GRUPO_DE[m.id] || "FORM") === g.id) }));
+    if (esAdmin()) grupos.find(g => g.id === "GESTION").items.push({ id: "ADMIN", titulo: "Panel de administración", descripcion: "Módulos, charlas, catálogo y vehículo" });
+    return grupos.filter(g => g.items.length);
+  }
+  const navActual = () => state.admin ? "ADMIN" : state.rd ? "REPORTE_DIARIO" : state.vista ? state.vista : state.form ? state.form : "";
+
+  // Abre cualquier módulo desde la barra lateral o el menú de inicio
+  function abrirModulo(id) {
+    if (id === "PDF") { abrirPanelPdf(); return; }               // es una ventana encima de la pantalla actual
+    cerrarMapaRuta(); cerrarPanelPdf();
+    if (state.rd) detenerVideo();
+    salirVistaGis(false);
+    state.admin = false; state.rd = false; state.rdDatos = null; state.rdCierreId = null; state.vista = null;
+    state.form = null; sessionStorage.removeItem("ecrf_form"); state.editId = null; state.previewIdx = null;
+    if (id === "ADMIN") { state.admin = true; state.adminMods = null; }
+    else if (id === "REPORTE_DIARIO") { abrirReporteDiario(); return; }
+    else if (MODULOS_APP[id] && MODULOS_APP[id].tipo === "form") {
+      state.form = id; sessionStorage.setItem("ecrf_form", id); state.tab = "nuevo";
+      resetForm(); state.rutaSel = null; state.rutaQuery = "";
+    } else if (["MAPA_NIS", "PLANIFICADOR_RUTAS", "LABORATORIO_ECRF"].includes(id)) { state.vista = id; state.labTab = "vehiculo"; }
+    render(); window.scrollTo(0, 0);
+  }
+
+  function pintarLateral() {
+    let el = document.getElementById("lateral");
+    if (!state.operario || !esAdmin()) { if (el) el.remove(); document.body.classList.remove("con-lat"); return; }   // barra lateral: solo administradores
+    document.body.classList.add("con-lat");
+    if (!el) { el = document.createElement("aside"); el.id = "lateral"; el.className = "lat"; el.setAttribute("aria-label", "Menú principal"); document.body.appendChild(el); }
+    const act = navActual();
+    el.innerHTML = `
+      <div class="lat-marca">
+        <span class="logo-chip"><img src="${LOGO_SEDAPAL}" alt="SEDAPAL"></span>
+        <div class="min-w-0"><b>ECRF Campo</b><small>Control y reducción de fugas</small></div>
+      </div>
+      <button class="lat-inicio" data-nav="" aria-current="${act === ""}">
+        <span>${escA(state.operario)}</span><small>${ROL_TXT[rolDe(state.operario)] || ""} · Inicio</small>
+      </button>
+      <nav class="lat-grupos">
+        ${navAgrupado().map(g => `
+          <div class="lat-grupo">
+            <p class="lat-gtit">${escA(g.nombre)}</p>
+            ${g.items.map(m => `
+              <button class="lat-item" data-nav="${m.id}" aria-current="${act === m.id}">
+                <span class="lat-ico" style="background:${g.color}">${ICO_LAT[m.id] || (m.id === "PDF" ? ICO_PDF : m.id === "REPORTE_DIARIO" ? ICO_RD : m.id === "ADMIN" ? ICO_ADMIN : "")}</span>
+                <span class="min-w-0"><b>${escA(m.titulo || (MODULOS_APP[m.id] && MODULOS_APP[m.id].defecto.titulo) || "")}</b>
+                  <small>${escA(m.descripcion || "")}</small></span>
+              </button>`).join("")}
+          </div>`).join("")}
+      </nav>
+      <div class="lat-pie"><span>SEDAPAL · ECRF</span><button id="latSalir">Salir</button></div>`;
+    el.querySelectorAll("[data-nav]").forEach(b => b.onclick = () => b.dataset.nav ? abrirModulo(b.dataset.nav) : abrirModulo(""));
+    el.querySelector("#latSalir").onclick = () => {
+      localStorage.removeItem("gpfo_operario"); localStorage.removeItem("ecrf_sesion"); sessionStorage.removeItem("ecrf_form");
+      salirVistaGis(false); state.operario = null; state.form = null; state.rd = false; state.admin = false; state.vista = null; state.pinBuffer = ""; render();
+    };
+  }
+
+  // Encabezado común de las vistas GIS (mismo estilo que el Reporte diario)
+  function cabeceraGis(titulo, sub, ico) {
+    return `<div class="rd-top" style="background:var(--brand-dark);color:#fff"><div class="gis-wrap px-4 pt-3 pb-3 flex items-center gap-3">
+        <button id="gisVolver" class="text-white font-bold text-xl leading-none px-1" aria-label="Volver al inicio">‹</button>
+        <span class="form-ico" style="display:flex;align-items:center;justify-content:center;background:rgba(255,255,255,.12);color:#fff;width:46px;height:46px">${ico}</span>
+        <div class="flex-1 min-w-0"><div class="font-extrabold leading-tight">${titulo}</div>
+          <div class="text-xs" style="color:#C9D8EA">GIS & Logística · ${escA(sub)}</div></div>
+        <span class="logo-chip"><img src="${LOGO_SEDAPAL}" alt="SEDAPAL"></span>
+      </div></div>`;
+  }
+  let mapaNisL = null, planL = null;
+  function salirVistaGis(pintar) {
+    if (mapaNisL) { mapaNisL.remove(); mapaNisL = null; }
+    if (planL) { planL.remove(); planL = null; }
+    const d = document.getElementById("labDetalle"); if (d) d.remove();
+    if (pintar === false) return;
+    state.vista = null; render(); window.scrollTo(0, 0);
+  }
+  function renderVistaGis() {
+    const app = document.getElementById("app");
+    app.classList.remove("max-w-md");
+    if (state.vista === "MAPA_NIS") renderMapaNis();
+    else if (state.vista === "PLANIFICADOR_RUTAS") renderPlanificador();
+    else renderLaboratorio();
+    const v = document.getElementById("gisVolver"); if (v) v.onclick = () => salirVistaGis();
+  }
+  // Si el recuadro del mapa cambia de tamaño (girar el celular, cargar el panel), el mapa se reajusta solo
+  function vigilarTamano(mapa) {
+    if (!window.ResizeObserver) return;
+    const ro = new ResizeObserver(() => { if (mapa._loaded && mapa.getContainer().isConnected) mapa.invalidateSize(); });
+    ro.observe(mapa.getContainer()); mapa.on("unload", () => ro.disconnect());
+  }
+  function capaBase(mapa) {
+    vigilarTamano(mapa);
+    const calles = L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 19, attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>' });
+    const sat = L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}", { maxZoom: 19, attribution: "Imágenes &copy; Esri" });
+    calles.addTo(mapa);
+    L.control.layers({ "Calles": calles, "Satélite": sat }, null, { position: "topright" }).addTo(mapa);
+  }
+  function ubicacionAhora() {
+    return new Promise(ok => {
+      if (!navigator.geolocation) return ok(null);
+      navigator.geolocation.getCurrentPosition(p => {
+        state.coords = { lat: p.coords.latitude, lon: p.coords.longitude, alt: null, speed: null }; ok(state.coords);
+      }, () => ok(null), { enableHighAccuracy: true, timeout: 9000 });
+    });
+  }
+  const fmtKm = km => km == null ? "—" : km < 1 ? Math.round(km * 1000) + " m" : (Math.round(km * 10) / 10).toString().replace(".", ",") + " km";
+  const pinNum = (n, color) => L.divIcon({ className: "", iconSize: [30, 30], iconAnchor: [15, 15],
+    html: `<div style="width:30px;height:30px;border-radius:50%;background:${color || "#03204C"};color:#fff;border:2px solid #fff;box-shadow:0 2px 6px rgba(0,0,0,.4);display:flex;align-items:center;justify-content:center;font:700 13px Roboto,Arial,sans-serif">${n}</div>` });
+  const PIN_NIS = () => L.divIcon({ className: "", iconSize: [34, 44], iconAnchor: [17, 42],
+    html: `<svg width="34" height="44" viewBox="0 0 34 44"><path d="M17 43s15-14.5 15-26A15 15 0 0 0 2 17c0 11.5 15 26 15 26Z" fill="#0B5FA5" stroke="#fff" stroke-width="2.5"/><circle cx="17" cy="17" r="6" fill="#fff"/></svg>` });
+
+  /* ---------------- MAPA DE NIS ---------------- */
+  const claveHistNis = () => "ecrf_mapa_hist_" + (state.operario || "");
+  function renderMapaNis() {
+    const q = state.mnQuery || "";
+    const sel = state.mnSel && (NIS_REMOTO[state.mnSel] || nisLocal(state.mnSel));
+    const est = q.length === 7 ? estadoBusqueda(q) : "";
+    const hist = leerLS(claveHistNis(), []);
+    const yo = state.coords && state.coords.lat != null ? state.coords : null;
+    const dist = sel && yo && sel.latNis != null ? distKm(yo, { lat: Number(sel.latNis), lon: Number(sel.lonNis) }) : null;
+    const operarios = listaUsuarios().filter(u => (u.rol || "OPERARIO") === "OPERARIO");
+    document.getElementById("app").innerHTML = `${estilosGis()}
+      ${cabeceraGis("Mapa de NIS", "visor de conexiones de la base", ICO_MAPA)}
+      <div class="gis-wrap px-4 py-4 pb-24 gis-split">
+        <div class="gis-panel">
+          <div class="card p-4">
+            <label class="gis-lbl" for="mnNis">Buscar NIS</label>
+            <div class="flex gap-2">
+              <input id="mnNis" class="input" inputmode="numeric" maxlength="7" placeholder="7 dígitos, ej. 2848378" value="${escA(q)}" autocomplete="off">
+              <button id="mnBuscar" class="btn-primary" style="width:auto;padding:0 18px">Buscar</button>
+            </div>
+            <div id="mnEstado" class="text-sm mt-2" style="color:var(--ink-soft)">${
+              est === "buscando" ? "Buscando en la base de NIS…" : est === "noexiste" ? `<span style="color:var(--danger);font-weight:600">El NIS ${escA(q)} no está en la base.</span>`
+              : est === "sinred" ? "Sin internet: solo se encuentran los NIS consultados antes en este equipo." : q.length && q.length < 7 ? "El NIS tiene 7 dígitos." : "Base de conexiones con coordenadas del GIS."}</div>
+            ${hist.length ? `<div class="gis-lbl mt-3">Últimos consultados</div><div class="flex gap-2" style="flex-wrap:wrap">${hist.map(n => `<button class="gis-chip mnHist" data-n="${n}" aria-pressed="${n === state.mnSel}">${n}</button>`).join("")}</div>` : ""}
+          </div>
+          ${sel ? `
+          <div class="card p-4 mt-3" id="mnFicha">
+            <div class="flex items-center justify-between gap-2"><b class="text-lg" style="color:var(--brand-dark)">NIS ${escA(state.mnSel)}</b>
+              ${sel.latNis != null ? `<span class="badge" style="background:#DDF3E7;color:#12613B">Con ubicación GIS</span>` : `<span class="badge" style="background:#FFF1C7;color:#6B4A00">Sin coordenadas</span>`}</div>
+            <div class="gis-datos mt-3">
+              <div class="rd-dato" style="grid-column:1/-1"><small>Dirección</small><b>${escA(sel.direccion || "—")}</b></div>
+              <div class="rd-dato" style="grid-column:1/-1"><small>Urbanización</small><b>${escA(sel.urb || "—")}</b></div>
+              <div class="rd-dato"><small>Distrito</small><b>${escA(sel.distrito || "—")}</b></div>
+              <div class="rd-dato"><small>Sector</small><b>${escA(sel.sector || "—")}</b></div>
+              <div class="rd-dato"><small>CCSS</small><b>${escA(sel.ccss || "—")}</b></div>
+              <div class="rd-dato"><small>Distancia</small><b>${dist == null ? (yo ? "—" : "Activa tu ubicación") : fmtKm(dist)}</b></div>
+              ${sel.latNis != null ? `<div class="rd-dato" style="grid-column:1/-1"><small>Coordenadas (WGS84)</small><b style="font-variant-numeric:tabular-nums">${Number(sel.latNis).toFixed(6)}, ${Number(sel.lonNis).toFixed(6)}</b></div>` : ""}
+            </div>
+            ${sel.latNis != null ? `<a class="btn-primary w-full mt-3" style="display:flex;justify-content:center;text-decoration:none" target="_blank" rel="noopener" href="https://www.google.com/maps/dir/?api=1&destination=${sel.latNis},${sel.lonNis}">▶ Cómo llegar (Google Maps)</a>` : ""}
+            <div class="gis-lbl mt-4">Agregar a la ruta</div>
+            <div class="grid gap-2" style="grid-template-columns:1fr 1fr">
+              <select id="mnForm" class="input"><option value="GPFO0381">0381 Presiones</option><option value="GPFO0405">0405 Reparación</option><option value="GPFO0416">0416 Muestreo</option></select>
+              ${esSupervisor() ? `<select id="mnPara" class="input">${operarios.map(u => `<option>${escA(u.name)}</option>`).join("")}<option>${escA(state.operario)}</option></select>` : `<button id="mnAgregar" class="btn-ghost">+ A mi ruta</button>`}
+            </div>
+            ${esSupervisor() ? `<button id="mnAgregar" class="btn-ghost w-full mt-2">+ Agregar a la ruta del operario</button>` : ""}
+          </div>` : `<div class="card p-4 mt-3 text-sm" style="color:var(--ink-soft)">Escribe un NIS para ubicarlo en el mapa con su dirección, sector y CCSS.</div>`}
+          <div class="card p-3 mt-3 flex items-center justify-between gap-2">
+            <label class="text-sm flex items-center gap-2" style="font-weight:600"><input type="checkbox" id="mnRuta" ${state.mnVerRuta ? "checked" : ""}> Mostrar mi ruta (${paradasRuta().length})</label>
+            <button id="mnYo" class="btn-ghost" style="width:auto;padding:8px 12px">◎ Mi ubicación</button>
+          </div>
+        </div>
+        <div class="gis-mapa" id="mnMapa" role="region" aria-label="Mapa"></div>
+      </div>`;
+    const inp = document.getElementById("mnNis");
+    const buscar = async () => {
+      const v = inp.value.replace(/\D/g, "").slice(0, 7); state.mnQuery = v;
+      if (v.length !== 7) { renderMapaNis(); return; }
+      if (!nisLocal(v) && NIS_REMOTO[v] === undefined) { renderMapaNis(); await buscarNisServidor(v); }
+      if (nisLocal(v)) { state.mnSel = v; guardarLS(claveHistNis(), [v].concat(leerLS(claveHistNis(), []).filter(x => x !== v)).slice(0, 8)); }
+      if (state.vista === "MAPA_NIS") renderMapaNis();
+    };
+    inp.oninput = () => { inp.value = inp.value.replace(/\D/g, "").slice(0, 7); precargarNis(inp.value); if (inp.value.length === 7) buscar(); };
+    inp.onkeydown = e => { if (e.key === "Enter") buscar(); };
+    document.getElementById("mnBuscar").onclick = buscar;
+    document.querySelectorAll(".mnHist").forEach(b => b.onclick = () => { state.mnQuery = b.dataset.n; state.mnSel = b.dataset.n; if (!nisLocal(b.dataset.n)) buscar(); else renderMapaNis(); });
+    document.getElementById("mnRuta").onchange = e => { state.mnVerRuta = e.target.checked; renderMapaNis(); };
+    document.getElementById("mnYo").onclick = async () => { toast("Buscando tu ubicación…"); const c = await ubicacionAhora(); if (!c) toast("No se pudo obtener tu ubicación", true); if (state.vista === "MAPA_NIS") renderMapaNis(); };
+    const bAg = document.getElementById("mnAgregar");
+    if (bAg) bAg.onclick = async () => {
+      const r = sel, form = document.getElementById("mnForm").value, para = esSupervisor() ? document.getElementById("mnPara").value : state.operario;
+      if (state.pendientes.some(p => p.nis === state.mnSel && p.para === para && formDe(p) === form)) { toast("Ese NIS ya está en la ruta", true); return; }
+      await agregarPendiente({ form, nis: state.mnSel, ccss: r.ccss || "", latNis: r.latNis ?? null, lonNis: r.lonNis ?? null, direccion: r.direccion || "", urb: r.urb || "", distrito: r.distrito || "",
+                               sector: String(r.sector || ""), manual: false, para, preparadoPor: state.operario, creadoEn: Date.now() });
+      toast("NIS " + state.mnSel + " agregado a la ruta" + (para !== state.operario ? " de " + para : ""));
+      renderMapaNis();
+    };
+    pintarMapaNis(sel, yo);
+  }
+  let turnoMapa = 0;                                   // si se vuelve a pintar mientras carga, solo vale el último
+  async function pintarMapaNis(sel, yo) {
+    const turno = ++turnoMapa;
+    try { await cargarLeaflet(); } catch (e) { const m = document.getElementById("mnMapa"); if (m) m.innerHTML = `<div class="gis-sinmapa">No se pudo cargar el mapa. Revisa tu internet.</div>`; return; }
+    if (turno !== turnoMapa) return;
+    if (mapaNisL) { mapaNisL.remove(); mapaNisL = null; }
+    if (!document.getElementById("mnMapa")) return;
+    mapaNisL = L.map("mnMapa"); capaBase(mapaNisL);
+    const lim = [];
+    if (state.mnVerRuta) aplicarOrden(paradasRuta()).filter(p => p.lat != null).forEach((p, i) => {
+      L.marker([p.lat, p.lon], { icon: pinNum(i + 1, "#5B6B7F") }).addTo(mapaNisL).bindPopup(`<b>${i + 1}. NIS ${escA(p.nis)}</b><br>${escA(p.direccion || "")}<br><small>${escA(FORM_CORTO[formDe(p)] || "")}</small>`);
+      lim.push([p.lat, p.lon]);
+    });
+    if (sel && sel.latNis != null) {
+      const ll = [Number(sel.latNis), Number(sel.lonNis)];
+      L.marker(ll, { icon: PIN_NIS() }).addTo(mapaNisL).bindPopup(`<b>NIS ${escA(state.mnSel)}</b><br>${escA(sel.direccion || "")}<br><small>${escA(sel.urb || "")} · ${escA(sel.distrito || "")} · Sector ${escA(sel.sector || "")}</small>`).openPopup();
+      L.circle(ll, { radius: 50, color: "#33B1E4", weight: 1, fillOpacity: .12 }).addTo(mapaNisL);
+      lim.push(ll);
+    }
+    if (yo) { L.circleMarker([yo.lat, yo.lon], { radius: 8, color: "#fff", weight: 3, fillColor: "#1A73E8", fillOpacity: 1 }).addTo(mapaNisL).bindPopup("Estás aquí"); lim.push([yo.lat, yo.lon]); }
+    if (sel && sel.latNis != null && lim.length === 1) mapaNisL.setView(lim[0], 18);
+    else if (lim.length) mapaNisL.fitBounds(lim, { padding: [40, 40], maxZoom: 18 });
+    else mapaNisL.setView([-12.06, -77.04], 11);
+    setTimeout(() => mapaNisL && mapaNisL.invalidateSize(), 150);
+  }
+
+  /* ---------------- PLANIFICADOR DE RUTAS ---------------- */
+  // Usa la misma ruta (hoja RUTA) que la pestaña "Ruta" de cada formulario: no hay una segunda lista.
+  function paradasPlan() {
+    const f = state.plFiltro || "TODOS", quien = state.plQuien || "";
+    return aplicarOrden(paradasRuta()).filter(p => (f === "TODOS" || formDe(p) === f) && (!quien || p.para === quien));
+  }
+  function renderPlanificador() {
+    const todas = paradasPlan();
+    const con = todas.filter(p => p.lat != null && p.lon != null), sin = todas.filter(p => p.lat == null || p.lon == null);
+    const yo = state.coords && state.coords.lat != null ? state.coords : null;
+    let total = 0; con.forEach((p, i) => { if (i) total += distKm(con[i - 1], p); else if (yo) total += distKm(yo, p); });
+    const tramos = []; for (let i = 0; i < con.length; i += PARADAS_TRAMO) tramos.push(con.slice(i, i + PARADAS_TRAMO));
+    const q = state.plQuery || "", r = q.length === 7 ? (NIS_REMOTO[q] || nisLocal(q)) : null, est = q.length === 7 ? estadoBusqueda(q) : "";
+    const quienes = [...new Set(state.pendientes.map(p => p.para).filter(Boolean))];
+    document.getElementById("app").innerHTML = `${estilosGis()}
+      ${cabeceraGis("Planificador de rutas", "optimización de paradas en campo", ICO_RUTA)}
+      <div class="gis-wrap px-4 py-4 pb-24 gis-split">
+        <div class="gis-panel">
+          <div class="gis-kpis">
+            <div class="rd-dato"><small>Paradas</small><b>${todas.length}</b></div>
+            <div class="rd-dato"><small>En el mapa</small><b>${con.length}</b></div>
+            <div class="rd-dato"><small>Recorrido aprox.</small><b>${fmtKm(con.length ? total : null)}</b></div>
+          </div>
+          <div class="card p-4 mt-3">
+            <label class="gis-lbl" for="plNis">Agregar NIS a la ruta</label>
+            <div class="flex gap-2">
+              <input id="plNis" class="input" inputmode="numeric" maxlength="7" placeholder="NIS de 7 dígitos" value="${escA(q)}" autocomplete="off">
+              <select id="plForm" class="input" style="width:auto"><option value="GPFO0381">0381</option><option value="GPFO0405">0405</option><option value="GPFO0416">0416</option></select>
+            </div>
+            <div class="text-sm mt-2" style="color:var(--ink-soft)">${
+              r ? `<b style="color:var(--ink)">${escA(r.direccion || "")}</b> · ${escA(r.distrito || "")} · Sector ${escA(r.sector || "")}${r.latNis == null ? " · <span style='color:#6B4A00'>sin coordenadas</span>" : ""}`
+              : est === "buscando" ? "Buscando en la base…" : est === "noexiste" ? `<span style="color:var(--danger);font-weight:600">No está en la base de NIS.</span>` : est === "sinred" ? "Sin internet." : "Se completa con la base de NIS."}</div>
+            ${esSupervisor() ? `<select id="plPara" class="input mt-2">${listaUsuarios().filter(u => (u.rol || "OPERARIO") === "OPERARIO").map(u => `<option>${escA(u.name)}</option>`).join("")}<option>${escA(state.operario)}</option></select>` : ""}
+            <button id="plAgregar" class="btn-primary w-full mt-2" ${r ? "" : "disabled"}>+ Agregar a la ruta</button>
+          </div>
+          <div class="flex gap-2 mt-3" style="flex-wrap:wrap">
+            ${["TODOS", "GPFO0381", "GPFO0405", "GPFO0416"].map(f => `<button class="gis-chip plFil" data-f="${f}" aria-pressed="${(state.plFiltro || "TODOS") === f}">${f === "TODOS" ? "Todos" : FORM_CORTO[f]}</button>`).join("")}
+          </div>
+          ${esSupervisor() && quienes.length ? `<select id="plQuien" class="input mt-2"><option value="">Todos los operarios</option>${quienes.map(n => `<option ${n === state.plQuien ? "selected" : ""}>${escA(n)}</option>`).join("")}</select>` : ""}
+          <div class="grid gap-2 mt-3" style="grid-template-columns:1fr 1fr">
+            <button id="plOrdenar" class="btn-ghost" ${con.length > 1 ? "" : "disabled"}>↻ Ordenar por cercanía</button>
+            <button id="plYo" class="btn-ghost">◎ ${yo ? "Actualizar ubicación" : "Usar mi ubicación"}</button>
+          </div>
+          ${tramos.map((t, i) => `<a href="${urlTramo(t)}" target="_blank" rel="noopener" class="btn-primary w-full mt-2" style="display:flex;justify-content:center;text-decoration:none">▶ Google Maps${tramos.length > 1 ? ` · tramo ${i + 1} (paradas ${i * PARADAS_TRAMO + 1}–${i * PARADAS_TRAMO + t.length})` : ""}</a>`).join("")}
+          <div class="gis-lbl mt-4">Orden de visita</div>
+          ${todas.length ? `<ol class="pl-lista">${todas.map(p => {
+            const i = con.indexOf(p), d = i > 0 ? distKm(con[i - 1], p) : i === 0 && yo ? distKm(yo, p) : null;
+            return `<li class="pl-item">
+              <span class="pl-num" style="background:${i >= 0 ? "#03204C" : "#B9C6D3"}">${i >= 0 ? i + 1 : "–"}</span>
+              <div class="min-w-0 flex-1"><b>NIS ${escA(p.nis)}</b> <span class="pl-form">${escA(FORM_CORTO[formDe(p)] || "")}</span>
+                <div class="text-sm" style="color:var(--ink-soft)">${escA(p.direccion || "")}${p.distrito ? " · " + escA(p.distrito) : ""}</div>
+                <div class="text-xs" style="color:var(--ink-soft)">${i < 0 ? "Sin ubicación en la base" : d != null ? (i === 0 ? "Desde tu ubicación: " : "Desde la anterior: ") + fmtKm(d) : ""}${esSupervisor() ? " · " + escA(p.para || "") : ""}</div>
+                ${state.plQuitar === p.id ? `<div class="flex gap-2 mt-2"><span class="text-sm" style="font-weight:600">¿Quitar de la ruta?</span><button class="gis-chip plSi" data-id="${p.id}" style="border-color:var(--danger);color:var(--danger)">Sí, quitar</button><button class="gis-chip plNo">No</button></div>` : ""}
+              </div>
+              <div class="pl-acc">
+                ${i >= 0 ? `<button class="pl-btn plSube" data-id="${p.id}" aria-label="Subir" ${i === 0 ? "disabled" : ""}>↑</button><button class="pl-btn plBaja" data-id="${p.id}" aria-label="Bajar" ${i === con.length - 1 ? "disabled" : ""}>↓</button>` : ""}
+                <button class="pl-btn plReg" data-id="${p.id}" aria-label="Registrar formulario" title="Registrar">✎</button>
+                <button class="pl-btn plQuitar" data-id="${p.id}" aria-label="Quitar" style="color:var(--danger)">✕</button>
+              </div></li>`; }).join("")}</ol>`
+          : `<div class="card p-4 text-sm" style="color:var(--ink-soft)">No hay NIS en la ruta. Agrégalos aquí, desde el Mapa de NIS o desde la pestaña «Ruta» de cada formulario.</div>`}
+          ${sin.length ? `<div class="text-xs mt-2 p-2 rounded-lg" style="background:#FFF1C7;color:#6B4A00">${sin.length} NIS sin coordenadas en la base: no salen en el mapa ni en Google Maps.</div>` : ""}
+        </div>
+        <div class="gis-mapa" id="plMapa" role="region" aria-label="Mapa de la ruta"></div>
+      </div>`;
+    const inp = document.getElementById("plNis");
+    inp.oninput = async () => {
+      inp.value = inp.value.replace(/\D/g, "").slice(0, 7); state.plQuery = inp.value; precargarNis(inp.value);
+      if (inp.value.length === 7) { if (!nisLocal(inp.value) && NIS_REMOTO[inp.value] === undefined) { renderPlanificador(); await buscarNisServidor(inp.value); }
+        if (state.vista === "PLANIFICADOR_RUTAS") { renderPlanificador(); const n = document.getElementById("plNis"); n.focus(); n.setSelectionRange(7, 7); } }
+    };
+    document.getElementById("plAgregar").onclick = async () => {
+      if (!r) return;
+      const form = document.getElementById("plForm").value, para = esSupervisor() ? document.getElementById("plPara").value : state.operario;
+      if (state.pendientes.some(p => p.nis === q && p.para === para && formDe(p) === form)) { toast("Ese NIS ya está en la ruta", true); return; }
+      await agregarPendiente({ form, nis: q, ccss: r.ccss || "", latNis: r.latNis ?? null, lonNis: r.lonNis ?? null, direccion: r.direccion || "", urb: r.urb || "", distrito: r.distrito || "",
+                               sector: String(r.sector || ""), manual: false, para, preparadoPor: state.operario, creadoEn: Date.now() });
+      state.plQuery = ""; toast("NIS " + q + " agregado a la ruta"); renderPlanificador();
+    };
+    document.querySelectorAll(".plFil").forEach(b => b.onclick = () => { state.plFiltro = b.dataset.f; renderPlanificador(); });
+    const qs = document.getElementById("plQuien"); if (qs) qs.onchange = () => { state.plQuien = qs.value; renderPlanificador(); };
+    const guardarOrden = lista => { const resto = leerLS(claveOrden(), []).filter(id => !lista.includes(id)); guardarLS(claveOrden(), lista.concat(resto)); };
+    document.getElementById("plOrdenar").onclick = () => {
+      const orden = ordenarCercania(con, yo ? { lat: yo.lat, lon: yo.lon } : null);
+      guardarOrden(orden.map(p => p.id).concat(sin.map(p => p.id))); toast("Ruta ordenada por cercanía" + (yo ? " desde tu ubicación" : "")); renderPlanificador();
+    };
+    document.getElementById("plYo").onclick = async () => { toast("Buscando tu ubicación…"); const c = await ubicacionAhora(); if (!c) toast("No se pudo obtener tu ubicación", true); if (state.vista === "PLANIFICADOR_RUTAS") renderPlanificador(); };
+    const mover = (id, delta) => { const ids = con.map(p => p.id), i = ids.indexOf(id), j = i + delta; if (j < 0 || j >= ids.length) return;
+      [ids[i], ids[j]] = [ids[j], ids[i]]; guardarOrden(ids.concat(sin.map(p => p.id))); renderPlanificador(); };
+    document.querySelectorAll(".plSube").forEach(b => b.onclick = () => mover(b.dataset.id, -1));
+    document.querySelectorAll(".plBaja").forEach(b => b.onclick = () => mover(b.dataset.id, 1));
+    document.querySelectorAll(".plQuitar").forEach(b => b.onclick = () => { state.plQuitar = b.dataset.id; renderPlanificador(); });
+    document.querySelectorAll(".plNo").forEach(b => b.onclick = () => { state.plQuitar = null; renderPlanificador(); });
+    document.querySelectorAll(".plSi").forEach(b => b.onclick = async () => { const p = state.pendientes.find(x => x.id === b.dataset.id); state.plQuitar = null; await borrarPendiente(b.dataset.id); toast("NIS " + (p ? p.nis : "") + " quitado de la ruta"); renderPlanificador(); });
+    document.querySelectorAll(".plReg").forEach(b => b.onclick = () => {     // abre el formulario con el NIS listo (igual que «Completar» en la Ruta)
+      const p = state.pendientes.find(x => x.id === b.dataset.id); if (!p) return;
+      abrirModulo(formDe(p));
+      state.nisSel = { nis: p.nis, direccion: p.direccion || "", urb: p.urb || "", distrito: p.distrito || "", sector: p.sector || "", ccss: p.ccss || "", latNis: p.latNis ?? null, lonNis: p.lonNis ?? null, manual: !!p.manual };
+      state.pendienteId = p.id; state.fecha = todayISO(); state.hora = nowHM(); ensureLocation(); render();
+    });
+    pintarPlan(con, yo);
+  }
+  async function pintarPlan(con, yo) {
+    const turno = ++turnoMapa;
+    try { await cargarLeaflet(); } catch (e) { const m = document.getElementById("plMapa"); if (m) m.innerHTML = `<div class="gis-sinmapa">No se pudo cargar el mapa. Revisa tu internet.</div>`; return; }
+    if (turno !== turnoMapa) return;
+    if (planL) { planL.remove(); planL = null; }
+    if (!document.getElementById("plMapa")) return;
+    planL = L.map("plMapa"); capaBase(planL);
+    const lim = [];
+    con.forEach((p, i) => { L.marker([p.lat, p.lon], { icon: pinNum(i + 1) }).addTo(planL)
+      .bindPopup(`<b>${i + 1}. NIS ${escA(p.nis)}</b><br>${escA(p.direccion || "")}<br><small>${escA(FORM_CORTO[formDe(p)] || "")}</small><br><a href="https://www.google.com/maps/dir/?api=1&destination=${p.lat},${p.lon}" target="_blank" rel="noopener">Ir a este punto</a>`);
+      lim.push([p.lat, p.lon]); });
+    const linea = (yo ? [[yo.lat, yo.lon]] : []).concat(con.map(p => [p.lat, p.lon]));
+    if (linea.length > 1) L.polyline(linea, { color: "#33B1E4", weight: 4, dashArray: "8 8" }).addTo(planL);
+    if (yo) { L.circleMarker([yo.lat, yo.lon], { radius: 8, color: "#fff", weight: 3, fillColor: "#1A73E8", fillOpacity: 1 }).addTo(planL).bindPopup("Estás aquí"); lim.push([yo.lat, yo.lon]); }
+    if (lim.length) planL.fitBounds(lim, { padding: [40, 40], maxZoom: 17 }); else planL.setView([-12.06, -77.04], 11);
+    setTimeout(() => planL && planL.invalidateSize(), 150);
+  }
+
+  /* ---------------- LABORATORIO ECRF ---------------- */
+  const LAB_SECCIONES = [
+    { t: "Identificación", c: [["placa", "Placa"], ["codigoUnidad", "Código de unidad"], ["codigoActivo", "Código de activo"], ["tipoFlota", "Tipo de flota"], ["tipoUnidad", "Tipo de unidad"], ["estado", "Estado operativo", "estado"]] },
+    { t: "Ficha técnica", c: [["marca", "Marca"], ["modelo", "Modelo"], ["anoFabricacion", "Año de fabricación"], ["combustible", "Combustible"], ["color", "Color"], ["numeroMotor", "N.° de motor"],
+      ["cilindros", "Cilindros"], ["cilindrada", "Cilindrada"], ["traccion", "Tracción"], ["numeroSerie", "N.° de serie (VIN)"], ["ruedas", "Ruedas"], ["numeroPasajeros", "Pasajeros"], ["numeroAsientos", "Asientos"]] },
+    { t: "Dimensiones y capacidad", c: [["longitud", "Longitud"], ["ancho", "Ancho"], ["altura", "Altura"], ["cargaUtil", "Carga útil"]] },
+    { t: "SOAT", c: [["soatPoliza", "N.° de póliza"], ["soatAseguradora", "Aseguradora"], ["soatDesde", "Vigente desde", "fecha"], ["soatHasta", "Vigente hasta", "fecha"], ["soatEnlace", "Enlace del documento (Drive)", "url"]] },
+    { t: "Revisión técnica (CITV)", c: [["citvCertificado", "N.° de certificado"], ["citvEntidad", "Entidad"], ["citvHasta", "Vigente hasta", "fecha"], ["citvEnlace", "Enlace del documento (Drive)", "url"]] },
+    { t: "Tarjeta de propiedad", c: [["tarjetaNumero", "N.° de tarjeta"], ["tarjetaPartida", "Partida registral"], ["tarjetaEnlace", "Enlace del documento (Drive)", "url"]] },
+    { t: "Mantenimiento preventivo", c: [["mantUltima", "Último mantenimiento", "fecha"], ["mantProxima", "Próximo mantenimiento", "fecha"], ["mantKm", "Kilometraje del último"], ["mantDetalle", "Detalle"], ["mantEnlace", "Enlace del documento (Drive)", "url"]] },
+    { t: "Alertas", c: [["diasAlerta", "Avisar con cuántos días de anticipación", "num"]] }
+  ];
+  const ESTADOS_VEH = ["Operativo", "En mantenimiento", "En reserva", "Fuera de servicio"];
+  const fechaPe = iso => /^\d{4}-\d{2}-\d{2}$/.test(String(iso || "")) ? String(iso).split("-").reverse().join("/") : (iso || "—");
+  function diasHasta(iso, hoy) { if (!/^\d{4}-\d{2}-\d{2}$/.test(String(iso || ""))) return null; return Math.round((Date.parse(iso + "T00:00:00Z") - Date.parse(hoy + "T00:00:00Z")) / 864e5); }
+  function alertasLab(v, hoy) {
+    const lim = Number(v.diasAlerta) || 7;
+    return [["SOAT", v.soatHasta], ["Revisión técnica", v.citvHasta], ["Mantenimiento preventivo", v.mantProxima]].map(([n, f]) => {
+      const d = diasHasta(f, hoy); if (d === null) return null;
+      return { n, f, d, nivel: d < 0 ? "vencido" : d <= lim ? "pronto" : "ok" };
+    }).filter(Boolean);
+  }
+  const NIVEL = { vencido: ["#FBE3E0", "#8A1F14"], pronto: ["#FFF1C7", "#6B4A00"], ok: ["#DDF3E7", "#12613B"] };
+  const txtAlerta = a => a.nivel === "vencido" ? `Vencido hace ${-a.d} día${a.d === -1 ? "" : "s"}` : a.d === 0 ? "Vence hoy" : a.nivel === "pronto" ? `Vence en ${a.d} día${a.d === 1 ? "" : "s"}` : `Vigente hasta ${fechaPe(a.f)}`;
+  async function cargarLab() {
+    try { state.labDatos = await rdApi("lab_datos"); } catch (e) { state.labDatos = { error: msgError(e) }; }
+    if (state.vista === "LABORATORIO_ECRF") renderLaboratorio();
+    if (state.admin && state.adminTab === "vehiculo") renderAdmin();
+  }
+  function renderLaboratorio() {
+    const d = state.labDatos, tab = state.labTab || "vehiculo";
+    document.getElementById("app").innerHTML = `${estilosGis()}
+      ${cabeceraGis("Laboratorio ECRF", "ficha técnica y unidad móvil", ICO_LAB)}
+      <div style="background:var(--card);border-bottom:1px solid var(--line)"><div class="gis-wrap flex px-4">
+        <div class="tab-btn ${tab === "vehiculo" ? "active" : ""}" data-labtab="vehiculo">Vehículo</div>
+        <div class="tab-btn ${tab === "recorridos" ? "active" : ""}" data-labtab="recorridos">Recorridos${d && d.enCurso ? " · en curso" : ""}</div>
+      </div></div>
+      <div class="gis-wrap px-4 py-4 pb-24" id="labCont">${
+        !d ? `<div class="text-sm py-6" style="color:var(--ink-soft)">Cargando…</div>`
+        : d.error ? `<div class="card p-4"><div class="text-sm" style="color:var(--danger);font-weight:600">${escA(d.error)}</div><button id="labReint" class="btn-primary w-full mt-3">Reintentar</button></div>`
+        : tab === "vehiculo" ? htmlLabVehiculo(d) : htmlLabRecorridos(d)}</div>`;
+    document.getElementById("gisVolver").onclick = () => salirVistaGis();
+    document.querySelectorAll("[data-labtab]").forEach(t => t.onclick = () => { state.labTab = t.dataset.labtab; renderLaboratorio(); });
+    if (!d) { cargarLab(); return; }
+    const re = document.getElementById("labReint"); if (re) re.onclick = () => { state.labDatos = null; renderLaboratorio(); };
+    if (!d.error && tab === "recorridos") activarLabRecorridos(d);
+    const ed = document.getElementById("labEditar"); if (ed) ed.onclick = () => { abrirModulo("ADMIN"); state.adminTab = "vehiculo"; renderAdmin(); };
+  }
+  function htmlLabVehiculo(d) {
+    const v = d.vehiculo || {};
+    if (!v.placa) return `<div class="card p-5 text-center"><div style="color:var(--brand-dark)">${ICO_LAB}</div>
+      <b class="block mt-2">Aún no hay datos del vehículo laboratorio</b>
+      <div class="text-sm mt-1" style="color:var(--ink-soft)">${esAdmin() ? "Regístralos en el Panel de administración, pestaña «Laboratorio (vehículo)»." : "El administrador debe registrarlos en el Panel de administración."}</div>
+      ${esAdmin() ? `<button id="labEditar" class="btn-primary mt-3" style="width:auto;padding:12px 20px">Registrar vehículo</button>` : ""}</div>`;
+    const al = alertasLab(v, d.hoy), malas = al.filter(a => a.nivel !== "ok");
+    const est = String(v.estado || "Operativo"), colEst = /operativo/i.test(est) ? NIVEL.ok : /fuera/i.test(est) ? NIVEL.vencido : NIVEL.pronto;
+    const doc = (u, t) => /^https:\/\//.test(u || "") ? `<a href="${escA(u)}" target="_blank" rel="noopener" class="gis-chip" style="text-decoration:none">📄 ${t}</a>` : "";
+    return `
+      ${malas.length ? `<div class="lab-alerta" role="alert"><b>⚠ Documentos por atender</b>${malas.map(a => `<div>${escA(a.n)}: <b>${txtAlerta(a)}</b> (${fechaPe(a.f)})</div>`).join("")}</div>` : ""}
+      <div class="card p-4 lab-cab">
+        <div class="lab-placa"><small>PERÚ</small><b>${escA(v.placa)}</b></div>
+        <div class="min-w-0 flex-1">
+          <div class="flex items-center gap-2" style="flex-wrap:wrap"><b class="text-lg" style="color:var(--brand-dark)">${escA(v.codigoUnidad || "Laboratorio ECRF")}</b>
+            <span class="badge" style="background:${colEst[0]};color:${colEst[1]}">${escA(est)}</span></div>
+          <div class="text-sm" style="color:var(--ink-soft)">${escA(v.tipoUnidad || "")}</div>
+          <div class="text-sm" style="color:var(--ink-soft)">${escA([v.marca, v.modelo, v.anoFabricacion].filter(Boolean).join(" · "))}</div>
+        </div>
+        ${esAdmin() ? `<button id="labEditar" class="btn-ghost" style="width:auto;padding:8px 14px">Editar</button>` : ""}
+      </div>
+      <div class="lab-docs mt-3">${al.map(a => `<div class="lab-doc" style="background:${NIVEL[a.nivel][0]};color:${NIVEL[a.nivel][1]}"><small>${escA(a.n)}</small><b>${txtAlerta(a)}</b></div>`).join("")}</div>
+      <div class="lab-secs mt-3">${LAB_SECCIONES.filter(s => s.t !== "Alertas").map(s => {
+        const filas = s.c.filter(([k, , tipo]) => tipo !== "url" && v[k]);
+        const docu = s.c.filter(([, , tipo]) => tipo === "url").map(([k]) => doc(v[k], "Ver documento")).join("");
+        if (!filas.length && !docu) return "";
+        return `<section class="card p-4"><h3 class="lab-st">${s.t}</h3><dl class="lab-dl">${filas.map(([k, n, tipo]) => `<dt>${n}</dt><dd>${escA(tipo === "fecha" ? fechaPe(v[k]) : v[k])}</dd>`).join("")}</dl>${docu ? `<div class="mt-2">${docu}</div>` : ""}</section>`;
+      }).join("")}</div>`;
+  }
+  function htmlLabRecorridos(d) {
+    const v = d.vehiculo || {}, ec = d.enCurso;
+    const ultimoKm = (d.recorridos || []).map(r => r.kmLlegada).filter(x => x != null).sort((a, b) => b - a)[0];
+    const foto = (id, txt) => `<div class="lab-foto"><input type="file" accept="image/*" capture="environment" id="${id}" class="lab-file"><label for="${id}" class="btn-ghost w-full" style="display:flex;justify-content:center;cursor:pointer">📷 ${txt}</label><div class="lab-prev" id="${id}Prev"></div></div>`;
+    const formSalida = `
+      <div class="card p-4"><h3 class="lab-st">Registrar salida del vehículo</h3>
+        ${!v.placa ? `<div class="text-sm" style="color:var(--danger)">Primero el administrador debe registrar los datos del vehículo.</div>` : `
+        <div class="text-sm mb-3" style="color:var(--ink-soft)">Vehículo <b>${escA(v.placa)}</b>${ultimoKm != null ? ` · último kilometraje registrado: <b>${ultimoKm} km</b>` : ""}</div>
+        <div class="grid gap-3 lab-form2">
+          <div><label class="gis-lbl" for="lsMotivo">Motivo de salida *</label><select id="lsMotivo" class="input"><option value="">Elige…</option>${(d.motivos || []).map(m => `<option>${escA(m)}</option>`).join("")}</select></div>
+          <div><label class="gis-lbl" for="lsKm">Kilometraje de salida *</label><input id="lsKm" class="input" inputmode="decimal" value="${ultimoKm != null ? ultimoKm : ""}" placeholder="Ej. 45230"></div>
+          <div><label class="gis-lbl" for="lsLugar">Lugar de salida</label><input id="lsLugar" class="input" value="Patio ECRF"></div>
+          <div><label class="gis-lbl" for="lsDet">Destino o detalle</label><input id="lsDet" class="input" maxlength="500" placeholder="Ej. Sector 306, San Juan de Miraflores"></div>
+        </div>
+        <div class="gis-lbl mt-3">Foto del odómetro *</div>${foto("lsFoto", "Tomar foto del odómetro")}
+        <div class="rd-err" id="lsErr"></div>
+        <button id="lsGuardar" class="btn-primary w-full mt-2">Registrar salida</button>`}
+      </div>`;
+    const formCurso = ec ? `
+      <div class="card p-4" style="border:2px solid #33B1E4">
+        <div class="flex items-center justify-between gap-2"><h3 class="lab-st" style="margin:0">Recorrido en curso · ${escA(ec.codigo)}</h3><span class="badge" style="background:#E1F3FB;color:#0B4A6B">En curso</span></div>
+        <div class="gis-kpis mt-3">
+          <div class="rd-dato"><small>Salida</small><b>${escA(horaDe(ec.salidaEn) || ec.salidaEn)}</b></div>
+          <div class="rd-dato"><small>Km salida</small><b>${ec.kmSalida}</b></div>
+          <div class="rd-dato"><small>Operador</small><b>${escA(ec.operador)}</b></div>
+        </div>
+        <div class="text-sm mt-2"><b>${escA(ec.motivo)}</b>${ec.detalle ? " · " + escA(ec.detalle) : ""}</div>
+        ${ec.paradas.length ? `<div class="gis-lbl mt-3">Paradas</div>${ec.paradas.map(p => `<div class="text-sm py-1" style="border-bottom:1px solid #EEF2F6"><b>${p.orden}.</b> ${escA(p.lugar)} · ${p.km} km · ${escA(horaDe(p.en) || p.en)}${p.obs ? " · " + escA(p.obs) : ""}</div>`).join("")}` : ""}
+        <div class="lab-acc mt-3">
+          <details class="lab-det" ${state.labAbierto === "parada" ? "open" : ""} data-k="parada"><summary class="btn-ghost">+ Agregar parada</summary>
+            <div class="grid gap-3 mt-3 lab-form2">
+              <div><label class="gis-lbl" for="lpLugar">Lugar *</label><input id="lpLugar" class="input" maxlength="200" placeholder="Ej. Grifo, taller, NIS 2848378"></div>
+              <div><label class="gis-lbl" for="lpKm">Kilometraje *</label><input id="lpKm" class="input" inputmode="decimal"></div>
+              <div style="grid-column:1/-1"><label class="gis-lbl" for="lpObs">Observación</label><input id="lpObs" class="input" maxlength="500"></div>
+            </div>
+            <div class="gis-lbl mt-3">Foto del odómetro (opcional)</div>${foto("lpFoto", "Tomar foto")}
+            <div class="rd-err" id="lpErr"></div><button id="lpGuardar" class="btn-primary w-full mt-2">Guardar parada</button>
+          </details>
+          <details class="lab-det" ${state.labAbierto === "llegada" ? "open" : ""} data-k="llegada"><summary class="btn-primary" style="display:block;text-align:center">Registrar llegada</summary>
+            <div class="grid gap-3 mt-3 lab-form2">
+              <div><label class="gis-lbl" for="llKm">Kilometraje de llegada *</label><input id="llKm" class="input" inputmode="decimal"></div>
+              <div><label class="gis-lbl" for="llLugar">Lugar de llegada</label><input id="llLugar" class="input" value="Patio ECRF"></div>
+              <div style="grid-column:1/-1"><label class="gis-lbl" for="llObs">Observaciones</label><textarea id="llObs" class="input" rows="2" maxlength="1000"></textarea></div>
+            </div>
+            <div class="gis-lbl mt-3">Foto del odómetro *</div>${foto("llFoto", "Tomar foto del odómetro")}
+            <div id="llTotal" class="text-sm mt-2" style="font-weight:600"></div>
+            <div class="rd-err" id="llErr"></div><button id="llGuardar" class="btn-primary w-full mt-2">Cerrar recorrido</button>
+          </details>
+        </div>
+      </div>` : "";
+    const lista = (d.recorridos || []).filter(r => r.estado !== "EN_CURSO");
+    return `${ec ? formCurso : formSalida}
+      <h3 class="lab-st mt-4">Historial de recorridos</h3>
+      ${lista.length ? `<div class="lab-tabla-wrap"><table class="lab-tabla"><thead><tr><th>Código</th><th>Fecha</th><th>Operador</th><th>Motivo</th><th class="num">Km salida</th><th class="num">Km llegada</th><th class="num">Total</th></tr></thead>
+        <tbody>${lista.map(r => `<tr class="labFila" data-id="${r.id}" tabindex="0"><td><b>${escA(r.codigo)}</b></td><td>${fechaPe(r.fecha)}</td><td>${escA(r.operador)}</td><td>${escA(r.motivo)}</td><td class="num">${r.kmSalida ?? ""}</td><td class="num">${r.kmLlegada ?? ""}</td><td class="num"><b>${r.kmTotal != null ? r.kmTotal + " km" : ""}</b></td></tr>`).join("")}</tbody></table></div>`
+        : `<div class="card p-4 text-sm" style="color:var(--ink-soft)">Todavía no hay recorridos terminados.</div>`}`;
+  }
+  // Foto del odómetro: se reduce a 1280 px antes de enviarla
+  function fotoReducida(file) {
+    return new Promise((ok, mal) => {
+      const img = new Image(), url = URL.createObjectURL(file);
+      img.onload = () => { const k = Math.min(1, 1280 / Math.max(img.width, img.height)); const c = document.createElement("canvas");
+        c.width = Math.round(img.width * k); c.height = Math.round(img.height * k); c.getContext("2d").drawImage(img, 0, 0, c.width, c.height);
+        URL.revokeObjectURL(url); ok(c.toDataURL("image/jpeg", 0.78)); };
+      img.onerror = () => { URL.revokeObjectURL(url); mal(new Error("foto")); };
+      img.src = url;
+    });
+  }
+  function activarLabRecorridos(d) {
+    const fotos = {};
+    document.querySelectorAll(".lab-file").forEach(inp => inp.onchange = async () => {
+      const f = inp.files && inp.files[0]; if (!f) return;
+      try { fotos[inp.id] = await fotoReducida(f); document.getElementById(inp.id + "Prev").innerHTML = `<img src="${fotos[inp.id]}" alt="Foto del odómetro">`; }
+      catch (e) { toast("No se pudo leer la foto", true); }
+    });
+    document.querySelectorAll(".lab-det").forEach(x => x.ontoggle = () => { if (x.open) { state.labAbierto = x.dataset.k; document.querySelectorAll(".lab-det").forEach(o => { if (o !== x) o.open = false; }); } });
+    const enviar = async (tipo, datos, errId, boton) => {
+      const b = document.getElementById(boton), e = document.getElementById(errId); e.textContent = "";
+      if (b.disabled) return; b.disabled = true; const t = b.textContent; b.textContent = "Guardando…";
+      try { state.labDatos = await rdApi(tipo, { clave: nuevaClave(), ...datos }); state.labAbierto = null; toast("Guardado ✅"); renderLaboratorio(); }
+      catch (x) { e.textContent = msgError(x); b.disabled = false; b.textContent = t; }
+    };
+    const val = id => (document.getElementById(id) || {}).value || "";
+    const bs = document.getElementById("lsGuardar");
+    if (bs) bs.onclick = () => {
+      const e = document.getElementById("lsErr");
+      if (!val("lsMotivo")) { e.textContent = "Elige el motivo de salida"; return; }
+      if (!val("lsKm").trim()) { e.textContent = "Escribe el kilometraje de salida"; return; }
+      if (!fotos.lsFoto) { e.textContent = "Toma la foto del odómetro"; return; }
+      enviar("lab_salida", { motivo: val("lsMotivo"), km: val("lsKm"), lugar: val("lsLugar"), detalle: val("lsDet"), foto: fotos.lsFoto }, "lsErr", "lsGuardar");
+    };
+    const bp = document.getElementById("lpGuardar");
+    if (bp) bp.onclick = () => {
+      const e = document.getElementById("lpErr");
+      if (!val("lpLugar").trim() || !val("lpKm").trim()) { e.textContent = "Completa el lugar y el kilometraje"; return; }
+      enviar("lab_parada", { id: d.enCurso.id, lugar: val("lpLugar"), km: val("lpKm"), obs: val("lpObs"), foto: fotos.lpFoto || "" }, "lpErr", "lpGuardar");
+    };
+    const kmLl = document.getElementById("llKm");
+    if (kmLl) kmLl.oninput = () => { const n = Number(kmLl.value.replace(",", ".")); const t = document.getElementById("llTotal");
+      t.textContent = isFinite(n) && kmLl.value.trim() && n >= d.enCurso.kmSalida ? "Recorrido total: " + (Math.round((n - d.enCurso.kmSalida) * 10) / 10) + " km" : ""; };
+    const bl = document.getElementById("llGuardar");
+    if (bl) bl.onclick = () => {
+      const e = document.getElementById("llErr");
+      if (!val("llKm").trim()) { e.textContent = "Escribe el kilometraje de llegada"; return; }
+      if (!fotos.llFoto) { e.textContent = "Toma la foto del odómetro"; return; }
+      enviar("lab_llegada", { id: d.enCurso.id, km: val("llKm"), lugar: val("llLugar"), observaciones: val("llObs"), foto: fotos.llFoto }, "llErr", "llGuardar");
+    };
+    document.querySelectorAll(".labFila").forEach(tr => tr.onclick = tr.onkeydown = ev => {
+      if (ev.type === "keydown" && ev.key !== "Enter") return;
+      const r = (d.recorridos || []).find(x => x.id === tr.dataset.id); if (r) abrirDetalleRecorrido(r);
+    });
+  }
+  function abrirDetalleRecorrido(r) {
+    const mini = id => id ? `<img src="https://drive.google.com/thumbnail?id=${encodeURIComponent(id)}&sz=w400" alt="Foto del odómetro" onerror="this.replaceWith(Object.assign(document.createElement('span'),{textContent:'Foto guardada en Drive',className:'text-xs'}))">` : `<span class="text-xs" style="color:var(--ink-soft)">Sin foto</span>`;
+    const el = document.createElement("div"); el.id = "labDetalle"; el.className = "lab-modal";
+    el.innerHTML = `<div class="lab-modal-in card p-4" role="dialog" aria-label="Detalle del recorrido">
+      <div class="flex items-center justify-between gap-2"><b class="text-lg" style="color:var(--brand-dark)">${escA(r.codigo)}</b><button id="labDetCerrar" class="pl-btn" aria-label="Cerrar">✕</button></div>
+      <div class="text-sm" style="color:var(--ink-soft)">${fechaPe(r.fecha)} · ${escA(r.placa)} · ${escA(r.operador)}</div>
+      <div class="text-sm mt-2"><b>${escA(r.motivo)}</b>${r.detalle ? " · " + escA(r.detalle) : ""}</div>
+      <div class="gis-kpis mt-3"><div class="rd-dato"><small>Salida</small><b>${r.kmSalida} km</b></div><div class="rd-dato"><small>Llegada</small><b>${r.kmLlegada ?? "—"} km</b></div><div class="rd-dato"><small>Total</small><b>${r.kmTotal ?? "—"} km</b></div></div>
+      <div class="lab-fotos mt-3"><div><small>Salida · ${escA(horaDe(r.salidaEn))} · ${escA(r.lugarSalida)}</small>${mini(r.fotoSalida)}</div><div><small>Llegada · ${escA(horaDe(r.llegadaEn))} · ${escA(r.lugarLlegada)}</small>${mini(r.fotoLlegada)}</div></div>
+      ${r.paradas.length ? `<div class="gis-lbl mt-3">Paradas</div>${r.paradas.map(p => `<div class="text-sm py-1" style="border-bottom:1px solid #EEF2F6"><b>${p.orden}.</b> ${escA(p.lugar)} · ${p.km} km · ${escA(horaDe(p.en))}${p.obs ? " · " + escA(p.obs) : ""}</div>`).join("")}` : ""}
+      ${r.observaciones ? `<div class="rd-dato mt-3"><small>Observaciones</small>${escA(r.observaciones)}</div>` : ""}
+    </div>`;
+    document.body.appendChild(el);
+    const cerrar = () => el.remove();
+    el.querySelector("#labDetCerrar").onclick = cerrar; el.onclick = ev => { if (ev.target === el) cerrar(); };
+  }
+
+  /* ---------- Panel de administración: pestaña «Laboratorio (vehículo)» ---------- */
+  function htmlAdminVehiculo() {
+    const d = state.labDatos;
+    if (!d) { cargarLab(); return `<div class="text-sm py-6" style="color:var(--ink-soft)">Cargando…</div>`; }
+    if (d.error) return `<div class="card p-4 text-sm" style="color:var(--danger)">${escA(d.error)}</div>`;
+    const v = state.adminVeh || (state.adminVeh = { diasAlerta: "7", estado: "Operativo", ...(d.vehiculo || {}) });
+    const campo = ([k, n, tipo]) => `<div ${k === "tipoUnidad" || k === "modelo" || k === "mantDetalle" || tipo === "url" ? 'style="grid-column:1/-1"' : ""}>
+      <label class="gis-lbl" for="veh_${k}">${n}${k === "placa" ? " *" : ""}</label>
+      ${tipo === "estado" ? `<select id="veh_${k}" class="input vehCampo" data-k="${k}">${ESTADOS_VEH.map(e => `<option ${e === v[k] ? "selected" : ""}>${e}</option>`).join("")}</select>`
+        : `<input id="veh_${k}" class="input vehCampo" data-k="${k}" ${tipo === "fecha" ? 'type="date"' : tipo === "num" ? 'type="number" min="1" max="90"' : tipo === "url" ? 'type="url" placeholder="https://drive.google.com/…"' : ""} value="${escA(v[k] || "")}">`}</div>`;
+    return `<div class="adm-veh">${LAB_SECCIONES.map(s => `<section class="card p-4"><h3 class="lab-st">${s.t}</h3><div class="grid gap-3 lab-form2">${s.c.map(campo).join("")}</div></section>`).join("")}</div>
+      <div class="rd-err" id="vehErr"></div>
+      <div class="adm-guardar-veh"><button id="vehGuardar" class="btn-primary">Guardar datos del vehículo</button></div>`;
+  }
+  function activarAdminVehiculo(app) {
+    app.querySelectorAll(".vehCampo").forEach(i => i.oninput = i.onchange = () => { state.adminVeh[i.dataset.k] = i.value; });
+    const b = document.getElementById("vehGuardar"); if (!b) return;
+    b.onclick = async () => {
+      const e = document.getElementById("vehErr"); e.textContent = "";
+      const v = state.adminVeh;
+      if (!String(v.placa || "").trim()) { e.textContent = "La placa es obligatoria"; return; }
+      const malo = LAB_SECCIONES.flatMap(s => s.c).find(([k, , t]) => t === "url" && v[k] && !/^https:\/\//.test(v[k]));
+      if (malo) { e.textContent = "El enlace de «" + malo[1] + "» debe empezar con https://"; return; }
+      b.disabled = true; b.textContent = "Guardando…";
+      try { state.labDatos = await rdApi("lab_vehiculo", { vehiculo: v }); state.adminVeh = null; toast("Vehículo guardado ✅"); }
+      catch (x) { e.textContent = msgError(x); }
+      b.disabled = false; b.textContent = "Guardar datos del vehículo";
+      if (state.admin) { const y = window.scrollY; renderAdmin(); window.scrollTo(0, y); }
+    };
+  }
+
+  function estilosGis() {
+    return `<style>
+      .gis-wrap{max-width:1240px;margin:0 auto;width:100%}
+      .gis-split{display:grid;gap:14px}
+      .gis-mapa{height:58vh;min-height:320px;border-radius:16px;overflow:hidden;border:1px solid var(--line);background:#dfe7ee;order:-1}
+      @media (min-width: 900px){ .gis-split{grid-template-columns:minmax(0,400px) minmax(0,1fr);align-items:start}
+        .gis-mapa{order:0;position:sticky;top:12px;height:calc(100vh - 140px)} }
+      .gis-sinmapa{padding:30px;text-align:center;color:var(--ink-soft)}
+      .gis-lbl{display:block;font-size:12px;font-weight:700;color:var(--ink-soft);text-transform:uppercase;letter-spacing:.04em;margin-bottom:6px}
+      .gis-chip{border-radius:999px;padding:7px 12px;font-size:13px;font-weight:700;border:1.5px solid var(--line);background:#fff;color:var(--ink);font-variant-numeric:tabular-nums}
+      .gis-chip[aria-pressed="true"]{background:#E1F3FB;border-color:#7CCBEA;color:#0B4A6B}
+      .gis-datos,.gis-kpis{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
+      .gis-kpis{grid-template-columns:repeat(3,minmax(0,1fr))}
+      .gis-kpis b{font-variant-numeric:tabular-nums}
+      .rd-dato{background:var(--bg,#F2F5F8);border-radius:10px;padding:8px 10px;min-width:0;overflow-wrap:anywhere}
+      .rd-dato small{display:block;font-size:11px;color:var(--ink-soft);font-weight:700;text-transform:uppercase;letter-spacing:.03em}
+      .rd-err{color:var(--danger);font-size:13px;font-weight:600;margin-top:6px}
+      .btn-primary:disabled{opacity:.5}
+      .pl-lista{display:grid;gap:8px}
+      .pl-item{display:flex;gap:10px;align-items:flex-start;background:#fff;border:1px solid var(--line);border-radius:14px;padding:10px}
+      .pl-num{width:30px;height:30px;border-radius:50%;color:#fff;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:13px;flex:0 0 30px}
+      .pl-form{font-size:11px;font-weight:700;background:#E1F3FB;color:#0B4A6B;border-radius:6px;padding:2px 6px;white-space:nowrap}
+      .pl-acc{display:flex;flex-direction:column;gap:4px}
+      .pl-btn{width:32px;height:32px;border-radius:9px;border:1.5px solid var(--line);background:#fff;font-weight:800;color:var(--ink)}
+      .pl-btn:disabled{opacity:.3}
+      .lab-alerta{background:#FBE3E0;color:#8A1F14;border-radius:14px;padding:12px 14px;margin-bottom:12px;display:grid;gap:4px;font-size:14px}
+      .lab-cab{display:flex;gap:14px;align-items:center;flex-wrap:wrap}
+      .lab-placa{border:3px solid #0F1B2D;border-radius:10px;background:#fff;padding:2px 12px 6px;text-align:center;min-width:120px}
+      .lab-placa small{display:block;font-size:10px;font-weight:800;letter-spacing:.2em;color:#fff;background:#0B5FA5;margin:0 -12px 4px;border-radius:6px 6px 0 0}
+      .lab-placa b{font-size:26px;letter-spacing:.06em;color:#0F1B2D;font-variant-numeric:tabular-nums}
+      .lab-docs{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:8px}
+      .lab-doc{border-radius:12px;padding:10px 12px}.lab-doc small{display:block;font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.04em;opacity:.85}
+      .lab-secs,.adm-veh{display:grid;gap:12px}
+      @media (min-width: 900px){ .lab-secs,.adm-veh{grid-template-columns:repeat(2,minmax(0,1fr));align-items:start} }
+      .lab-st{font-weight:800;color:var(--brand-dark);margin-bottom:10px}
+      .lab-dl{display:grid;grid-template-columns:minmax(0,42%) minmax(0,1fr);gap:6px 12px;font-size:14px}
+      .lab-dl dt{color:var(--ink-soft)}.lab-dl dd{margin:0;font-weight:600;overflow-wrap:anywhere}
+      .lab-form2{grid-template-columns:repeat(auto-fit,minmax(200px,1fr))}
+      .lab-file{position:absolute;width:1px;height:1px;opacity:0}
+      .lab-foto{position:relative}.lab-prev img{margin-top:8px;max-height:180px;border-radius:10px}
+      .lab-acc{display:grid;gap:10px}.lab-det summary{list-style:none;cursor:pointer}.lab-det summary::-webkit-details-marker{display:none}
+      .lab-tabla-wrap{overflow-x:auto;border:1px solid var(--line);border-radius:14px;background:#fff}
+      .lab-tabla{width:100%;border-collapse:collapse;font-size:14px;min-width:640px}
+      .lab-tabla th{text-align:left;font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:var(--ink-soft);padding:10px;border-bottom:1px solid var(--line)}
+      .lab-tabla td{padding:10px;border-bottom:1px solid #EEF2F6}.lab-tabla tr.labFila{cursor:pointer}.lab-tabla tr.labFila:hover{background:#F6F9FC}
+      .lab-tabla .num{text-align:right;font-variant-numeric:tabular-nums}
+      .lab-modal{position:fixed;inset:0;z-index:90;background:rgba(3,32,76,.55);display:flex;align-items:flex-end;justify-content:center;padding:16px}
+      .lab-modal-in{width:100%;max-width:560px;max-height:88vh;overflow:auto}
+      @media (min-width: 700px){ .lab-modal{align-items:center} }
+      .lab-fotos{display:grid;grid-template-columns:1fr 1fr;gap:10px}.lab-fotos small{display:block;font-size:12px;color:var(--ink-soft);margin-bottom:4px}
+      .lab-fotos img{border-radius:10px}
+      .adm-guardar-veh{position:sticky;bottom:0;padding:12px 0 calc(12px + env(safe-area-inset-bottom,0px));background:linear-gradient(transparent,var(--bg) 30%)}
+    </style>`;
   }
 
   /* ---------------- Generar PDF (cada operario el suyo; el supervisor, el de cualquiera) ---------------- */
