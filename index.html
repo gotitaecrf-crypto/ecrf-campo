@@ -3356,8 +3356,8 @@
     html: `<div style="width:30px;height:30px;border-radius:50%;background:${color || "#03204C"};color:#fff;border:2px solid #fff;box-shadow:0 2px 6px rgba(0,0,0,.4);display:flex;align-items:center;justify-content:center;font:700 13px Roboto,Arial,sans-serif">${n}</div>` });
   // Conexión cercana: rectángulo celeste (Moorea Blue). Mi ubicación: círculo verde con «Aquí estás».
   const COLOR_CONEXION = "#41B6E6";
-  const ICONO_CONEXION = () => L.divIcon({ className: "ico-conexion", iconSize: [18, 12], iconAnchor: [9, 6], popupAnchor: [0, -6],
-    html: `<span style="display:block;width:18px;height:12px;border-radius:2px;background:${COLOR_CONEXION};border:2px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,.45)"></span>` });
+  const ICONO_CONEXION = () => L.divIcon({ className: "ico-conexion", iconSize: [14, 14], iconAnchor: [7, 7], popupAnchor: [0, -7],
+    html: `<span style="display:block;width:14px;height:14px;border-radius:2px;background:${COLOR_CONEXION};border:2px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,.45)"></span>` });
   const ICONO_AQUI = () => L.divIcon({ className: "", iconSize: [22, 22], iconAnchor: [11, 11],
     html: `<div style="position:relative;width:22px;height:22px"><span style="position:absolute;inset:0;border-radius:50%;background:#1E9E4A;border:3px solid #fff;box-shadow:0 1px 6px rgba(0,0,0,.5)"></span>
       <span style="position:absolute;left:50%;bottom:26px;transform:translateX(-50%);white-space:nowrap;background:#1E9E4A;color:#fff;font:700 12px Roboto,Arial,sans-serif;padding:3px 8px;border-radius:8px;box-shadow:0 1px 4px rgba(0,0,0,.35)">Aquí estás</span></div>` });
@@ -3419,7 +3419,6 @@
           </div>` : `<div class="card p-4 mt-3 text-sm" style="color:var(--ink-soft)">Escribe un NIS para ubicarlo en el mapa con su dirección, sector y CCSS.</div>`}
           <div class="card p-3 mt-3 flex items-center justify-between gap-2">
             <label class="text-sm flex items-center gap-2" style="font-weight:600"><input type="checkbox" id="mnRuta" ${state.mnVerRuta ? "checked" : ""}> Mostrar mi ruta (${paradasRuta().length})</label>
-            <button id="mnYo" class="btn-ghost" style="width:auto;padding:8px 12px">◎ Mi ubicación</button>
           </div>
         </div>
         <div class="gis-mapa" id="mnMapa" role="region" aria-label="Mapa"></div>
@@ -3438,7 +3437,6 @@
     document.querySelectorAll(".mnHist").forEach(b => b.onclick = () => { state.mnQuery = b.dataset.n; if (!nisLocal(b.dataset.n)) { inp.value = b.dataset.n; buscar(); } else centrarEnNis(b.dataset.n); });
     document.querySelectorAll(".mnAtajo").forEach(b => b.onclick = () => irAFormularioConNis(b.dataset.f, state.mnSel));
     document.getElementById("mnRuta").onchange = e => { state.mnVerRuta = e.target.checked; renderMapaNis(); };
-    document.getElementById("mnYo").onclick = async () => { toast("Buscando tu ubicación…"); const c = await ubicacionAhora(); if (!c) toast("No se pudo obtener tu ubicación", true); if (state.vista === "MAPA_NIS") renderMapaNis(); };
     const bAg = document.getElementById("mnAgregar");
     if (bAg) bAg.onclick = async () => {
       const r = sel, form = document.getElementById("mnForm").value, para = esSupervisor() ? document.getElementById("mnPara").value : state.operario;
@@ -3551,6 +3549,26 @@
     if (mapaNisL) { mapaNisL.remove(); mapaNisL = null; }
     if (!document.getElementById("mnMapa")) return;
     mapaNisL = L.map("mnMapa"); capaBase(mapaNisL);
+    // Botón bajo el + y −: vuelve a leer el GPS y lleva el mapa a tu ubicación (con las conexiones cercanas en el radio elegido)
+    const BotonYo = L.Control.extend({ options: { position: "topleft" }, onAdd() {
+      const d = L.DomUtil.create("div", "leaflet-bar leaflet-control");
+      d.innerHTML = `<a href="#" id="mnIrYo" role="button" title="Ir a mi ubicación" aria-label="Actualizar mi ubicación GPS e ir a ella" style="display:flex;align-items:center;justify-content:center;width:34px;height:34px;color:#1E9E4A">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/><circle cx="12" cy="12" r="8"/></svg></a>`;
+      L.DomEvent.disableClickPropagation(d);
+      d.querySelector("#mnIrYo").addEventListener("click", async ev => {
+        ev.preventDefault(); ev.stopPropagation();
+        const a = d.firstElementChild; a.style.opacity = ".5";
+        // primero la última posición que dio el GPS (respuesta inmediata) y luego una lectura nueva para afinar
+        const u = state.gpsUltimo, reciente = u && Date.now() - u.en < 5 * 60000;
+        if (reciente && state.vista === "MAPA_NIS") buscarCercanos(u.lat, u.lon, "gps");
+        const c = await ubicacionAhora();
+        a.style.opacity = "";
+        if (!c) { if (!reciente) toast("No se pudo obtener tu ubicación. Revisa que el GPS esté activo", true); return; }
+        if (state.vista === "MAPA_NIS" && (!reciente || distKm(u, c) > 0.005)) buscarCercanos(c.lat, c.lon, "gps");
+      });
+      return d;
+    } });
+    new BotonYo().addTo(mapaNisL);
     const lim = [];
     if (state.mnVerRuta) aplicarOrden(paradasRuta()).filter(p => p.lat != null).forEach((p, i) => {
       L.marker([p.lat, p.lon], { icon: pinNum(i + 1, "#5B6B7F") }).addTo(mapaNisL).bindPopup(`<b>${i + 1}. NIS ${escA(p.nis)}</b><br>${escA(p.direccion || "")}<br><small>${escA(FORM_CORTO[formDe(p)] || "")}</small>`);
