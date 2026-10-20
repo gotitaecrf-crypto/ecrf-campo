@@ -2233,6 +2233,8 @@
            defecto: { titulo: "Mapa de NIS", descripcion: "Ubica un NIS de la base en el mapa" } },
     PLANIFICADOR_RUTAS: { tipo: "vista", soloAdmin: true, ico: () => ICO_RUTA, abrir: () => abrirModulo("PLANIFICADOR_RUTAS"), estilo: "background:#E6F6EF;border-color:#9BD3B0",
            defecto: { titulo: "Planificador de rutas", descripcion: "Ordena tus NIS por cercanía" } },
+    REPLICA_GIS: { tipo: "vista", soloAdmin: true, ico: () => ICO_REPLICA, abrir: () => abrirModulo("REPLICA_GIS"), estilo: "background:#E6F6EF;border-color:#9BD3B0",
+           defecto: { titulo: "Réplica GIS", descripcion: "Tuberías, válvulas y accesorios a tu alrededor" } },
     LABORATORIO_ECRF: { tipo: "vista", soloAdmin: true, ico: () => ICO_LAB, abrir: () => abrirModulo("LABORATORIO_ECRF"), estilo: "background:#E6F6EF;border-color:#9BD3B0",
            defecto: { titulo: "Laboratorio ECRF", descripcion: "Ficha del vehículo y recorridos" } }
   };
@@ -3240,7 +3242,7 @@
     { id: "GESTION", nombre: "Gestión & Reportes", color: "#FFF4DB" }
   ];
   const GRUPO_DE = { REPORTE_DIARIO: "OPER", GPFO0381: "FORM", GPFO0405: "FORM", GPFO0416: "FORM", PDF: "FORM",
-                     MAPA_NIS: "GIS", PLANIFICADOR_RUTAS: "GIS", LABORATORIO_ECRF: "GIS" };
+                     MAPA_NIS: "GIS", PLANIFICADOR_RUTAS: "GIS", REPLICA_GIS: "GIS", LABORATORIO_ECRF: "GIS" };
   // Los elementos que se ven en el menú, agrupados (respeta lo que configuró el administrador)
   function navAgrupado() {
     const mods = modulosMenu();
@@ -3263,9 +3265,10 @@
     else if (MODULOS_APP[id] && MODULOS_APP[id].tipo === "form") {
       state.form = id; sessionStorage.setItem("ecrf_form", id); state.tab = "nuevo";
       resetForm(); state.rutaSel = null; state.rutaQuery = "";
-    } else if (["MAPA_NIS", "PLANIFICADOR_RUTAS", "LABORATORIO_ECRF"].includes(id)) {
+    } else if (["MAPA_NIS", "PLANIFICADOR_RUTAS", "LABORATORIO_ECRF", "REPLICA_GIS"].includes(id)) {
       state.vista = id; state.labTab = "vehiculo";
-      if (id === "MAPA_NIS") { state.mnRadio = 50; state.mnCerca = null; state.mnAuto = true; }   // al entrar: radio de 50 m alrededor de donde estás
+      if (id === "MAPA_NIS") { state.mnRadio = 50; state.mnCerca = null; state.mnAuto = true; }
+      if (id === "REPLICA_GIS") { state.rgRadio = state.rgRadio || 200; state.rgDatos = null; state.rgAuto = true; }   // al entrar: radio de 50 m alrededor de donde estás
     }
     render(); window.scrollTo(0, 0);
   }
@@ -3318,6 +3321,7 @@
   function salirVistaGis(pintar) {
     if (mapaNisL) { mapaNisL.remove(); mapaNisL = null; }
     if (planL) { planL.remove(); planL = null; }
+    if (typeof replicaL !== "undefined" && replicaL) { replicaL.remove(); replicaL = null; }
     const d = document.getElementById("labDetalle"); if (d) d.remove();
     if (pintar === false) return;
     state.vista = null; render(); window.scrollTo(0, 0);
@@ -3327,6 +3331,7 @@
     app.classList.remove("max-w-md");
     if (state.vista === "MAPA_NIS") renderMapaNis();
     else if (state.vista === "PLANIFICADOR_RUTAS") renderPlanificador();
+    else if (state.vista === "REPLICA_GIS") renderReplica();
     else renderLaboratorio();
     const v = document.getElementById("gisVolver"); if (v) v.onclick = () => salirVistaGis();
   }
@@ -3609,6 +3614,244 @@
     else mapaNisL.setView([-12.06, -77.04], 11);
     setTimeout(() => mapaNisL && mapaNisL.invalidateSize(), 150);
   }
+
+  /* ---------------- RÉPLICA GIS ----------------
+     Redes de agua (tuberías, válvulas, accesorios e hidrantes) en un radio alrededor de tu ubicación.
+     Solo visualización: todo se dibuja en el mapa sin ventanas ni clics, con la simbología del GIS. */
+  const ICO_REPLICA = ICS(`<path d="M3 7h6v4h6V7h6"/><path d="M12 11v10"/><circle cx="12" cy="21" r="0.5"/><path d="M9 4v6M15 4v6"/>`);
+  const RG_RADIOS = [100, 200, 300, 500];
+  const RG_COLOR = { prim: "#A900E6", sec: "#0070FF", valv: "#E60000", acc: "#E60000" };   // Anemone Violet, Cretan Blue, Poinsettia Red (aprox.)
+  const RG_CAPAS = [
+    { k: "prim", n: "Tuberías primarias" }, { k: "sec", n: "Tuberías secundarias" }, { k: "v", n: "Válvulas del sistema" },
+    { k: "a", n: "Accesorios" }, { k: "h", n: "Hidrantes" }, { k: "et", n: "Etiquetas (material y diámetro)" }
+  ];
+  let replicaL = null, replicaFondo = null;
+  function rgVisibles() { const v = state.rgCapas || (state.rgCapas = { prim: true, sec: true, v: true, a: true, h: true, et: true }); return v; }
+  function renderReplica() {
+    const d = state.rgDatos, r = state.rgRadio || 200, vis = rgVisibles();
+    const cuenta = d && d.puntos ? d.puntos.reduce((m, p) => (m[p[0]] = (m[p[0]] || 0) + 1, m), {}) : {};
+    const muestra = k => `<canvas class="rg-muestra" data-k="${k}" width="44" height="22" aria-hidden="true"></canvas>`;
+    document.getElementById("app").innerHTML = `${estilosGis()}
+      ${cabeceraGis("Réplica GIS", "redes de agua a tu alrededor", ICO_REPLICA)}
+      <div class="gis-wrap px-4 py-4 pb-24 gis-split rg-split">
+        <div class="gis-panel">
+          <div class="card p-4">
+            <div class="gis-lbl">Radio de carga</div>
+            <div class="flex gap-2" style="flex-wrap:wrap">${RG_RADIOS.map(x => `<button class="gis-chip rgRadio" data-r="${x}" aria-pressed="${x === r}">${x} m</button>`).join("")}</div>
+            <div id="rgEstado" class="text-sm mt-3" style="color:var(--ink-soft)">${
+              d && d.cargando ? "Cargando redes…" : d && d.error ? `<span style="color:var(--danger);font-weight:600">${escA(d.error)}</span>`
+              : d && d.lineas ? `<b style="color:var(--brand-dark)">${d.lineas.length} tuberías · ${cuenta.v || 0} válvulas · ${cuenta.a || 0} accesorios · ${cuenta.h || 0} hidrantes</b><br>en ${d.r} m ${d.origen === "gps" ? "de tu ubicación" : "del centro del mapa"}`
+              : "Buscando tu ubicación…"}</div>
+            <div class="text-xs mt-2" style="color:var(--ink-soft)">Usa ◎ en el mapa para volver a tu ubicación, o mueve el mapa y toca «Cargar esta zona».</div>
+          </div>
+          <div class="card p-4 mt-3">
+            <div class="gis-lbl">Capas</div>
+            <div class="rg-capas">${RG_CAPAS.map(c => `<label class="rg-capa"><input type="checkbox" class="rgCapa" data-k="${c.k}" ${vis[c.k] ? "checked" : ""}>${c.k === "et" ? `<span class="rg-et">AC 100</span>` : muestra(c.k)}<span>${c.n}</span></label>`).join("")}</div>
+          </div>
+          <div class="card p-4 mt-3">
+            <div class="gis-lbl">Accesorios</div>
+            <div class="rg-ley">${RG_ACC_LEY.map(([c, n]) => `<div><canvas class="rg-muestra-acc" data-c="${c}" width="26" height="26" aria-hidden="true"></canvas><span><b>${c}</b> ${n}</span></div>`).join("")}</div>
+          </div>
+        </div>
+        <div class="gis-mapa rg-mapa" id="rgMapa" role="region" aria-label="Mapa de redes"></div>
+      </div>`;
+    document.querySelectorAll(".rgRadio").forEach(b => b.onclick = () => {
+      state.rgRadio = Number(b.dataset.r);
+      const c = state.rgDatos && state.rgDatos.centro;
+      if (c) cargarReplica(c[0], c[1], state.rgDatos.origen); else renderReplica();
+    });
+    document.querySelectorAll(".rgCapa").forEach(i => i.onchange = () => { rgVisibles()[i.dataset.k] = i.checked; if (replicaFondo) replicaFondo.redraw(); });
+    document.querySelectorAll(".rg-muestra").forEach(c => dibujarMuestra(c));
+    document.querySelectorAll(".rg-muestra-acc").forEach(c => { const x = c.getContext("2d"); x.translate(13, 13); dibujarAccesorio(x, c.dataset.c, 0, 1.1); });
+    pintarReplica();
+    if (state.rgAuto) {
+      state.rgAuto = false;
+      const u = state.gpsUltimo || (state.coords && state.coords.lat != null ? state.coords : null);
+      (u ? Promise.resolve(u) : ubicacionAhora()).then(c => { if (c && state.vista === "REPLICA_GIS") cargarReplica(c.lat, c.lon, "gps"); });
+    }
+  }
+  async function cargarReplica(lat, lon, origen) {
+    const r = state.rgRadio || 200;
+    if (!apiListo() || !enLinea()) { state.rgDatos = { error: "Necesitas internet para cargar las redes" }; return renderReplica(); }
+    state.rgDatos = { ...(state.rgDatos || {}), cargando: true, error: null };
+    const est = document.getElementById("rgEstado"); if (est) est.textContent = "Cargando redes…";
+    try {
+      const d = await rdApi("gis_cerca", { lat: lat.toFixed(6), lon: lon.toFixed(6), r });
+      state.rgDatos = { centro: [lat, lon], origen, r: d.r, lineas: prepararLineas(d.lineas), puntos: d.puntos, encuadrar: true };
+    } catch (e) {
+      state.rgDatos = { centro: [lat, lon], origen, r, error: e && e.code === "sin_replica" ? "Falta cargar la carpeta ECRF_REPLICA_GIS en el Drive" : msgError(e) };
+    }
+    if (state.vista === "REPLICA_GIS") renderReplica();
+  }
+  // cada tubería con su caja (para dibujar solo las que tocan cada cuadro del mapa)
+  function prepararLineas(ls) {
+    return (ls || []).map(f => {
+      const c = []; let s = 90, n = -90, w = 180, e = -180;
+      for (let i = 3; i + 1 < f.length; i += 2) { const la = f[i] / 1e6, lo = f[i + 1] / 1e6; c.push([la, lo]); s = Math.min(s, la); n = Math.max(n, la); w = Math.min(w, lo); e = Math.max(e, lo); }
+      return { t: f[0], et: (f[1] + " " + f[2]).trim(), c, s, n, w, e };
+    });
+  }
+  async function pintarReplica() {
+    const turno = ++turnoMapa;
+    try { await cargarLeaflet(); } catch (e) { const m = document.getElementById("rgMapa"); if (m) m.innerHTML = `<div class="gis-sinmapa">No se pudo cargar el mapa. Revisa tu internet.</div>`; return; }
+    if (turno !== turnoMapa || !document.getElementById("rgMapa")) return;
+    const d = state.rgDatos || {};
+    const vista = replicaL && !d.encuadrar ? { c: replicaL.getCenter(), z: replicaL.getZoom() } : null;
+    if (replicaL) { replicaL.remove(); replicaL = null; }
+    replicaL = L.map("rgMapa", { zoomControl: true, maxZoom: 20 }); capaBase(replicaL);
+    replicaFondo = new (CapaRedes())({ pane: "overlayPane" }).addTo(replicaL);
+    if (d.centro) L.circle(d.centro, { radius: d.r, color: "#0B5FA5", weight: 2, dashArray: "6 6", fill: false, interactive: false }).addTo(replicaL);
+    const u = state.gpsUltimo || (state.coords && state.coords.lat != null ? state.coords : null);
+    if (u) L.marker([u.lat, u.lon], { icon: ICONO_AQUI(), interactive: false, keyboard: false, zIndexOffset: 1000 }).addTo(replicaL);
+    // ◎ volver a mi ubicación (lee el GPS otra vez) y ↻ cargar la zona que estás viendo
+    const Botones = L.Control.extend({ options: { position: "topleft" }, onAdd() {
+      const box = L.DomUtil.create("div", "leaflet-bar leaflet-control");
+      box.innerHTML = `<a href="#" id="rgIrYo" role="button" title="Ir a mi ubicación" aria-label="Actualizar mi ubicación GPS e ir a ella" style="display:flex;align-items:center;justify-content:center;width:34px;height:34px;color:#1E9E4A">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/><circle cx="12" cy="12" r="8"/></svg></a>`;
+      L.DomEvent.disableClickPropagation(box);
+      box.querySelector("#rgIrYo").addEventListener("click", async ev => {
+        ev.preventDefault(); ev.stopPropagation();
+        const v = state.gpsUltimo, reciente = v && Date.now() - v.en < 5 * 60000;
+        if (reciente) cargarReplica(v.lat, v.lon, "gps");
+        const c = await ubicacionAhora();
+        if (!c) { if (!reciente) toast("No se pudo obtener tu ubicación. Revisa que el GPS esté activo", true); return; }
+        if (!reciente || distKm(v, c) > 0.01) cargarReplica(c.lat, c.lon, "gps");
+      });
+      return box;
+    } });
+    new Botones().addTo(replicaL);
+    const Zona = L.Control.extend({ options: { position: "topright" }, onAdd() {
+      const b = L.DomUtil.create("button", "rg-zona"); b.type = "button"; b.id = "rgZona"; b.textContent = "↻ Cargar esta zona"; b.hidden = true;
+      L.DomEvent.disableClickPropagation(b);
+      b.addEventListener("click", ev => { ev.stopPropagation(); const c = replicaL.getCenter(); cargarReplica(c.lat, c.lng, "mapa"); });
+      return b;
+    } });
+    new Zona().addTo(replicaL);
+    replicaL.on("moveend", () => {
+      const b = document.getElementById("rgZona"), c = state.rgDatos && state.rgDatos.centro; if (!b) return;
+      const centro = replicaL.getCenter();
+      b.hidden = !!c && distKm({ lat: c[0], lon: c[1] }, { lat: centro.lat, lon: centro.lng }) * 1000 < (state.rgDatos.r || 200) * 0.6;
+    });
+    if (d.centro && d.encuadrar) { replicaL.fitBounds(L.latLng(d.centro).toBounds(d.r * 2), { padding: [10, 10], maxZoom: 19 }); d.encuadrar = false; }
+    else if (vista) replicaL.setView(vista.c, vista.z);
+    else if (u) replicaL.setView([u.lat, u.lon], 17);
+    else replicaL.setView([-12.06, -77.04], 12);
+    setTimeout(() => replicaL && replicaL.invalidateSize(), 150);
+  }
+
+  // ---------- dibujo en lienzo (no interactivo) ----------
+  const CapaRedes = () => L.GridLayer.extend({
+    options: { updateWhenIdle: false, keepBuffer: 2, maxZoom: 20, zIndex: 450 },
+    createTile(c) {
+      const t = document.createElement("canvas"), dpr = Math.min(2, window.devicePixelRatio || 1);
+      t.width = t.height = 256 * dpr; t.style.width = t.style.height = "256px";
+      const d = state.rgDatos; if (!d || !d.lineas) return t;
+      try {
+        const x = t.getContext("2d"); x.scale(dpr, dpr);
+        const m = this._map, z = c.z, ox = c.x * 256, oy = c.y * 256, vis = rgVisibles();
+        const xy = (la, lo) => { const p = m.project([la, lo], z); return [p.x - ox, p.y - oy]; };
+        const marg = 70;                                                   // para etiquetas e íconos que cruzan el borde
+        const nw = m.unproject([ox - marg, oy - marg], z), se = m.unproject([ox + 256 + marg, oy + 256 + marg], z);
+        const dentro = (la, lo) => la <= nw.lat && la >= se.lat && lo >= nw.lng && lo <= se.lng;
+        const lineas = d.lineas.filter(l => l.n >= se.lat && l.s <= nw.lat && l.e >= nw.lng && l.w <= se.lng);
+        // 1) tuberías: primero las secundarias, encima las primarias
+        x.lineCap = "round"; x.lineJoin = "round";
+        [2, 1].forEach(tipo => {
+          if (!vis[tipo === 1 ? "prim" : "sec"]) return;
+          x.strokeStyle = tipo === 1 ? RG_COLOR.prim : RG_COLOR.sec;
+          x.lineWidth = tipo === 1 ? (z >= 17 ? 3.5 : 2.5) : (z >= 17 ? 2 : 1.4);
+          lineas.filter(l => l.t === tipo).forEach(l => { x.beginPath(); l.c.forEach(([la, lo], i) => { const [px, py] = xy(la, lo); i ? x.lineTo(px, py) : x.moveTo(px, py); }); x.stroke(); });
+        });
+        // 2) etiquetas paralelas a la tubería (material y diámetro), desde zoom 17
+        if (vis.et && z >= 17) {
+          x.font = "500 10px Roboto, Arial, sans-serif"; x.textAlign = "center"; x.textBaseline = "bottom";
+          lineas.forEach(l => {
+            if (!vis[l.t === 1 ? "prim" : "sec"] || !l.et) return;
+            const w = x.measureText(l.et).width + 12;
+            // el tramo más largo de la tubería lleva la etiqueta (y uno cada ~250 px si es muy larga)
+            const tramos = [];
+            for (let i = 0; i + 1 < l.c.length; i++) {
+              const a = m.project(l.c[i], z), b = m.project(l.c[i + 1], z), len = Math.hypot(b.x - a.x, b.y - a.y);
+              if (len >= w) tramos.push({ a, b, len });
+            }
+            if (!tramos.length) return;
+            tramos.sort((p, q) => q.len - p.len);
+            tramos.slice(0, Math.max(1, Math.floor(tramos.reduce((s, q) => s + q.len, 0) / 250))).forEach(({ a, b }) => {
+              const mx = (a.x + b.x) / 2 - ox, my = (a.y + b.y) / 2 - oy;
+              if (mx < -marg || my < -marg || mx > 256 + marg || my > 256 + marg) return;
+              let ang = Math.atan2(b.y - a.y, b.x - a.x);
+              if (ang > Math.PI / 2) ang -= Math.PI; else if (ang < -Math.PI / 2) ang += Math.PI;   // siempre legible
+              x.save(); x.translate(mx, my); x.rotate(ang);
+              x.lineWidth = 3; x.strokeStyle = "rgba(255,255,255,.9)"; x.strokeText(l.et, 0, -3);
+              x.fillStyle = "#1D2A3A"; x.fillText(l.et, 0, -3); x.restore();
+            });
+          });
+        }
+        // 3) puntos: accesorios (desde zoom 17), válvulas e hidrantes (desde zoom 15)
+        const esc = z >= 19 ? 1.35 : z >= 18 ? 1.15 : 1;
+        d.puntos.forEach(p => {
+          const [k, cod, la6, lo6, ang] = p, la = la6 / 1e6, lo = lo6 / 1e6;
+          if (!dentro(la, lo) || !vis[k]) return;
+          if (k === "a" && z < 17) return;
+          if (k !== "a" && z < 15) return;
+          const [px, py] = xy(la, lo);
+          x.save(); x.translate(px, py);
+          if (k === "v") { x.fillStyle = RG_COLOR.valv; x.strokeStyle = "#fff"; x.lineWidth = 1; x.beginPath(); x.arc(0, 0, (z >= 17 ? 4.5 : 3) * esc, 0, 6.2832); x.fill(); x.stroke(); }
+          else if (k === "h") dibujarHidrante(x, z >= 17 ? esc : 0.75);
+          else dibujarAccesorio(x, cod, ang >= 0 ? -ang * Math.PI / 180 : 0, esc);
+          x.restore();
+        });
+      } catch (e) { console.warn("réplica GIS", e); }
+      return t;
+    }
+  });
+  // Simbología de accesorios (como la leyenda del GIS). El eje x sigue la tubería.
+  const RG_ACC_LEY = [["CRU", "Cruz"], ["T", "Tee"], ["Y", "Yee"], ["COD", "Codo"], ["THID", "Tee de hidrante"], ["UNI", "Unión"], ["TAP", "Tapón"],
+                      ["RED", "Reducción"], ["TRED", "Tee de reducción"], ["CRED", "Cruz de reducción"], ["CR", "CR"], ["OTRO", "Otro"]];
+  function dibujarAccesorio(x, cod, rot, esc) {
+    x.save(); x.rotate(rot || 0); x.scale(esc || 1, esc || 1);
+    const rojo = "#E60000", s = 6;
+    x.strokeStyle = rojo; x.fillStyle = rojo; x.lineWidth = 1.5; x.lineCap = "butt";
+    const linea = (a, b, c, d) => { x.beginPath(); x.moveTo(a, b); x.lineTo(c, d); x.stroke(); };
+    const tope = (px, py, horiz) => horiz ? linea(px, py - 2.5, px, py + 2.5) : linea(px - 2.5, py, px + 2.5, py);   // rayita en cada extremo
+    const flecha = (px, py, dir) => { x.beginPath(); x.moveTo(px + dir * 3, py); x.lineTo(px - dir * 1.5, py - 2.5); x.lineTo(px - dir * 1.5, py + 2.5); x.closePath(); x.fill(); };
+    switch (cod) {
+      case "CRU": linea(-s, 0, s, 0); linea(0, -s, 0, s); tope(-s, 0, 1); tope(s, 0, 1); tope(0, -s, 0); tope(0, s, 0); break;
+      case "T": linea(-s, 0, s, 0); linea(0, 0, 0, -s); tope(-s, 0, 1); tope(s, 0, 1); tope(0, -s, 0); break;
+      case "Y": linea(-s, 0, s, 0); linea(0, 0, 4, -4.5); tope(-s, 0, 1); tope(s, 0, 1); break;
+      case "COD": linea(-s, 0, 0, 0); linea(0, 0, 0, -s); tope(-s, 0, 1); tope(0, -s, 0); break;
+      case "THID": x.strokeStyle = "#5A3A1A"; x.fillStyle = "#5A3A1A"; linea(-s, 0, s, 0); linea(0, 0, 0, -s); tope(-s, 0, 1); tope(s, 0, 1);
+        x.fillRect(-2.5, -s - 2, 5, 2.5); break;
+      case "UNI": case "AA": x.strokeStyle = "#9B4FD0"; linea(-3, -3.5, -3, 3.5); linea(3, -3.5, 3, 3.5); linea(-3, 0, 3, 0); break;
+      case "TAP": linea(-1.5, -s, -1.5, s); linea(1.5, -s, 1.5, s); break;
+      case "JEXP": x.fillRect(-4, -4, 8, 8); x.strokeStyle = "#fff"; linea(-2.5, -2.5, 2.5, -2.5); linea(2.5, -2.5, -2.5, 2.5); linea(-2.5, 2.5, 2.5, 2.5); break;
+      case "RED": x.beginPath(); x.moveTo(-4, -4); x.lineTo(4, 0); x.lineTo(-4, 4); x.closePath(); x.fill(); break;
+      case "TRED": linea(-s, 0, s, 0); linea(0, 0, 0, -s); flecha(-s + 1, 0, -1); flecha(s - 1, 0, 1); tope(0, -s, 0); break;
+      case "CRED": linea(-s, 0, s, 0); linea(0, -s, 0, s); flecha(-s + 1, 0, -1); flecha(s - 1, 0, 1); flecha(0, -s + 1, 0); tope(0, -s, 0); tope(0, s, 0); break;
+      case "CR": x.beginPath(); x.moveTo(-4, -4); x.lineTo(4, 0); x.lineTo(-4, 4); x.closePath(); x.fill(); x.fillRect(-4, -1, 3, 2); break;
+      default: x.lineWidth = 1.3; x.strokeRect(-3, -3, 6, 6);
+    }
+    x.restore();
+  }
+  function dibujarHidrante(x, esc) {
+    x.save(); x.scale(esc, esc);
+    x.fillStyle = "#fff"; x.strokeStyle = "#E60000"; x.lineWidth = 1.6;
+    x.beginPath(); x.rect(-5, -4, 10, 9); x.fill(); x.stroke();          // cuerpo
+    x.fillStyle = "#E60000"; x.fillRect(-4, -7, 8, 3);                     // tapa
+    x.fillRect(-7.5, -1.5, 2.5, 3); x.fillRect(5, -1.5, 2.5, 3);           // salidas
+    x.fillRect(-6, 5, 12, 2.5);                                            // base
+    x.beginPath(); x.arc(0, 0.5, 2, 0, 6.2832); x.stroke();
+    x.restore();
+  }
+  function dibujarMuestra(c) {
+    const x = c.getContext("2d"), k = c.dataset.k;
+    x.translate(22, 11);
+    if (k === "prim" || k === "sec") { x.strokeStyle = RG_COLOR[k]; x.lineWidth = k === "prim" ? 3.5 : 2; x.beginPath(); x.moveTo(-18, 0); x.lineTo(18, 0); x.stroke(); }
+    else if (k === "v") { x.fillStyle = RG_COLOR.valv; x.beginPath(); x.arc(0, 0, 4.5, 0, 6.2832); x.fill(); }
+    else if (k === "a") { x.strokeStyle = RG_COLOR.sec; x.lineWidth = 2; x.beginPath(); x.moveTo(-18, 0); x.lineTo(18, 0); x.stroke(); dibujarAccesorio(x, "T", 0, 1.1); }
+    else if (k === "h") dibujarHidrante(x, 1);
+  }
+  ICO_LAT.REPLICA_GIS = ICO_REPLICA;
 
   /* ---------------- GPS OBLIGATORIO ----------------
      Al abrir la app (con sesión) se pide la ubicación y no se continúa hasta tenerla. Luego se sigue el GPS
@@ -4032,6 +4275,12 @@
       .rd-dato small{display:block;font-size:11px;color:var(--ink-soft);font-weight:700;text-transform:uppercase;letter-spacing:.03em}
       .rd-err{color:var(--danger);font-size:13px;font-weight:600;margin-top:6px}
       .btn-primary:disabled{opacity:.5}
+      .rg-mapa{height:72vh;min-height:380px}
+      @media (min-width: 900px){ .rg-split{grid-template-columns:minmax(0,340px) minmax(0,1fr)} .rg-mapa{height:calc(100vh - 140px)} }
+      .rg-capas{display:grid;gap:6px}.rg-capa{display:flex;align-items:center;gap:10px;font-size:14px;font-weight:600}
+      .rg-capa input{width:18px;height:18px}.rg-et{font:500 11px Roboto,Arial,sans-serif;color:#1D2A3A;width:44px;text-align:center}
+      .rg-ley{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px 10px;font-size:12px}.rg-ley div{display:flex;align-items:center;gap:6px}
+      .rg-zona{background:#03204C;color:#fff;border:0;border-radius:10px;padding:8px 12px;font:700 13px Roboto,Arial,sans-serif;box-shadow:0 2px 6px rgba(0,0,0,.3)}
       .mn-pop{font:14px Roboto,Arial,sans-serif;color:#0F1B2D}
       .mn-pop-tit{font-weight:800;font-size:16px;color:#03204C;margin-bottom:6px}.mn-pop-tit span{font-size:12px;font-weight:700;color:#12613B;background:#DDF3E7;border-radius:6px;padding:2px 6px;margin-left:4px}
       .mn-pop dl{display:grid;grid-template-columns:auto 1fr;gap:3px 10px;margin:0 0 8px}.mn-pop dt{color:#4A5A6E;font-size:12px;font-weight:700}.mn-pop dd{margin:0;font-weight:600}
