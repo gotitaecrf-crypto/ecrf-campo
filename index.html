@@ -3354,6 +3354,13 @@
   const fmtKm = km => km == null ? "—" : km < 1 ? Math.round(km * 1000) + " m" : (Math.round(km * 10) / 10).toString().replace(".", ",") + " km";
   const pinNum = (n, color) => L.divIcon({ className: "", iconSize: [30, 30], iconAnchor: [15, 15],
     html: `<div style="width:30px;height:30px;border-radius:50%;background:${color || "#03204C"};color:#fff;border:2px solid #fff;box-shadow:0 2px 6px rgba(0,0,0,.4);display:flex;align-items:center;justify-content:center;font:700 13px Roboto,Arial,sans-serif">${n}</div>` });
+  // Conexión cercana: rectángulo celeste (Moorea Blue). Mi ubicación: círculo verde con «Aquí estás».
+  const COLOR_CONEXION = "#41B6E6";
+  const ICONO_CONEXION = () => L.divIcon({ className: "ico-conexion", iconSize: [18, 12], iconAnchor: [9, 6], popupAnchor: [0, -6],
+    html: `<span style="display:block;width:18px;height:12px;border-radius:2px;background:${COLOR_CONEXION};border:2px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,.45)"></span>` });
+  const ICONO_AQUI = () => L.divIcon({ className: "", iconSize: [22, 22], iconAnchor: [11, 11],
+    html: `<div style="position:relative;width:22px;height:22px"><span style="position:absolute;inset:0;border-radius:50%;background:#1E9E4A;border:3px solid #fff;box-shadow:0 1px 6px rgba(0,0,0,.5)"></span>
+      <span style="position:absolute;left:50%;bottom:26px;transform:translateX(-50%);white-space:nowrap;background:#1E9E4A;color:#fff;font:700 12px Roboto,Arial,sans-serif;padding:3px 8px;border-radius:8px;box-shadow:0 1px 4px rgba(0,0,0,.35)">Aquí estás</span></div>` });
   const PIN_NIS = () => L.divIcon({ className: "", iconSize: [34, 44], iconAnchor: [17, 42],
     html: `<svg width="34" height="44" viewBox="0 0 34 44"><path d="M17 43s15-14.5 15-26A15 15 0 0 0 2 17c0 11.5 15 26 15 26Z" fill="#0B5FA5" stroke="#fff" stroke-width="2.5"/><circle cx="17" cy="17" r="6" fill="#fff"/></svg>` });
 
@@ -3380,7 +3387,7 @@
             <div id="mnEstado" class="text-sm mt-2" style="color:var(--ink-soft)">${
               est === "buscando" ? "Buscando en la base de NIS…" : est === "noexiste" ? `<span style="color:var(--danger);font-weight:600">El NIS ${escA(q)} no está en la base.</span>`
               : est === "sinred" ? "Sin internet: solo se encuentran los NIS consultados antes en este equipo." : q.length && q.length < 7 ? "El NIS tiene 7 dígitos." : "Base de conexiones con coordenadas del GIS."}</div>
-            ${hist.length ? `<div class="gis-lbl mt-3">Últimos consultados</div><div class="flex gap-2" style="flex-wrap:wrap">${hist.map(n => `<button class="gis-chip mnHist" data-n="${n}" aria-pressed="${n === state.mnSel}">${n}</button>`).join("")}</div>` : ""}
+            ${hist.length ? `<div class="gis-lbl mt-3">Últimos NIS consultados</div><div class="flex gap-2" style="flex-wrap:wrap">${hist.slice(0, 3).map(n => `<button class="gis-chip mnHist" data-n="${n}" aria-pressed="${n === state.mnSel}">${n}</button>`).join("")}</div>` : ""}
           </div>
           ${htmlCercanos()}
           ${sel ? `
@@ -3422,13 +3429,13 @@
       const v = inp.value.replace(/\D/g, "").slice(0, 7); state.mnQuery = v;
       if (v.length !== 7) { renderMapaNis(); return; }
       if (!nisLocal(v) && NIS_REMOTO[v] === undefined) { renderMapaNis(); await buscarNisServidor(v); }
-      if (nisLocal(v)) { state.mnSel = v; guardarLS(claveHistNis(), [v].concat(leerLS(claveHistNis(), []).filter(x => x !== v)).slice(0, 8)); }
+      if (nisLocal(v)) { centrarEnNis(v); return; }
       if (state.vista === "MAPA_NIS") renderMapaNis();
     };
     inp.oninput = () => { inp.value = inp.value.replace(/\D/g, "").slice(0, 7); precargarNis(inp.value); if (inp.value.length === 7) buscar(); };
     inp.onkeydown = e => { if (e.key === "Enter") buscar(); };
     document.getElementById("mnBuscar").onclick = buscar;
-    document.querySelectorAll(".mnHist").forEach(b => b.onclick = () => { state.mnQuery = b.dataset.n; state.mnSel = b.dataset.n; if (!nisLocal(b.dataset.n)) buscar(); else renderMapaNis(); });
+    document.querySelectorAll(".mnHist").forEach(b => b.onclick = () => { state.mnQuery = b.dataset.n; if (!nisLocal(b.dataset.n)) { inp.value = b.dataset.n; buscar(); } else centrarEnNis(b.dataset.n); });
     document.querySelectorAll(".mnAtajo").forEach(b => b.onclick = () => irAFormularioConNis(b.dataset.f, state.mnSel));
     document.getElementById("mnRuta").onchange = e => { state.mnVerRuta = e.target.checked; renderMapaNis(); };
     document.getElementById("mnYo").onclick = async () => { toast("Buscando tu ubicación…"); const c = await ubicacionAhora(); if (!c) toast("No se pudo obtener tu ubicación", true); if (state.vista === "MAPA_NIS") renderMapaNis(); };
@@ -3456,7 +3463,6 @@
       <dl><dt>Dirección</dt><dd>${escA(d.direccion || "—")}</dd><dt>Localidad</dt><dd>${escA(d.urb || "—")}</dd>
         <dt>Distrito</dt><dd>${escA(d.distrito || "—")}</dd><dt>Sector</dt><dd>${escA(d.sector || "—")}</dd>${d.ccss ? `<dt>CCSS</dt><dd>${escA(d.ccss)}</dd>` : ""}</dl>
       <div class="mn-pop-at">${atajo("GPFO0381", "Toma de presiones")}${atajo("GPFO0405", "Verificación de reparación")}${atajo("GPFO0416", "Verificación por muestreo")}</div>
-      <button class="mnVerFicha mn-pop-ficha" data-n="${nis}">Ver ficha completa ›</button>
     </div>`;
   }
   // Abre el formulario elegido con el NIS ya cargado (dirección, distrito, sector y coordenadas)
@@ -3484,7 +3490,7 @@
       <button id="mnCerca" class="btn-primary w-full mt-3" ${c && c.cargando ? "disabled" : ""}>${c && c.cargando ? "Buscando…" : `◎ NIS a ${r} m de mi ubicación`}</button>
       <div class="text-xs mt-2" style="color:var(--ink-soft)">También puedes tocar el mapa y buscar alrededor de ese punto.</div>
       ${c && c.error ? `<div class="rd-err">${escA(c.error)}</div>` : ""}
-      ${c && c.items ? `<div class="text-sm mt-3" style="font-weight:700;color:var(--brand-dark)">${c.total} conexi${c.total === 1 ? "ón" : "ones"} a menos de ${c.r} m ${c.origen === "gps" ? "de tu ubicación" : "del punto elegido"}</div>
+      ${c && c.items ? `<div class="text-sm mt-3" style="font-weight:700;color:var(--brand-dark)">${c.total} conexi${c.total === 1 ? "ón" : "ones"} a menos de ${c.r} m ${c.origen === "gps" ? "de tu ubicación" : c.origen === "nis" ? "del NIS " + escA(state.mnSel || "") : "del punto elegido"}</div>
         ${c.total > lista.length ? `<div class="text-xs" style="color:var(--ink-soft)">Se muestran las ${lista.length} más cercanas.</div>` : ""}
         <div class="mn-cerca-lista">${lista.slice(0, state.mnCercaVer || 30).map(x => `
           <button class="mn-cerca-item mnCercaNis" data-n="${x.nis}" aria-pressed="${x.nis === state.mnSel}">
@@ -3524,9 +3530,17 @@
     document.querySelectorAll(".mnCercaNis").forEach(b => b.onclick = () => elegirCercano(b.dataset.n));
     const mas = document.getElementById("mnCercaMas"); if (mas) mas.onclick = () => { state.mnCercaVer = (state.mnCercaVer || 30) + 30; renderMapaNis(); };
   }
+  // NIS buscado: el mapa va a su ubicación y muestra las conexiones cercanas a él en el radio elegido
+  function centrarEnNis(nis) {
+    const d = NIS_REMOTO[nis] || nisLocal(nis); if (!d) return;
+    state.mnSel = nis; state.mnQuery = nis;
+    guardarLS(claveHistNis(), [nis].concat(leerLS(claveHistNis(), []).filter(x => x !== nis)).slice(0, 3));
+    if (d.latNis != null && d.latNis !== "") buscarCercanos(Number(d.latNis), Number(d.lonNis), "nis");
+    else { state.mnCerca = null; renderMapaNis(); }
+  }
   function elegirCercano(nis) {
     state.mnSel = nis; state.mnQuery = nis; state.mnCentrarCerca = true;
-    guardarLS(claveHistNis(), [nis].concat(leerLS(claveHistNis(), []).filter(x => x !== nis)).slice(0, 8));
+    guardarLS(claveHistNis(), [nis].concat(leerLS(claveHistNis(), []).filter(x => x !== nis)).slice(0, 3));
     renderMapaNis();
   }
   let turnoMapa = 0;                                   // si se vuelve a pintar mientras carga, solo vale el último
@@ -3545,18 +3559,17 @@
     if (sel && sel.latNis != null) {
       const ll = [Number(sel.latNis), Number(sel.lonNis)];
       L.marker(ll, { icon: PIN_NIS() }).addTo(mapaNisL).bindPopup(ventanaNis(state.mnSel, sel, null), { maxWidth: 290, minWidth: 240 }).openPopup();
-      L.circle(ll, { radius: 50, color: "#33B1E4", weight: 1, fillOpacity: .12 }).addTo(mapaNisL);
       lim.push(ll);
     }
-    if (yo) { L.circleMarker([yo.lat, yo.lon], { radius: 8, color: "#fff", weight: 3, fillColor: "#1A73E8", fillOpacity: 1 }).addTo(mapaNisL).bindPopup("Estás aquí"); lim.push([yo.lat, yo.lon]); }
+    if (yo) { L.marker([yo.lat, yo.lon], { icon: ICONO_AQUI(), zIndexOffset: 1000, keyboard: false }).addTo(mapaNisL); lim.push([yo.lat, yo.lon]); }
     const c = state.mnCerca;
     if (c && c.lat != null) {                          // radio de búsqueda y conexiones encontradas
       const centro = [c.lat, c.lon];
       const aro = L.circle(centro, { radius: c.r, color: "#0B5FA5", weight: 2, dashArray: "6 6", fillColor: "#33B1E4", fillOpacity: .08 }).addTo(mapaNisL);
-      if (c.origen !== "gps") L.circleMarker(centro, { radius: 6, color: "#fff", weight: 2, fillColor: "#0B5FA5", fillOpacity: 1 }).addTo(mapaNisL).bindPopup("Punto elegido");
+      if (c.origen === "mapa") L.circleMarker(centro, { radius: 6, color: "#fff", weight: 2, fillColor: "#0B5FA5", fillOpacity: 1 }).addTo(mapaNisL).bindPopup("Punto elegido");
       (c.items || []).forEach(x => {
         if (x.nis === state.mnSel) return;
-        L.circleMarker([x.lat, x.lon], { radius: 7, color: "#fff", weight: 2, fillColor: "#1E8E5A", fillOpacity: .95, bubblingMouseEvents: false }).addTo(mapaNisL)
+        L.marker([x.lat, x.lon], { icon: ICONO_CONEXION(), title: "NIS " + x.nis, bubblingMouseEvents: false }).addTo(mapaNisL)
           .bindPopup(() => ventanaNis(x.nis, NIS_REMOTO[x.nis] || desdeServidor(x.nis, { dir: x.dir, urb: x.urb, dist: x.dist, sec: x.sec, ccss: x.ccss, lat: x.lat, lon: x.lon }), x.m), { maxWidth: 290, minWidth: 240 });
       });
       if (!state.mnCentrarCerca || !(sel && sel.latNis != null)) { mapaNisL.fitBounds(L.latLng(centro).toBounds(c.r * 2), { padding: [30, 30], maxZoom: 19 }); lim.length = 0; }
