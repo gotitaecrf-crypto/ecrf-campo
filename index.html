@@ -570,7 +570,8 @@
     return "OPERARIO";
   }
   const esAdmin = () => rolDe(state.operario) === "ADMINISTRADOR";
-  const esSupervisor = () => rolDe(state.operario) !== "OPERARIO";
+  // Ver y gestionar lo de otros (hechos, rutas, PDF, reportes): nadie. Cada usuario ve solo lo suyo, sea operario, supervisor o administrador.
+  const esSupervisor = () => false;
   function misPendientes() {
     const hoy = aplicarOrden(state.pendientes);   // orden de "Ordenar por cercanía" si se usó; si no, por fecha de carga
     const delForm = hoy.filter(p => formDe(p) === (state.form || "GPFO0381"));
@@ -2163,7 +2164,7 @@
   }
   const dmy = s => /^\d{4}-\d{2}-\d{2}$/.test(String(s || "")) ? String(s).split("-").reverse().join("/") : (s || "");
   const formDe = r => (r && r.form) || "GPFO0381";
-  // Cada operario ve solo sus registros; el supervisor ve todos (o los de un operario que elija)
+  // Cada usuario ve solo sus propios registros
   const regsVisibles = () => state.registros.filter(r => esSupervisor()
     ? (!state.verDe || r.operario === state.verDe) : r.operario === state.operario);
   const regsDelForm = () => regsVisibles().filter(r => formDe(r) === state.form);
