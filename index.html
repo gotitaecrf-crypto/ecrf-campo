@@ -2248,15 +2248,15 @@
            defecto: { titulo: "Generar mis PDF", descripcion: "Formularios del mes · GPFO0416 por quincena" } },
     REPORTE_DIARIO: { tipo: "vista", soloAdmin: true, ico: () => ICO_RD, abrir: () => abrirReporteDiario(), estilo: "background:#EAF6EE;border-color:#9BD3B0",
            defecto: { titulo: "Reporte diario de actividades", descripcion: "Charla de seguridad, plan del día y cierre" } },
-    MAPA_NIS: { tipo: "vista", soloAdmin: true, ico: () => ICO_MAPA, abrir: () => abrirModulo("MAPA_NIS"), estilo: "background:#E6F6EF;border-color:#9BD3B0",
-           defecto: { titulo: "Mapa de NIS", descripcion: "Ubica un NIS de la base en el mapa" } },
+    // Plano GIS: une el antiguo «Mapa de NIS» y el «Plano GIS» (NIS, redes y lotes en un solo mapa); lo ven todos los roles
+    PLANO_GIS: { tipo: "vista", ico: () => ICO_REPLICA, abrir: () => abrirModulo("PLANO_GIS"), estilo: "background:#E6F6EF;border-color:#9BD3B0",
+           defecto: { titulo: "Plano GIS", descripcion: "NIS, tuberías, accesorios y lotes a tu alrededor" } },
     PLANIFICADOR_RUTAS: { tipo: "vista", soloAdmin: true, ico: () => ICO_RUTA, abrir: () => abrirModulo("PLANIFICADOR_RUTAS"), estilo: "background:#E6F6EF;border-color:#9BD3B0",
            defecto: { titulo: "Planificador de rutas", descripcion: "Ordena tus NIS por cercanía" } },
-    REPLICA_GIS: { tipo: "vista", soloAdmin: true, ico: () => ICO_REPLICA, abrir: () => abrirModulo("REPLICA_GIS"), estilo: "background:#E6F6EF;border-color:#9BD3B0",
-           defecto: { titulo: "Plano GIS", descripcion: "Tuberías, válvulas y accesorios a tu alrededor" } },
     LABORATORIO_ECRF: { tipo: "vista", soloAdmin: true, ico: () => ICO_LAB, abrir: () => abrirModulo("LABORATORIO_ECRF"), estilo: "background:#E6F6EF;border-color:#9BD3B0",
            defecto: { titulo: "Laboratorio ECRF", descripcion: "Ficha del vehículo y recorridos" } }
   };
+  const MOD_RETIRADOS = ["MAPA_NIS", "REPLICA_GIS"];   // se unieron en PLANO_GIS
   function modulosConfig() {
     let c = null; try { c = JSON.parse(localStorage.getItem("ecrf_modulos") || "null"); } catch (e) {}
     // los módulos nuevos empiezan solo para administradores (igual que en el servidor) hasta que el panel diga otra cosa
@@ -2264,7 +2264,7 @@
     if (!Array.isArray(c) || !c.length) return base;
     const porId = Object.fromEntries(c.map(m => [m.id, m]));
     return base.map(b => porId[b.id] ? { ...b, ...porId[b.id], roles: (porId[b.id].roles || []).slice() } : { ...b, orden: 900 + b.orden })
-      .concat(c.filter(m => !MODULOS_APP[m.id]).map(m => ({ ...m, roles: (m.roles || []).slice() })))   // módulos de una versión futura
+      .concat(c.filter(m => !MODULOS_APP[m.id] && !MOD_RETIRADOS.includes(m.id)).map(m => ({ ...m, roles: (m.roles || []).slice() })))   // módulos de una versión futura
       .sort((a, b) => (a.orden || 0) - (b.orden || 0));
   }
   function modulosMenu() {
@@ -3252,7 +3252,7 @@
     GPFO0381: ICS(`<path d="m12 14 4-4"/><path d="M3.34 19a10 10 0 1 1 17.32 0"/>`),
     GPFO0405: ICS(`<path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/>`),
     GPFO0416: ICS(`<circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/><path d="m8 11 2 2 4-4"/>`),
-    MAPA_NIS: ICO_MAPA, PLANIFICADOR_RUTAS: ICO_RUTA, LABORATORIO_ECRF: ICO_LAB
+    PLANIFICADOR_RUTAS: ICO_RUTA, LABORATORIO_ECRF: ICO_LAB
   };
   const GRUPOS_NAV = [
     { id: "OPER", nombre: "Operaciones diarias", color: "#EAF6EE" },
@@ -3261,7 +3261,7 @@
     { id: "GESTION", nombre: "Gestión & Reportes", color: "#FFF4DB" }
   ];
   const GRUPO_DE = { REPORTE_DIARIO: "OPER", GPFO0381: "FORM", GPFO0405: "FORM", GPFO0416: "FORM", PDF: "FORM",
-                     MAPA_NIS: "GIS", PLANIFICADOR_RUTAS: "GIS", REPLICA_GIS: "GIS", LABORATORIO_ECRF: "GIS" };
+                     PLANO_GIS: "GIS", PLANIFICADOR_RUTAS: "GIS", LABORATORIO_ECRF: "GIS" };
   // Los elementos que se ven en el menú, agrupados (respeta lo que configuró el administrador)
   function navAgrupado() {
     const mods = modulosMenu();
@@ -3284,10 +3284,9 @@
     else if (MODULOS_APP[id] && MODULOS_APP[id].tipo === "form") {
       state.form = id; sessionStorage.setItem("ecrf_form", id); state.tab = "nuevo";
       resetForm(); state.rutaSel = null; state.rutaQuery = "";
-    } else if (["MAPA_NIS", "PLANIFICADOR_RUTAS", "LABORATORIO_ECRF", "REPLICA_GIS"].includes(id)) {
+    } else if (["PLANO_GIS", "PLANIFICADOR_RUTAS", "LABORATORIO_ECRF"].includes(id)) {
       state.vista = id; state.labTab = "vehiculo";
-      if (id === "MAPA_NIS") { state.mnRadio = 50; state.mnCerca = null; state.mnAuto = true; }
-      if (id === "REPLICA_GIS") { state.rgRadio = state.rgRadio || 200; state.rgDatos = null; state.rgAuto = true; }   // al entrar: radio de 50 m alrededor de donde estás
+      if (id === "PLANO_GIS") { state.rgRadio = state.rgRadio || RG_RADIO_DEF; state.rgDatos = null; state.rgAuto = true; }   // al entrar: el plano alrededor de donde estás
     }
     render(); window.scrollTo(0, 0);
   }
@@ -3348,9 +3347,8 @@
   function renderVistaGis() {
     const app = document.getElementById("app");
     app.classList.remove("max-w-md");
-    if (state.vista === "MAPA_NIS") renderMapaNis();
+    if (state.vista === "PLANO_GIS") renderPlano();
     else if (state.vista === "PLANIFICADOR_RUTAS") renderPlanificador();
-    else if (state.vista === "REPLICA_GIS") renderReplica();
     else renderLaboratorio();
     const v = document.getElementById("gisVolver"); if (v) v.onclick = () => salirVistaGis();
   }
@@ -3378,8 +3376,8 @@
   const fmtKm = km => km == null ? "—" : km < 1 ? Math.round(km * 1000) + " m" : (Math.round(km * 10) / 10).toString().replace(".", ",") + " km";
   const pinNum = (n, color) => L.divIcon({ className: "", iconSize: [30, 30], iconAnchor: [15, 15],
     html: `<div style="width:30px;height:30px;border-radius:50%;background:${color || "#03204C"};color:#fff;border:2px solid #fff;box-shadow:0 2px 6px rgba(0,0,0,.4);display:flex;align-items:center;justify-content:center;font:700 13px Roboto,Arial,sans-serif">${n}</div>` });
-  // Conexión cercana: rectángulo celeste (Moorea Blue). Mi ubicación: círculo verde con «Aquí estás».
-  const COLOR_CONEXION = "#41B6E6";
+  // NIS (conexión de la base): cuadradito celeste (Moorea Blue). Mi ubicación: círculo verde con «Aquí estás».
+  const COLOR_CONEXION = "#00A9E6";   // Moorea Blue (paleta de ArcMap)
   const ICONO_CONEXION = () => L.divIcon({ className: "ico-conexion", iconSize: [14, 14], iconAnchor: [7, 7], popupAnchor: [0, -7],
     html: `<span style="display:block;width:14px;height:14px;border-radius:2px;background:${COLOR_CONEXION};border:2px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,.45)"></span>` });
   const ICONO_AQUI = () => L.divIcon({ className: "", iconSize: [22, 22], iconAnchor: [11, 11],
@@ -3388,9 +3386,36 @@
   const PIN_NIS = () => L.divIcon({ className: "", iconSize: [34, 44], iconAnchor: [17, 42],
     html: `<svg width="34" height="44" viewBox="0 0 34 44"><path d="M17 43s15-14.5 15-26A15 15 0 0 0 2 17c0 11.5 15 26 15 26Z" fill="#0B5FA5" stroke="#fff" stroke-width="2.5"/><circle cx="17" cy="17" r="6" fill="#fff"/></svg>` });
 
-  /* ---------------- MAPA DE NIS ---------------- */
+  /* ---------------- PLANO GIS (módulo PLANO_GIS) ----------------
+     Une el antiguo «Mapa de NIS» y el «Plano GIS» en un solo mapa: los NIS de la base (cuadraditos celestes), las redes de
+     agua (tuberías, conexiones, empalmes de hidrante, válvulas, accesorios e hidrantes) y los lotes, en un radio alrededor de
+     tu ubicación, de un NIS buscado o de un punto del mapa. Las redes y los lotes son solo para ver; los NIS sí se pueden tocar:
+     abren su ventana con dirección, localidad, distrito y sector, y los accesos a los 3 formularios. */
   const claveHistNis = () => "ecrf_mapa_hist_" + (state.operario || "");
-  function renderMapaNis() {
+  const ICO_REPLICA = ICS(`<path d="M3 7h6v4h6V7h6"/><path d="M12 11v10"/><circle cx="12" cy="21" r="0.5"/><path d="M9 4v6M15 4v6"/>`);
+  const RG_RADIOS = [25, 50, 100, 200, 300];
+  const RG_RADIO_DEF = 100;
+  // Colores de la paleta estándar de ArcMap (Esri): Anemone Violet, Cretan Blue, Poinsettia Red, Lapis Lazuli y Mars Red
+  const RG_COLOR = { prim: "#A900E6", sec: "#0082FF", valv: "#E60000", acc: "#E60000", cx: "#005CE6", eh: "#FF0000" };
+  // Lotes: TL001 gris 10 %, TL003 y TL005 verde, TL009 Raw Umber, los demás gris 30 %; borde negro delgado
+  const RG_LOTE_COLOR = t => t === 1 ? "#E1E1E1" : (t === 3 || t === 5) ? "#64AB64" : t === 9 ? "#A87000" : "#B2B2B2";
+  // grosor de las tuberías de agua potable; las conexiones y los empalmes van con la mitad
+  const anchoTuberia = (tipo, z) => tipo === 1 ? (z >= 17 ? 3.5 : 2.5) : (z >= 17 ? 2 : 1.4);
+  const RG_CAPAS = [
+    { k: "nis", n: "NIS (conexiones de la base)" }, { k: "lo", n: "Lotes" },
+    { k: "prim", n: "Tuberías primarias" }, { k: "sec", n: "Tuberías secundarias" },
+    { k: "cx", n: "Tuberías de conexión" }, { k: "eh", n: "Empalmes de hidrante" },
+    { k: "v", n: "Válvulas del sistema" }, { k: "a", n: "Accesorios" }, { k: "h", n: "Hidrantes" }, { k: "et", n: "Etiquetas (material y diámetro)" }
+  ];
+  let replicaL = null, replicaFondo = null, turnoCarga = 0;
+  let turnoMapa = 0;                                   // si se vuelve a pintar mientras carga, solo vale el último
+  function rgVisibles() {
+    const v = state.rgCapas || (state.rgCapas = {});
+    RG_CAPAS.forEach(c => { if (v[c.k] === undefined) v[c.k] = true; });
+    return v;
+  }
+  function renderPlano() {
+    const d = state.rgDatos, r = state.rgRadio || RG_RADIO_DEF, vis = rgVisibles();
     const q = state.mnQuery || "";
     const sel = state.mnSel && (NIS_REMOTO[state.mnSel] || nisLocal(state.mnSel));
     const est = q.length === 7 ? estadoBusqueda(q) : "";
@@ -3398,9 +3423,15 @@
     const yo = state.coords && state.coords.lat != null ? state.coords : state.gpsUltimo || null;
     const dist = sel && yo && sel.latNis != null ? distKm(yo, { lat: Number(sel.latNis), lon: Number(sel.lonNis) }) : null;
     const operarios = listaUsuarios().filter(u => (u.rol || "OPERARIO") === "OPERARIO");
+    const cuenta = d && d.puntos ? d.puntos.reduce((m, p) => (m[p[0]] = (m[p[0]] || 0) + 1, m), {}) : {};
+    const nCx = d && d.conex ? d.conex.filter(l => l.t === 1).length : 0, nEh = d && d.conex ? d.conex.filter(l => l.t === 2).length : 0;
+    const desde = !d ? "" : d.origen === "gps" ? "de tu ubicación" : d.origen === "nis" ? "del NIS " + escA(d.nisCentro || "") : "del punto elegido";
+    const lista = d && d.nis ? d.nis : [], ver = state.mnCercaVer || 30;
+    const muestra = k => `<canvas class="rg-muestra" data-k="${k}" width="44" height="22" aria-hidden="true"></canvas>`;
+    const aviso = t => t ? `<div class="text-xs mt-1" style="color:#6B4A00">${escA(t)}</div>` : "";
     document.getElementById("app").innerHTML = `${estilosGis()}
-      ${cabeceraGis("Mapa de NIS", "visor de conexiones de la base", ICO_MAPA)}
-      <div class="gis-wrap px-4 py-4 pb-24 gis-split">
+      ${cabeceraGis("Plano GIS", "NIS, redes y lotes a tu alrededor", ICO_REPLICA)}
+      <div class="gis-wrap px-4 py-4 pb-24 gis-split rg-split">
         <div class="gis-panel">
           <div class="card p-4">
             <label class="gis-lbl" for="mnNis">Buscar NIS</label>
@@ -3410,10 +3441,18 @@
             </div>
             <div id="mnEstado" class="text-sm mt-2" style="color:var(--ink-soft)">${
               est === "buscando" ? "Buscando en la base de NIS…" : est === "noexiste" ? `<span style="color:var(--danger);font-weight:600">El NIS ${escA(q)} no está en la base.</span>`
-              : est === "sinred" ? "Sin internet: solo se encuentran los NIS consultados antes en este equipo." : q.length && q.length < 7 ? "El NIS tiene 7 dígitos." : "Base de conexiones con coordenadas del GIS."}</div>
+              : est === "sinred" ? "Sin internet: solo se encuentran los NIS consultados antes en este equipo." : q.length && q.length < 7 ? "El NIS tiene 7 dígitos." : "El plano se carga alrededor del NIS que busques."}</div>
             ${hist.length ? `<div class="gis-lbl mt-3">Últimos NIS consultados</div><div class="flex gap-2" style="flex-wrap:wrap">${hist.slice(0, 3).map(n => `<button class="gis-chip mnHist" data-n="${n}" aria-pressed="${n === state.mnSel}">${n}</button>`).join("")}</div>` : ""}
           </div>
-          ${htmlCercanos()}
+          <div class="card p-4 mt-3">
+            <div class="gis-lbl">Radio de carga</div>
+            <div class="flex gap-2" style="flex-wrap:wrap">${RG_RADIOS.map(x => `<button class="gis-chip rgRadio" data-r="${x}" aria-pressed="${x === r}">${x} m</button>`).join("")}</div>
+            <div id="rgEstado" class="text-sm mt-3" style="color:var(--ink-soft)">${
+              d && d.cargando ? "Cargando plano…" : d && d.error ? `<span style="color:var(--danger);font-weight:600">${escA(d.error)}</span>`
+              : d && d.centro ? `<b style="color:var(--brand-dark)">${d.nis ? d.totalNis + " NIS · " : ""}${d.lineas ? `${d.lineas.length} tuberías · ${nCx} conexiones · ${nEh} empalmes · ${cuenta.v || 0} válvulas · ${cuenta.a || 0} accesorios · ${cuenta.h || 0} hidrantes · ${(d.lotes || []).length} lotes` : ""}</b><br>en ${d.r} m ${desde}`
+              : "Buscando tu ubicación…"}${d && !d.cargando ? aviso(d.errorRedes) + aviso(d.errorNis) + aviso(d.avisoLotes) + aviso(d.avisoConex) : ""}</div>
+            <div class="text-xs mt-2" style="color:var(--ink-soft)">Toca un NIS (cuadradito celeste) para ver sus datos. Usa ◎ para volver a tu ubicación o toca fuera del círculo para cargar el plano ahí.</div>
+          </div>
           ${sel ? `
           <div class="card p-4 mt-3" id="mnFicha">
             <div class="flex items-center justify-between gap-2"><b class="text-lg" style="color:var(--brand-dark)">NIS ${escA(state.mnSel)}</b>
@@ -3440,41 +3479,73 @@
               ${esSupervisor() ? `<select id="mnPara" class="input">${operarios.map(u => `<option>${escA(u.name)}</option>`).join("")}<option>${escA(state.operario)}</option></select>` : `<button id="mnAgregar" class="btn-ghost">+ A mi ruta</button>`}
             </div>
             ${esSupervisor() ? `<button id="mnAgregar" class="btn-ghost w-full mt-2">+ Agregar a la ruta del operario</button>` : ""}
-          </div>` : `<div class="card p-4 mt-3 text-sm" style="color:var(--ink-soft)">Escribe un NIS para ubicarlo en el mapa con su dirección, sector y CCSS.</div>`}
-          <div class="card p-3 mt-3 flex items-center justify-between gap-2">
-            <label class="text-sm flex items-center gap-2" style="font-weight:600"><input type="checkbox" id="mnRuta" ${state.mnVerRuta ? "checked" : ""}> Mostrar mi ruta (${paradasRuta().length})</label>
+          </div>` : ""}
+          ${lista.length ? `
+          <div class="card p-4 mt-3" id="mnCercaCard">
+            <div class="gis-lbl">NIS en el radio</div>
+            <div class="text-sm" style="font-weight:700;color:var(--brand-dark)">${d.totalNis} conexi${d.totalNis === 1 ? "ón" : "ones"} a menos de ${d.r} m ${desde}</div>
+            <div class="mn-cerca-lista">${lista.slice(0, ver).map(x => `
+              <button class="mn-cerca-item mnCercaNis" data-n="${x.nis}" aria-pressed="${x.nis === state.mnSel}">
+                <span class="mn-m">${x.m} m</span><span class="min-w-0"><b>NIS ${x.nis}</b><small>${escA(legibleBase(x.dir, "dir"))}${x.sec ? " · Sector " + escA(x.sec) : ""}</small></span>
+              </button>`).join("")}</div>
+            ${lista.length > ver ? `<button id="mnCercaMas" class="btn-ghost w-full mt-2">Ver ${Math.min(30, lista.length - ver)} más</button>` : ""}
+          </div>` : ""}
+          <div class="card p-4 mt-3">
+            <div class="gis-lbl">Capas</div>
+            <div class="rg-capas">${RG_CAPAS.map(c => `<label class="rg-capa"><input type="checkbox" class="rgCapa" data-k="${c.k}" ${vis[c.k] ? "checked" : ""}>${c.k === "et" ? `<span class="rg-et">AC 100</span>` : muestra(c.k)}<span>${c.n}</span></label>`).join("")}</div>
+            <label class="text-sm flex items-center gap-2 mt-3" style="font-weight:600"><input type="checkbox" id="mnRuta" ${state.mnVerRuta ? "checked" : ""}> Mostrar mi ruta (${paradasRuta().length})</label>
+          </div>
+          <div class="card p-4 mt-3">
+            <div class="gis-lbl">Lotes</div>
+            <div class="rg-ley">${[["#E1E1E1", "TL001"], ["#64AB64", "TL003 y TL005"], ["#A87000", "TL009"], ["#B2B2B2", "Otros tipos"]].map(([c, n]) => `<div><span class="rg-lote" style="background:${c}"></span><span>${n}</span></div>`).join("")}</div>
+          </div>
+          <div class="card p-4 mt-3">
+            <div class="gis-lbl">Accesorios</div>
+            <div class="rg-ley">${RG_ACC_LEY.map(([c, n]) => `<div><canvas class="rg-muestra-acc" data-c="${c}" width="26" height="26" aria-hidden="true"></canvas><span><b>${c}</b> ${n}</span></div>`).join("")}</div>
           </div>
         </div>
-        <div class="gis-mapa" id="mnMapa" role="region" aria-label="Mapa"></div>
+        <div class="gis-mapa rg-mapa" id="rgMapa" role="region" aria-label="Plano GIS"></div>
       </div>`;
+    // buscar NIS
     const inp = document.getElementById("mnNis");
     const buscar = async () => {
       const v = inp.value.replace(/\D/g, "").slice(0, 7); state.mnQuery = v;
-      if (v.length !== 7) { renderMapaNis(); return; }
-      if (!nisLocal(v) && NIS_REMOTO[v] === undefined) { renderMapaNis(); await buscarNisServidor(v); }
+      if (v.length !== 7) { renderPlano(); return; }
+      if (!nisLocal(v) && NIS_REMOTO[v] === undefined) { renderPlano(); await buscarNisServidor(v); }
       if (nisLocal(v)) { centrarEnNis(v); return; }
-      if (state.vista === "MAPA_NIS") renderMapaNis();
+      if (state.vista === "PLANO_GIS") renderPlano();
     };
     inp.oninput = () => { inp.value = inp.value.replace(/\D/g, "").slice(0, 7); precargarNis(inp.value); if (inp.value.length === 7) buscar(); };
     inp.onkeydown = e => { if (e.key === "Enter") buscar(); };
     document.getElementById("mnBuscar").onclick = buscar;
     document.querySelectorAll(".mnHist").forEach(b => b.onclick = () => { state.mnQuery = b.dataset.n; if (!nisLocal(b.dataset.n)) { inp.value = b.dataset.n; buscar(); } else centrarEnNis(b.dataset.n); });
     document.querySelectorAll(".mnAtajo").forEach(b => b.onclick = () => irAFormularioConNis(b.dataset.f, state.mnSel));
-    document.getElementById("mnRuta").onchange = e => { state.mnVerRuta = e.target.checked; renderMapaNis(); };
+    document.getElementById("mnRuta").onchange = e => { state.mnVerRuta = e.target.checked; renderPlano(); };
     const bAg = document.getElementById("mnAgregar");
     if (bAg) bAg.onclick = async () => {
-      const r = sel, form = document.getElementById("mnForm").value, para = esSupervisor() ? document.getElementById("mnPara").value : state.operario;
+      const form = document.getElementById("mnForm").value, para = esSupervisor() ? document.getElementById("mnPara").value : state.operario;
       if (state.pendientes.some(p => p.nis === state.mnSel && p.para === para && formDe(p) === form)) { toast("Ese NIS ya está en la ruta", true); return; }
-      await agregarPendiente({ form, nis: state.mnSel, ccss: r.ccss || "", latNis: r.latNis ?? null, lonNis: r.lonNis ?? null, direccion: r.direccion || "", urb: r.urb || "", distrito: r.distrito || "",
-                               sector: String(r.sector || ""), manual: false, para, preparadoPor: state.operario, creadoEn: Date.now() });
+      await agregarPendiente({ form, nis: state.mnSel, ccss: sel.ccss || "", latNis: sel.latNis ?? null, lonNis: sel.lonNis ?? null, direccion: sel.direccion || "", urb: sel.urb || "", distrito: sel.distrito || "",
+                               sector: String(sel.sector || ""), manual: false, para, preparadoPor: state.operario, creadoEn: Date.now() });
       toast("NIS " + state.mnSel + " agregado a la ruta" + (para !== state.operario ? " de " + para : ""));
-      renderMapaNis();
+      renderPlano();
     };
-    activarCercanos();
-    pintarMapaNis(sel, yo);
-    if (state.mnAuto) {
-      state.mnAuto = false;
-      (yo ? Promise.resolve(yo) : ubicacionAhora()).then(c => { if (c && c.lat != null && state.vista === "MAPA_NIS") buscarCercanos(c.lat, c.lon, "gps"); });
+    // radio, capas y lista de NIS
+    document.querySelectorAll(".rgRadio").forEach(b => b.onclick = () => {
+      state.rgRadio = Number(b.dataset.r);
+      const c = state.rgDatos && state.rgDatos.centro;
+      if (c) cargarPlano(c[0], c[1], state.rgDatos.origen, state.rgDatos.nisCentro); else renderPlano();
+    });
+    document.querySelectorAll(".rgCapa").forEach(i => i.onchange = () => { rgVisibles()[i.dataset.k] = i.checked; if (replicaFondo) replicaFondo.redraw(); });
+    document.querySelectorAll(".mnCercaNis").forEach(b => b.onclick = () => elegirCercano(b.dataset.n));
+    const mas = document.getElementById("mnCercaMas"); if (mas) mas.onclick = () => { state.mnCercaVer = ver + 30; renderPlano(); };
+    document.querySelectorAll(".rg-muestra").forEach(c => dibujarMuestra(c));
+    document.querySelectorAll(".rg-muestra-acc").forEach(c => { const x = c.getContext("2d"); x.translate(13, 13); dibujarAccesorio(x, c.dataset.c, 0, 1.1); });
+    pintarPlano(sel);
+    if (state.rgAuto) {                                // al entrar: el plano alrededor de donde estás
+      state.rgAuto = false;
+      const u = state.gpsUltimo || (yo && yo.lat != null ? yo : null);
+      (u ? Promise.resolve(u) : ubicacionAhora()).then(c => { if (c && c.lat != null && state.vista === "PLANO_GIS") cargarPlano(c.lat, c.lon, "gps"); });
     }
   }
   // Ventana de un NIS en el mapa: datos y atajos a los formularios con ese NIS ya cargado
@@ -3490,224 +3561,62 @@
   // Abre el formulario elegido con el NIS ya cargado (dirección, distrito, sector y coordenadas)
   function irAFormularioConNis(form, nis) {
     const d = NIS_REMOTO[nis] || nisLocal(nis); if (!d) return;
-    if (mapaNisL) mapaNisL.closePopup();
+    if (replicaL) replicaL.closePopup();
     abrirModulo(form);
     state.nisSel = { nis, direccion: d.direccion || "", urb: d.urb || "", distrito: d.distrito || "", sector: d.sector || "", ccss: d.ccss || "",
                      latNis: d.latNis ?? null, lonNis: d.lonNis ?? null, manual: false };
     state.fecha = todayISO(); state.hora = nowHM(); ensureLocation(); render(); window.scrollTo(0, 0);
     toast("NIS " + nis + " cargado en " + (FORM_CORTO[form] || form));
   }
-
-  /* ---------- Conexiones cercanas (radio alrededor de mi ubicación o de un punto del mapa) ---------- */
-  const RADIOS = [25, 50, 100];
-  function htmlCercanos() {
-    const c = state.mnCerca, r = state.mnRadio || 50;
-    const lista = c && c.items ? c.items : [];
-    return `<div class="card p-4 mt-3" id="mnCercaCard">
-      <div class="gis-lbl">Conexiones cercanas</div>
-      <div class="flex gap-2 items-center" style="flex-wrap:wrap">
-        <span class="text-sm" style="font-weight:600">Radio:</span>
-        ${RADIOS.map(x => `<button class="gis-chip mnRadio" data-r="${x}" aria-pressed="${x === r}">${x} m</button>`).join("")}
-      </div>
-      <button id="mnCerca" class="btn-primary w-full mt-3" ${c && c.cargando ? "disabled" : ""}>${c && c.cargando ? "Buscando…" : `◎ NIS a ${r} m de mi ubicación`}</button>
-      <div class="text-xs mt-2" style="color:var(--ink-soft)">También puedes tocar el mapa y buscar alrededor de ese punto.</div>
-      ${c && c.error ? `<div class="rd-err">${escA(c.error)}</div>` : ""}
-      ${c && c.items ? `<div class="text-sm mt-3" style="font-weight:700;color:var(--brand-dark)">${c.total} conexi${c.total === 1 ? "ón" : "ones"} a menos de ${c.r} m ${c.origen === "gps" ? "de tu ubicación" : c.origen === "nis" ? "del NIS " + escA(state.mnSel || "") : "del punto elegido"}</div>
-        ${c.total > lista.length ? `<div class="text-xs" style="color:var(--ink-soft)">Se muestran las ${lista.length} más cercanas.</div>` : ""}
-        <div class="mn-cerca-lista">${lista.slice(0, state.mnCercaVer || 30).map(x => `
-          <button class="mn-cerca-item mnCercaNis" data-n="${x.nis}" aria-pressed="${x.nis === state.mnSel}">
-            <span class="mn-m">${x.m} m</span><span class="min-w-0"><b>NIS ${x.nis}</b><small>${escA(legibleBase(x.dir, "dir"))}${x.sec ? " · Sector " + escA(x.sec) : ""}</small></span>
-          </button>`).join("")}</div>
-        ${lista.length > (state.mnCercaVer || 30) ? `<button id="mnCercaMas" class="btn-ghost w-full mt-2">Ver ${Math.min(30, lista.length - (state.mnCercaVer || 30))} más</button>` : ""}` : ""}
-    </div>`;
-  }
-  async function buscarCercanos(lat, lon, origen) {
-    const r = state.mnRadio || 50;
-    if (!apiListo() || !enLinea()) { state.mnCerca = { error: "Necesitas internet para buscar conexiones cercanas" }; return renderMapaNis(); }
-    state.mnCerca = { lat, lon, r, origen, cargando: true, items: state.mnCerca && state.mnCerca.items }; state.mnCercaVer = 30;
-    renderMapaNis();
-    try {
-      const d = await apiGet({ action: "nis_cerca", lat: lat.toFixed(6), lon: lon.toFixed(6), r });
-      // lo encontrado queda guardado como cualquier NIS consultado (sirve sin internet y para los formularios)
-      d.items.forEach(x => { if (NIS_REMOTO[x.nis] === undefined || NIS_REMOTO[x.nis] === null) NIS_REMOTO[x.nis] = desdeServidor(x.nis, { dir: x.dir, urb: x.urb, dist: x.dist, sec: x.sec, ccss: x.ccss, lat: x.lat, lon: x.lon }); });
-      guardarCacheNis();
-      state.mnCerca = { lat, lon, r: d.r, origen, items: d.items, total: d.total };
-    } catch (e) {
-      state.mnCerca = { lat, lon, r, origen, error: e && e.code === "sin_base_geo" ? "Falta cargar la base por ubicación (carpeta ECRF_BASE_GEO) en el Drive" : (e && e.message) || "No se pudo buscar. Revisa tu internet" };
-    }
-    if (state.vista === "MAPA_NIS") renderMapaNis();
-  }
-  function activarCercanos() {
-    document.querySelectorAll(".mnRadio").forEach(b => b.onclick = () => {
-      state.mnRadio = Number(b.dataset.r);
-      const c = state.mnCerca;
-      if (c && c.lat != null && !c.cargando) buscarCercanos(c.lat, c.lon, c.origen); else renderMapaNis();
-    });
-    document.getElementById("mnCerca").onclick = async () => {
-      toast("Buscando tu ubicación…");
-      const c = await ubicacionAhora();
-      if (!c) { state.mnCerca = { error: "No se pudo obtener tu ubicación. Activa el GPS o toca un punto del mapa." }; return renderMapaNis(); }
-      buscarCercanos(c.lat, c.lon, "gps");
-    };
-    document.querySelectorAll(".mnCercaNis").forEach(b => b.onclick = () => elegirCercano(b.dataset.n));
-    const mas = document.getElementById("mnCercaMas"); if (mas) mas.onclick = () => { state.mnCercaVer = (state.mnCercaVer || 30) + 30; renderMapaNis(); };
-  }
-  // NIS buscado: el mapa va a su ubicación y muestra las conexiones cercanas a él en el radio elegido
+  const datosNis = x => NIS_REMOTO[x.nis] || desdeServidor(x.nis, { dir: x.dir, urb: x.urb, dist: x.dist, sec: x.sec, ccss: x.ccss, lat: x.lat, lon: x.lon });
+  // NIS buscado: el plano se carga a su alrededor en el radio elegido
   function centrarEnNis(nis) {
     const d = NIS_REMOTO[nis] || nisLocal(nis); if (!d) return;
     state.mnSel = nis; state.mnQuery = nis;
     guardarLS(claveHistNis(), [nis].concat(leerLS(claveHistNis(), []).filter(x => x !== nis)).slice(0, 3));
-    if (d.latNis != null && d.latNis !== "") buscarCercanos(Number(d.latNis), Number(d.lonNis), "nis");
-    else { state.mnCerca = null; renderMapaNis(); }
+    if (d.latNis != null && d.latNis !== "") cargarPlano(Number(d.latNis), Number(d.lonNis), "nis", nis);
+    else renderPlano();
   }
+  // NIS elegido de la lista: se marca y el mapa se acerca a él (sin volver a cargar)
   function elegirCercano(nis) {
-    state.mnSel = nis; state.mnQuery = nis; state.mnCentrarCerca = true;
+    state.mnSel = nis; state.mnQuery = nis; state.rgFoco = true;
     guardarLS(claveHistNis(), [nis].concat(leerLS(claveHistNis(), []).filter(x => x !== nis)).slice(0, 3));
-    renderMapaNis();
+    renderPlano();
   }
-  let turnoMapa = 0;                                   // si se vuelve a pintar mientras carga, solo vale el último
-  async function pintarMapaNis(sel, yo) {
-    const turno = ++turnoMapa;
-    try { await cargarLeaflet(); } catch (e) { const m = document.getElementById("mnMapa"); if (m) m.innerHTML = `<div class="gis-sinmapa">No se pudo cargar el mapa. Revisa tu internet.</div>`; return; }
-    if (turno !== turnoMapa) return;
-    if (mapaNisL) { mapaNisL.remove(); mapaNisL = null; }
-    if (!document.getElementById("mnMapa")) return;
-    mapaNisL = L.map("mnMapa"); capaBase(mapaNisL);
-    // Botón bajo el + y −: vuelve a leer el GPS y lleva el mapa a tu ubicación (con las conexiones cercanas en el radio elegido)
-    const BotonYo = L.Control.extend({ options: { position: "topleft" }, onAdd() {
-      const d = L.DomUtil.create("div", "leaflet-bar leaflet-control");
-      d.innerHTML = `<a href="#" id="mnIrYo" role="button" title="Ir a mi ubicación" aria-label="Actualizar mi ubicación GPS e ir a ella" style="display:flex;align-items:center;justify-content:center;width:34px;height:34px;color:#1E9E4A">
-        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/><circle cx="12" cy="12" r="8"/></svg></a>`;
-      L.DomEvent.disableClickPropagation(d);
-      d.querySelector("#mnIrYo").addEventListener("click", async ev => {
-        ev.preventDefault(); ev.stopPropagation();
-        const a = d.firstElementChild; a.style.opacity = ".5";
-        // primero la última posición que dio el GPS (respuesta inmediata) y luego una lectura nueva para afinar
-        const u = state.gpsUltimo, reciente = u && Date.now() - u.en < 5 * 60000;
-        if (reciente && state.vista === "MAPA_NIS") buscarCercanos(u.lat, u.lon, "gps");
-        const c = await ubicacionAhora();
-        a.style.opacity = "";
-        if (!c) { if (!reciente) toast("No se pudo obtener tu ubicación. Revisa que el GPS esté activo", true); return; }
-        if (state.vista === "MAPA_NIS" && (!reciente || distKm(u, c) > 0.005)) buscarCercanos(c.lat, c.lon, "gps");
-      });
-      return d;
-    } });
-    new BotonYo().addTo(mapaNisL);
-    const lim = [];
-    if (state.mnVerRuta) aplicarOrden(paradasRuta()).filter(p => p.lat != null).forEach((p, i) => {
-      L.marker([p.lat, p.lon], { icon: pinNum(i + 1, "#5B6B7F") }).addTo(mapaNisL).bindPopup(`<b>${i + 1}. NIS ${escA(p.nis)}</b><br>${escA(p.direccion || "")}<br><small>${escA(FORM_CORTO[formDe(p)] || "")}</small>`);
-      lim.push([p.lat, p.lon]);
-    });
-    if (sel && sel.latNis != null) {
-      const ll = [Number(sel.latNis), Number(sel.lonNis)];
-      L.marker(ll, { icon: PIN_NIS() }).addTo(mapaNisL).bindPopup(ventanaNis(state.mnSel, sel, null), { maxWidth: 290, minWidth: 240 }).openPopup();
-      lim.push(ll);
+  // Carga a la vez las redes (servidor del Plano GIS) y los NIS de la base en el radio elegido
+  async function cargarPlano(lat, lon, origen, nisCentro) {
+    const r = state.rgRadio || RG_RADIO_DEF;
+    if (!apiListo() || !enLinea()) { state.rgDatos = { error: "Necesitas internet para cargar el plano" }; return renderPlano(); }
+    const turno = ++turnoCarga;
+    state.rgDatos = { ...(state.rgDatos || {}), cargando: true, error: null }; state.mnCercaVer = 30;
+    const est = document.getElementById("rgEstado"); if (est) est.textContent = "Cargando plano…";
+    const [redes, nis] = await Promise.allSettled([
+      rdApi("gis_cerca", { lat: lat.toFixed(6), lon: lon.toFixed(6), r }),
+      apiGet({ action: "nis_cerca", lat: lat.toFixed(6), lon: lon.toFixed(6), r: Math.min(300, r) })
+    ]);
+    if (turno !== turnoCarga) return;                  // ya se pidió otro punto o radio
+    const nd = { centro: [lat, lon], origen, nisCentro: nisCentro || "", r, encuadrar: true };
+    if (redes.status === "fulfilled") {
+      const g = redes.value;
+      Object.assign(nd, { r: g.r, lineas: prepararLineas(g.lineas), puntos: g.puntos || [], lotes: prepararLotes(g.lotes), conex: prepararConex(g.conex),
+                          avisoLotes: g.avisoLotes || "", avisoConex: g.avisoConex || "" });
+    } else {
+      const e = redes.reason;
+      nd.errorRedes = e && e.code === "sin_replica" ? "Falta cargar la carpeta ECRF_REPLICA_GIS en el Drive" : msgError(e);
     }
-    if (yo) { L.marker([yo.lat, yo.lon], { icon: ICONO_AQUI(), zIndexOffset: 1000, keyboard: false }).addTo(mapaNisL); lim.push([yo.lat, yo.lon]); }
-    const c = state.mnCerca;
-    if (c && c.lat != null) {                          // radio de búsqueda y conexiones encontradas
-      const centro = [c.lat, c.lon];
-      const aro = L.circle(centro, { radius: c.r, color: "#0B5FA5", weight: 2, dashArray: "6 6", fillColor: "#33B1E4", fillOpacity: .08 }).addTo(mapaNisL);
-      if (c.origen === "mapa") L.circleMarker(centro, { radius: 6, color: "#fff", weight: 2, fillColor: "#0B5FA5", fillOpacity: 1 }).addTo(mapaNisL).bindPopup("Punto elegido");
-      (c.items || []).forEach(x => {
-        if (x.nis === state.mnSel) return;
-        L.marker([x.lat, x.lon], { icon: ICONO_CONEXION(), title: "NIS " + x.nis, bubblingMouseEvents: false }).addTo(mapaNisL)
-          .bindPopup(() => ventanaNis(x.nis, NIS_REMOTO[x.nis] || desdeServidor(x.nis, { dir: x.dir, urb: x.urb, dist: x.dist, sec: x.sec, ccss: x.ccss, lat: x.lat, lon: x.lon }), x.m), { maxWidth: 290, minWidth: 240 });
-      });
-      if (!state.mnCentrarCerca || !(sel && sel.latNis != null)) { mapaNisL.fitBounds(L.latLng(centro).toBounds(c.r * 2), { padding: [30, 30], maxZoom: 19 }); lim.length = 0; }
-      state.mnCentrarCerca = false;
+    if (nis.status === "fulfilled") {
+      const n = nis.value;
+      // lo encontrado queda guardado como cualquier NIS consultado (sirve sin internet y para los formularios)
+      (n.items || []).forEach(x => { if (NIS_REMOTO[x.nis] === undefined || NIS_REMOTO[x.nis] === null) NIS_REMOTO[x.nis] = datosNis(x); });
+      guardarCacheNis();
+      nd.nis = n.items || []; nd.totalNis = n.total || nd.nis.length;
+    } else {
+      const e = nis.reason;
+      nd.errorNis = e && e.code === "sin_base_geo" ? "Falta cargar la base por ubicación (carpeta ECRF_BASE_GEO) en el Drive" : "NIS: " + ((e && e.message) || "no se pudieron cargar");
     }
-    // tocar el mapa: buscar alrededor de ese punto
-    mapaNisL.on("click", ev => {
-      const r = state.mnRadio || 50;
-      L.popup().setLatLng(ev.latlng).setContent(`<button class="mnAqui" style="color:#0B5FA5;font-weight:700">◎ Buscar NIS a ${r} m de aquí</button>`).openOn(mapaNisL);
-    });
-    mapaNisL.getContainer().onclick = e => {
-      const a = e.target.closest(".mnAqui"); if (a) { const p = mapaNisL._popup && mapaNisL._popup.getLatLng(); if (p) buscarCercanos(p.lat, p.lng, "mapa"); return; }
-      const v = e.target.closest(".mnVerFicha"); if (v) { mapaNisL.closePopup(); elegirCercano(v.dataset.n); return; }
-      const f = e.target.closest(".mnIrForm"); if (f) irAFormularioConNis(f.dataset.f, f.dataset.n);
-    };
-    if (c && c.lat != null && lim.length === 0) { /* ya se encuadró en el radio */ }
-    else if (sel && sel.latNis != null && lim.length === 1) mapaNisL.setView(lim[0], 18);
-    else if (lim.length) mapaNisL.fitBounds(lim, { padding: [40, 40], maxZoom: 18 });
-    else mapaNisL.setView([-12.06, -77.04], 11);
-    setTimeout(() => mapaNisL && mapaNisL.invalidateSize(), 150);
-  }
-
-  /* ---------------- PLANO GIS (módulo REPLICA_GIS) ----------------
-     Redes de agua (tuberías, válvulas, accesorios e hidrantes) en un radio alrededor de tu ubicación.
-     Solo visualización: todo se dibuja en el mapa sin ventanas ni clics, con la simbología del GIS. */
-  const ICO_REPLICA = ICS(`<path d="M3 7h6v4h6V7h6"/><path d="M12 11v10"/><circle cx="12" cy="21" r="0.5"/><path d="M9 4v6M15 4v6"/>`);
-  const RG_RADIOS = [100, 200, 300, 500];
-  const RG_COLOR = { prim: "#A900E6", sec: "#0070FF", valv: "#E60000", acc: "#E60000" };   // Anemone Violet, Cretan Blue, Poinsettia Red (aprox.)
-  // Lotes: TL001 gris 10 %, TL003 y TL005 verde, TL009 «raw umber», los demás gris 30 %; borde negro delgado
-  const RG_LOTE_COLOR = t => t === 1 ? "#E1E1E1" : (t === 3 || t === 5) ? "#64AB64" : t === 9 ? "#734C00" : "#B2B2B2";
-  const RG_CAPAS = [
-    { k: "lo", n: "Lotes" },
-    { k: "prim", n: "Tuberías primarias" }, { k: "sec", n: "Tuberías secundarias" }, { k: "v", n: "Válvulas del sistema" },
-    { k: "a", n: "Accesorios" }, { k: "h", n: "Hidrantes" }, { k: "et", n: "Etiquetas (material y diámetro)" }
-  ];
-  let replicaL = null, replicaFondo = null;
-  function rgVisibles() { const v = state.rgCapas || (state.rgCapas = { lo: true, prim: true, sec: true, v: true, a: true, h: true, et: true }); return v; }
-  function renderReplica() {
-    const d = state.rgDatos, r = state.rgRadio || 200, vis = rgVisibles();
-    const cuenta = d && d.puntos ? d.puntos.reduce((m, p) => (m[p[0]] = (m[p[0]] || 0) + 1, m), {}) : {};
-    const muestra = k => `<canvas class="rg-muestra" data-k="${k}" width="44" height="22" aria-hidden="true"></canvas>`;
-    document.getElementById("app").innerHTML = `${estilosGis()}
-      ${cabeceraGis("Plano GIS", "redes de agua a tu alrededor", ICO_REPLICA)}
-      <div class="gis-wrap px-4 py-4 pb-24 gis-split rg-split">
-        <div class="gis-panel">
-          <div class="card p-4">
-            <div class="gis-lbl">Radio de carga</div>
-            <div class="flex gap-2" style="flex-wrap:wrap">${RG_RADIOS.map(x => `<button class="gis-chip rgRadio" data-r="${x}" aria-pressed="${x === r}">${x} m</button>`).join("")}</div>
-            <div id="rgEstado" class="text-sm mt-3" style="color:var(--ink-soft)">${
-              d && d.cargando ? "Cargando redes…" : d && d.error ? `<span style="color:var(--danger);font-weight:600">${escA(d.error)}</span>`
-              : d && d.lineas ? `<b style="color:var(--brand-dark)">${d.lineas.length} tuberías · ${cuenta.v || 0} válvulas · ${cuenta.a || 0} accesorios · ${cuenta.h || 0} hidrantes · ${(d.lotes || []).length} lotes</b><br>en ${d.r} m ${d.origen === "gps" ? "de tu ubicación" : "del punto elegido"}`
-              : "Buscando tu ubicación…"}${d && d.avisoLotes ? `<div class="text-xs mt-1" style="color:#6B4A00">${escA(d.avisoLotes)}</div>` : ""}</div>
-            <div class="text-xs mt-2" style="color:var(--ink-soft)">Usa ◎ en el mapa para volver a tu ubicación, o toca un punto fuera del círculo para cargar el plano ahí.</div>
-          </div>
-          <div class="card p-4 mt-3">
-            <div class="gis-lbl">Capas</div>
-            <div class="rg-capas">${RG_CAPAS.map(c => `<label class="rg-capa"><input type="checkbox" class="rgCapa" data-k="${c.k}" ${vis[c.k] ? "checked" : ""}>${c.k === "et" ? `<span class="rg-et">AC 100</span>` : muestra(c.k)}<span>${c.n}</span></label>`).join("")}</div>
-          </div>
-          <div class="card p-4 mt-3">
-            <div class="gis-lbl">Lotes</div>
-            <div class="rg-ley">${[["#E1E1E1", "TL001"], ["#64AB64", "TL003 y TL005"], ["#734C00", "TL009"], ["#B2B2B2", "Otros tipos"]].map(([c, n]) => `<div><span class="rg-lote" style="background:${c}"></span><span>${n}</span></div>`).join("")}</div>
-          </div>
-          <div class="card p-4 mt-3">
-            <div class="gis-lbl">Accesorios</div>
-            <div class="rg-ley">${RG_ACC_LEY.map(([c, n]) => `<div><canvas class="rg-muestra-acc" data-c="${c}" width="26" height="26" aria-hidden="true"></canvas><span><b>${c}</b> ${n}</span></div>`).join("")}</div>
-          </div>
-        </div>
-        <div class="gis-mapa rg-mapa" id="rgMapa" role="region" aria-label="Mapa de redes"></div>
-      </div>`;
-    document.querySelectorAll(".rgRadio").forEach(b => b.onclick = () => {
-      state.rgRadio = Number(b.dataset.r);
-      const c = state.rgDatos && state.rgDatos.centro;
-      if (c) cargarReplica(c[0], c[1], state.rgDatos.origen); else renderReplica();
-    });
-    document.querySelectorAll(".rgCapa").forEach(i => i.onchange = () => { rgVisibles()[i.dataset.k] = i.checked; if (replicaFondo) replicaFondo.redraw(); });
-    document.querySelectorAll(".rg-muestra").forEach(c => dibujarMuestra(c));
-    document.querySelectorAll(".rg-muestra-acc").forEach(c => { const x = c.getContext("2d"); x.translate(13, 13); dibujarAccesorio(x, c.dataset.c, 0, 1.1); });
-    pintarReplica();
-    if (state.rgAuto) {
-      state.rgAuto = false;
-      const u = state.gpsUltimo || (state.coords && state.coords.lat != null ? state.coords : null);
-      (u ? Promise.resolve(u) : ubicacionAhora()).then(c => { if (c && state.vista === "REPLICA_GIS") cargarReplica(c.lat, c.lon, "gps"); });
-    }
-  }
-  async function cargarReplica(lat, lon, origen) {
-    const r = state.rgRadio || 200;
-    if (!apiListo() || !enLinea()) { state.rgDatos = { error: "Necesitas internet para cargar las redes" }; return renderReplica(); }
-    state.rgDatos = { ...(state.rgDatos || {}), cargando: true, error: null };
-    const est = document.getElementById("rgEstado"); if (est) est.textContent = "Cargando redes…";
-    try {
-      const d = await rdApi("gis_cerca", { lat: lat.toFixed(6), lon: lon.toFixed(6), r });
-      state.rgDatos = { centro: [lat, lon], origen, r: d.r, lineas: prepararLineas(d.lineas), puntos: d.puntos, lotes: prepararLotes(d.lotes), avisoLotes: d.avisoLotes || "", encuadrar: true };
-    } catch (e) {
-      state.rgDatos = { centro: [lat, lon], origen, r, error: e && e.code === "sin_replica" ? "Falta cargar la carpeta ECRF_REPLICA_GIS en el Drive" : msgError(e) };
-    }
-    if (state.vista === "REPLICA_GIS") renderReplica();
+    if (!nd.lineas && !nd.nis) { nd.error = nd.errorRedes || nd.errorNis; nd.errorRedes = nd.errorNis = ""; }
+    state.rgDatos = nd;
+    if (state.vista === "PLANO_GIS") renderPlano();
   }
   // lotes: se decodifican los anillos (diferencias × 1e6) y se calcula su caja
   function prepararLotes(ls) {
@@ -3719,6 +3628,14 @@
       return { t: l[0], anillos, s, n, w, e };
     });
   }
+  // conexiones y empalmes de hidrante: [tipo, lat0, lon0, dlat, dlon…] (× 1e6)
+  function prepararConex(ls) {
+    return (ls || []).map(f => {
+      const c = []; let la = 0, lo = 0, s = 90, n = -90, w = 180, e = -180;
+      for (let i = 1; i + 1 < f.length; i += 2) { la += f[i]; lo += f[i + 1]; const p = [la / 1e6, lo / 1e6]; c.push(p); s = Math.min(s, p[0]); n = Math.max(n, p[0]); w = Math.min(w, p[1]); e = Math.max(e, p[1]); }
+      return { t: f[0], c, s, n, w, e };
+    });
+  }
   // cada tubería con su caja (para dibujar solo las que tocan cada cuadro del mapa)
   function prepararLineas(ls) {
     return (ls || []).map(f => {
@@ -3727,7 +3644,16 @@
       return { t: f[0], et: (f[1] + " " + f[2]).trim(), c, s, n, w, e };
     });
   }
-  async function pintarReplica() {
+  // el NIS más cercano al punto tocado (a menos de 14 px en pantalla)
+  function nisTocado(latlng) {
+    const d = state.rgDatos;
+    if (!replicaL || !d || !d.nis || !rgVisibles().nis || replicaL.getZoom() < 15) return null;
+    const p = replicaL.latLngToContainerPoint(latlng);
+    let mejor = null, md = 14;
+    d.nis.forEach(x => { const q = replicaL.latLngToContainerPoint([x.lat, x.lon]); const dd = Math.hypot(q.x - p.x, q.y - p.y); if (dd < md) { md = dd; mejor = x; } });
+    return mejor;
+  }
+  async function pintarPlano(sel) {
     const turno = ++turnoMapa;
     try { await cargarLeaflet(); } catch (e) { const m = document.getElementById("rgMapa"); if (m) m.innerHTML = `<div class="gis-sinmapa">No se pudo cargar el mapa. Revisa tu internet.</div>`; return; }
     if (turno !== turnoMapa || !document.getElementById("rgMapa")) return;
@@ -3737,9 +3663,18 @@
     replicaL = L.map("rgMapa", { zoomControl: true, maxZoom: 20 }); capaBase(replicaL);
     replicaFondo = new (CapaRedes())({ pane: "overlayPane" }).addTo(replicaL);
     if (d.centro) L.circle(d.centro, { radius: d.r, color: "#0B5FA5", weight: 2, dashArray: "6 6", fill: false, interactive: false }).addTo(replicaL);
+    if (d.centro && d.origen === "mapa") L.circleMarker(d.centro, { radius: 5, color: "#fff", weight: 2, fillColor: "#0B5FA5", fillOpacity: 1, interactive: false }).addTo(replicaL);
     const u = state.gpsUltimo || (state.coords && state.coords.lat != null ? state.coords : null);
     if (u) L.marker([u.lat, u.lon], { icon: ICONO_AQUI(), interactive: false, keyboard: false, zIndexOffset: 1000 }).addTo(replicaL);
-    // ◎ volver a mi ubicación (lee el GPS otra vez) y ↻ cargar la zona que estás viendo
+    // mi ruta (opcional)
+    if (state.mnVerRuta) aplicarOrden(paradasRuta()).filter(p => p.lat != null).forEach((p, i) => {
+      L.marker([p.lat, p.lon], { icon: pinNum(i + 1, "#5B6B7F") }).addTo(replicaL).bindPopup(`<b>${i + 1}. NIS ${escA(p.nis)}</b><br>${escA(p.direccion || "")}<br><small>${escA(FORM_CORTO[formDe(p)] || "")}</small>`);
+    });
+    // NIS elegido: alfiler con su ventana
+    let pinSel = null;
+    if (sel && sel.latNis != null) pinSel = L.marker([Number(sel.latNis), Number(sel.lonNis)], { icon: PIN_NIS(), zIndexOffset: 900 }).addTo(replicaL)
+      .bindPopup(ventanaNis(state.mnSel, sel, null), { maxWidth: 290, minWidth: 240 });
+    // ◎ volver a mi ubicación (lee el GPS otra vez y carga el plano ahí)
     const Botones = L.Control.extend({ options: { position: "topleft" }, onAdd() {
       const box = L.DomUtil.create("div", "leaflet-bar leaflet-control");
       box.innerHTML = `<a href="#" id="rgIrYo" role="button" title="Ir a mi ubicación" aria-label="Actualizar mi ubicación GPS e ir a ella" style="display:flex;align-items:center;justify-content:center;width:34px;height:34px;color:#1E9E4A">
@@ -3747,29 +3682,46 @@
       L.DomEvent.disableClickPropagation(box);
       box.querySelector("#rgIrYo").addEventListener("click", async ev => {
         ev.preventDefault(); ev.stopPropagation();
+        const a = box.firstElementChild; a.style.opacity = ".5";
+        // primero la última posición que dio el GPS (respuesta inmediata) y luego una lectura nueva para afinar
         const v = state.gpsUltimo, reciente = v && Date.now() - v.en < 5 * 60000;
-        if (reciente) cargarReplica(v.lat, v.lon, "gps");
+        if (reciente) cargarPlano(v.lat, v.lon, "gps");
         const c = await ubicacionAhora();
+        a.style.opacity = "";
         if (!c) { if (!reciente) toast("No se pudo obtener tu ubicación. Revisa que el GPS esté activo", true); return; }
-        if (!reciente || distKm(v, c) > 0.01) cargarReplica(c.lat, c.lon, "gps");
+        if (!reciente || distKm(v, c) > 0.005) cargarPlano(c.lat, c.lon, "gps");
       });
       return box;
     } });
     new Botones().addTo(replicaL);
-    if (d.centro && d.origen !== "gps") L.circleMarker(d.centro, { radius: 5, color: "#fff", weight: 2, fillColor: "#0B5FA5", fillOpacity: 1, interactive: false }).addTo(replicaL);
-    // tocar fuera del círculo: ofrecer cargar el plano en ese punto (dentro del círculo no pasa nada: el plano es solo para ver)
+    // tocar el mapa: un NIS abre su ventana; fuera del círculo ofrece cargar el plano en ese punto; lo demás es solo para ver
     replicaL.on("click", ev => {
-      const c = state.rgDatos && state.rgDatos.centro, r = state.rgRadio || 200;
+      const x = nisTocado(ev.latlng);
+      if (x) {
+        L.popup({ maxWidth: 290, minWidth: 240, offset: [0, -4] }).setLatLng([x.lat, x.lon]).setContent(ventanaNis(x.nis, datosNis(x), x.m)).openOn(replicaL);
+        return;
+      }
+      const c = state.rgDatos && state.rgDatos.centro, r = state.rgRadio || RG_RADIO_DEF;
       if (c && replicaL.distance(ev.latlng, c) <= (state.rgDatos.r || r)) return;
       const btn = document.createElement("button");
       btn.className = "rg-aqui"; btn.type = "button"; btn.textContent = `◎ Cargar plano a ${r} m de aquí`;
-      btn.onclick = e => { e.stopPropagation(); replicaL.closePopup(); cargarReplica(ev.latlng.lat, ev.latlng.lng, "mapa"); };
+      btn.onclick = e => { e.stopPropagation(); replicaL.closePopup(); cargarPlano(ev.latlng.lat, ev.latlng.lng, "mapa"); };
       L.popup({ closeButton: false, className: "rg-pop" }).setLatLng(ev.latlng).setContent(btn).openOn(replicaL);
     });
-    if (d.centro && d.encuadrar) { replicaL.fitBounds(L.latLng(d.centro).toBounds(d.r * 2), { padding: [10, 10], maxZoom: 19 }); d.encuadrar = false; }
+    // la mano sobre un NIS (en PC)
+    replicaL.on("mousemove", ev => { replicaL.getContainer().style.cursor = nisTocado(ev.latlng) ? "pointer" : ""; });
+    replicaL.getContainer().addEventListener("click", e => {
+      const f = e.target.closest(".mnIrForm"); if (f) irAFormularioConNis(f.dataset.f, f.dataset.n);
+    });
+    if (state.rgFoco && pinSel) { replicaL.setView(pinSel.getLatLng(), 19); pinSel.openPopup(); d.encuadrar = false; }
+    else if (d.centro && d.encuadrar) {
+      replicaL.fitBounds(L.latLng(d.centro).toBounds(d.r * 2), { padding: [10, 10], maxZoom: 19 }); d.encuadrar = false;
+      if (pinSel && d.origen === "nis") pinSel.openPopup();
+    }
     else if (vista) replicaL.setView(vista.c, vista.z);
     else if (u) replicaL.setView([u.lat, u.lon], 17);
     else replicaL.setView([-12.06, -77.04], 12);
+    state.rgFoco = false;
     setTimeout(() => replicaL && replicaL.invalidateSize(), 150);
   }
 
@@ -3779,7 +3731,7 @@
     createTile(c) {
       const t = document.createElement("canvas"), dpr = Math.min(2, window.devicePixelRatio || 1);
       t.width = t.height = 256 * dpr; t.style.width = t.style.height = "256px";
-      const d = state.rgDatos; if (!d || !d.lineas) return t;
+      const d = state.rgDatos; if (!d || (!d.lineas && !d.nis)) return t;
       try {
         const x = t.getContext("2d"); x.scale(dpr, dpr);
         const m = this._map, z = c.z, ox = c.x * 256, oy = c.y * 256, vis = rgVisibles();
@@ -3787,7 +3739,7 @@
         const marg = 70;                                                   // para etiquetas e íconos que cruzan el borde
         const nw = m.unproject([ox - marg, oy - marg], z), se = m.unproject([ox + 256 + marg, oy + 256 + marg], z);
         const dentro = (la, lo) => la <= nw.lat && la >= se.lat && lo >= nw.lng && lo <= se.lng;
-        const lineas = d.lineas.filter(l => l.n >= se.lat && l.s <= nw.lat && l.e >= nw.lng && l.w <= se.lng);
+        const lineas = (d.lineas || []).filter(l => l.n >= se.lat && l.s <= nw.lat && l.e >= nw.lng && l.w <= se.lng);
         // 0) lotes: relleno según el tipo y borde negro delgado (debajo de todo)
         if (vis.lo && d.lotes) {
           x.lineWidth = z >= 18 ? 0.8 : z >= 16 ? 0.5 : 0.3; x.strokeStyle = "#000"; x.lineJoin = "miter";
@@ -3798,15 +3750,26 @@
             x.closePath(); x.fillStyle = RG_LOTE_COLOR(l.t); x.fill("evenodd"); if (z >= 15) x.stroke();
           });
         }
-        // 1) tuberías: primero las secundarias, encima las primarias
+        // 1) tuberías de conexión (Lapis Lazuli) y empalmes de hidrante (Mars Red): la mitad del grosor de las de agua potable
         x.lineCap = "round"; x.lineJoin = "round";
+        if (d.conex && z >= 15) [1, 2].forEach(tipo => {
+          const k = tipo === 1 ? "cx" : "eh"; if (!vis[k]) return;
+          x.strokeStyle = RG_COLOR[k]; x.lineWidth = anchoTuberia(2, z) / 2;
+          x.beginPath();
+          d.conex.forEach(l => {
+            if (l.t !== tipo || !(l.n >= se.lat && l.s <= nw.lat && l.e >= nw.lng && l.w <= se.lng)) return;
+            l.c.forEach(([la, lo], i) => { const [px, py] = xy(la, lo); i ? x.lineTo(px, py) : x.moveTo(px, py); });
+          });
+          x.stroke();
+        });
+        // 2) tuberías de agua potable: primero las secundarias, encima las primarias
         [2, 1].forEach(tipo => {
           if (!vis[tipo === 1 ? "prim" : "sec"]) return;
           x.strokeStyle = tipo === 1 ? RG_COLOR.prim : RG_COLOR.sec;
-          x.lineWidth = tipo === 1 ? (z >= 17 ? 3.5 : 2.5) : (z >= 17 ? 2 : 1.4);
+          x.lineWidth = anchoTuberia(tipo, z);
           lineas.filter(l => l.t === tipo).forEach(l => { x.beginPath(); l.c.forEach(([la, lo], i) => { const [px, py] = xy(la, lo); i ? x.lineTo(px, py) : x.moveTo(px, py); }); x.stroke(); });
         });
-        // 2) etiquetas paralelas a la tubería (material y diámetro), desde zoom 17
+        // 3) etiquetas paralelas a la tubería (material y diámetro), desde zoom 17
         if (vis.et && z >= 17) {
           x.font = "500 10px Roboto, Arial, sans-serif"; x.textAlign = "center"; x.textBaseline = "bottom";
           lineas.forEach(l => {
@@ -3831,9 +3794,9 @@
             });
           });
         }
-        // 3) puntos: accesorios (desde zoom 17), válvulas e hidrantes (desde zoom 15)
+        // 4) puntos: accesorios (desde zoom 17), válvulas e hidrantes (desde zoom 15)
         const esc = z >= 19 ? 1.35 : z >= 18 ? 1.15 : 1;
-        d.puntos.forEach(p => {
+        (d.puntos || []).forEach(p => {
           const [k, cod, la6, lo6, ang] = p, la = la6 / 1e6, lo = lo6 / 1e6;
           if (!dentro(la, lo) || !vis[k]) return;
           if (k === "a" && z < 17) return;
@@ -3845,7 +3808,18 @@
           else dibujarAccesorio(x, cod, ang >= 0 ? -ang * Math.PI / 180 : 0, esc);
           x.restore();
         });
-      } catch (e) { console.warn("réplica GIS", e); }
+        // 5) NIS de la base: cuadraditos celestes encima de todo (son los únicos que se pueden tocar)
+        if (vis.nis && d.nis && z >= 15) {
+          const s = z >= 18 ? 12 : z >= 17 ? 10 : 7;
+          x.fillStyle = COLOR_CONEXION; x.strokeStyle = "#fff"; x.lineWidth = 1.5;
+          d.nis.forEach(n => {
+            if (n.nis === state.mnSel || !dentro(n.lat, n.lon)) return;
+            const [px, py] = xy(n.lat, n.lon);
+            x.shadowColor = "rgba(0,0,0,.35)"; x.shadowBlur = 2;
+            x.fillRect(px - s / 2, py - s / 2, s, s); x.shadowBlur = 0; x.strokeRect(px - s / 2, py - s / 2, s, s);
+          });
+        }
+      } catch (e) { console.warn("plano GIS", e); }
       return t;
     }
   });
@@ -3890,13 +3864,15 @@
   function dibujarMuestra(c) {
     const x = c.getContext("2d"), k = c.dataset.k;
     x.translate(22, 11);
-    if (k === "lo") { x.fillStyle = "#E1E1E1"; x.strokeStyle = "#000"; x.lineWidth = 0.8; x.fillRect(-12, -7, 24, 14); x.strokeRect(-12, -7, 24, 14); }
+    if (k === "nis") { x.fillStyle = COLOR_CONEXION; x.strokeStyle = "#fff"; x.lineWidth = 1.5; x.fillRect(-6, -6, 12, 12); x.strokeRect(-6, -6, 12, 12); }
+    else if (k === "cx" || k === "eh") { x.strokeStyle = RG_COLOR[k]; x.lineWidth = 1.2; x.beginPath(); x.moveTo(-18, 0); x.lineTo(18, 0); x.stroke(); }
+    else if (k === "lo") { x.fillStyle = "#E1E1E1"; x.strokeStyle = "#000"; x.lineWidth = 0.8; x.fillRect(-12, -7, 24, 14); x.strokeRect(-12, -7, 24, 14); }
     else if (k === "prim" || k === "sec") { x.strokeStyle = RG_COLOR[k]; x.lineWidth = k === "prim" ? 3.5 : 2; x.beginPath(); x.moveTo(-18, 0); x.lineTo(18, 0); x.stroke(); }
     else if (k === "v") { x.fillStyle = RG_COLOR.valv; x.beginPath(); x.arc(0, 0, 4.5, 0, 6.2832); x.fill(); }
     else if (k === "a") { x.strokeStyle = RG_COLOR.sec; x.lineWidth = 2; x.beginPath(); x.moveTo(-18, 0); x.lineTo(18, 0); x.stroke(); dibujarAccesorio(x, "T", 0, 1.1); }
     else if (k === "h") dibujarHidrante(x, 1);
   }
-  ICO_LAT.REPLICA_GIS = ICO_REPLICA;
+  ICO_LAT.PLANO_GIS = ICO_REPLICA;
 
   /* ---------------- GPS OBLIGATORIO ----------------
      Al abrir la app (con sesión) se pide la ubicación y no se continúa hasta tenerla. Luego se sigue el GPS
