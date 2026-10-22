@@ -574,8 +574,19 @@
   const esSupervisor = () => false;
   function misPendientes() {
     const hoy = aplicarOrden(state.pendientes);   // orden de "Ordenar por cercanía" si se usó; si no, por fecha de carga
-    const delForm = hoy.filter(p => formDe(p) === (state.form || "GPFO0381"));
+    const delForm = hoy.filter(p => formDe(p) === (state.form || "GPFO0381") && esDeHoy(p));
     return esSupervisor() ? delForm : delForm.filter(p => p.para === state.operario);
+  }
+  // La ruta es del día: un NIS agregado el lunes vale todo el lunes y el martes ya no aparece (ni en el celular ni en el servidor)
+  const diaDe = ts => { const d = new Date(Number(ts) || 0); return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0"); };
+  const esDeHoy = p => diaDe(p && p.creadoEn) === todayISO();
+  function purgarRutaVieja() {
+    if (!Array.isArray(state.pendientes) || state.diaRuta === todayISO()) return;
+    state.diaRuta = todayISO();
+    const antes = state.pendientes.length;
+    state.pendientes = state.pendientes.filter(esDeHoy);
+    if (state.pendientes.length !== antes) guardarLS("gpfo_pendientes", state.pendientes);
+    guardarLS("gpfo_pend_ops", leerLS("gpfo_pend_ops", []).filter(o => o.op !== "add" || esDeHoy(o.data)));   // lo de días pasados ya no se sube
   }
   async function loadPendientes() {
     let lista = leerLS("gpfo_pendientes", []);
@@ -590,8 +601,9 @@
       if (op.op === "add" && !lista.some(p => p.id === op.id)) lista.push({ id: op.id, ...op.data });
       if (op.op === "del") lista = lista.filter(p => p.id !== op.id);
     }
-    state.pendientes = lista;
-    guardarLS("gpfo_pendientes", lista);
+    state.pendientes = lista.filter(esDeHoy); state.diaRuta = todayISO();
+    guardarLS("gpfo_pendientes", state.pendientes);
+    guardarLS("gpfo_pend_ops", leerLS("gpfo_pend_ops", []).filter(o => o.op !== "add" || esDeHoy(o.data)));
   }
   async function agregarPendiente(p) {
     const id = nuevoId("p");
@@ -1081,6 +1093,7 @@
 
   /* ================= RENDER ================= */
   function render() {
+    purgarRutaVieja();                                // si pasó la medianoche con la app abierta, la ruta de ayer se borra
     renderPantalla();
     if (typeof pintarLateral === "function") try { pintarLateral(); } catch (e) {}
   }
@@ -2353,9 +2366,9 @@
           <button class="adm-tab" data-admtab="vehiculo" aria-current="${tab === "vehiculo"}">Laboratorio (vehículo)</button>
           <button class="adm-tab" disabled title="Próximamente">Usuarios · próximamente</button>
         </div>
-        ${tab === "charlas" ? `<div class="text-sm mb-3" style="color:var(--ink-soft)">La charla <b>vigente</b> es la que verán todos los trabajadores al iniciar su reporte diario. Solo puede haber una vigente.</div>` + htmlAdminCharlas()
+        ${tab === "charlas" ? estilosGis() + estilosCharlas() + htmlAdminCharlas()
           : tab === "catalogo" ? `<div class="text-sm mb-3" style="color:var(--ink-soft)">Actividades que los trabajadores eligen al planificar su día. No se borran: se desactivan.</div>` + htmlAdminCatalogo()
-          : tab === "vehiculo" ? `<div class="text-sm mb-3" style="color:var(--ink-soft)">Ficha del vehículo laboratorio que ven todos en «Laboratorio ECRF». Las fechas de SOAT, revisión técnica y mantenimiento generan las alertas de vencimiento.</div>` + htmlAdminVehiculo() : `
+          : tab === "vehiculo" ? `<div class="text-sm mb-3" style="color:var(--ink-soft)">Ficha del vehículo laboratorio que ven todos en «Laboratorio ECRF». Las fechas de SOAT, revisión técnica y mantenimiento generan las alertas de vencimiento.</div>` + estilosGis() + htmlAdminVehiculo() : `
         <div class="text-sm mb-3" style="color:var(--ink-soft)">Activa o desactiva cada módulo, cambia su orden y su nombre, y elige qué roles lo ven en el menú. Los cambios llegan a todos los celulares la próxima vez que abran la app con internet.</div>
         <div class="adm-grid">
           <div>
@@ -3004,40 +3017,107 @@
     catch (e) { state.adminRd = { error: msgError(e) }; }
     if (state.admin) renderAdmin();
   }
+  // Charlas programadas por fecha (diseño de tarjetas). Las de días pasados las borra el servidor.
+  const sumarDia = (iso, n) => { const d = new Date(iso + "T12:00:00"); d.setDate(d.getDate() + n); return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0"); };
+  const DIAS_CORTOS = ["dom", "lun", "mar", "mié", "jue", "vie", "sáb"];
+  function estadoCharla(c, d) {
+    if (!c.activa) return { k: "pausada", t: "Pausada" };
+    if (c.id === d.vigenteId) return { k: "hoy", t: c.fecha ? "Hoy" : "En uso hoy" };
+    if (!c.fecha) return { k: "defecto", t: "Por defecto" };
+    return { k: "prog", t: "Programada" };
+  }
   function htmlAdminCharlas() {
     const d = state.adminRd;
     if (!d) { cargarAdminRd(); return `<div class="text-sm py-6" style="color:var(--ink-soft)">Cargando…</div>`; }
     if (d.error) return `<div class="card p-4 text-sm" style="color:var(--danger)">${escA(d.error)}</div>`;
-    const ed = state.adminCharlaEd || {};
-    const vid = idYoutubeCliente(ed.url || "");
+    const hoy = d.hoy || todayISO(), ed = state.adminCharlaEd;
+    const orden = c => { const e = estadoCharla(c, d).k; return (e === "hoy" ? "0" : e === "prog" ? "1" + c.fecha : e === "defecto" ? "2" : "3") + (c.fecha || ""); };
+    const lista = d.charlas.slice().sort((a, b) => orden(a).localeCompare(orden(b)));
+    // próximos 14 días: qué charla toca cada día
+    const defecto = d.charlas.find(c => c.activa && !c.fecha);
+    const dias = Array.from({ length: 14 }, (_, i) => { const f = sumarDia(hoy, i); return { f, c: d.charlas.find(c => c.activa && c.fecha === f) }; });
+    const vid = ed ? idYoutubeCliente(ed.url || "") : "";
+    const fechaTxt = f => { const x = new Date(f + "T12:00:00"); return DIAS_CORTOS[x.getDay()] + " " + x.getDate() + "/" + (x.getMonth() + 1); };
     return `
-      <div class="adm-grid">
-        <div>
-          ${d.charlas.length ? d.charlas.slice().reverse().map(c => `
-            <div class="adm-mod" style="grid-template-areas:none;grid-template-columns:auto 1fr auto;display:grid;align-items:center">
-              <img src="https://img.youtube.com/vi/${escA(c.videoId)}/mqdefault.jpg" alt="" style="width:120px;border-radius:8px" onerror="this.style.visibility='hidden'">
-              <div class="min-w-0">
-                <div class="text-xs font-bold" style="color:var(--brand)">${escA(c.tema)}</div>
-                <div class="font-bold">${escA(c.titulo)}</div>
-                <div class="text-xs" style="color:var(--ink-soft);word-break:break-all">${escA(c.url)}</div>
-                ${c.activa ? `<span class="badge" style="background:#DDF3E7;color:#12613B">Vigente</span>` : `<span class="badge" style="background:#EEF2F6;color:#4A5A6E">Inactiva</span>`}
-                <button class="text-sm font-semibold ml-2 chEd" data-id="${escA(c.id)}" style="color:var(--brand);margin-left:8px">Editar</button>
-              </div>
-              <button class="adm-sw chSw" role="switch" data-id="${escA(c.id)}" aria-checked="${c.activa}" aria-label="Vigente"></button>
-            </div>`).join("") : `<div class="card p-4 text-sm" style="color:var(--ink-soft)">Aún no hay charlas registradas.</div>`}
+      <section class="card ch-cab">
+        <div class="min-w-0"><b class="ch-tit">🛡 Programación y catálogo de charlas de seguridad diarias</b>
+          <div class="text-sm" style="color:var(--ink-soft)">Programa las charlas en video de <b>YouTube</b> por fecha para el inicio de jornada. Cada día los trabajadores ven la charla de ese día; las de días pasados se borran solas.</div></div>
+        <button id="chNueva" class="btn-primary" style="width:auto;padding:12px 18px;white-space:nowrap">＋ Programar charla</button>
+      </section>
+      <section class="card p-4 mt-3">
+        <div class="gis-lbl">Próximos 14 días</div>
+        <div class="ch-dias">${dias.map(x => `<button class="ch-dia ${x.c ? "ch-dia-ok" : "ch-dia-no"} ${x.f === hoy ? "ch-dia-hoy" : ""} chDia" data-f="${x.f}" title="${x.c ? escA(x.c.tema) : defecto ? "Sin charla: se usará la por defecto" : "Sin charla"}">
+          <small>${x.f === hoy ? "Hoy" : fechaTxt(x.f)}</small><b>${x.c ? "✓" : defecto ? "◌" : "—"}</b></button>`).join("")}</div>
+        <div class="text-xs mt-2" style="color:var(--ink-soft)">✓ charla programada · ◌ sin charla: se usa la charla por defecto${defecto ? ` («${escA(defecto.tema)}»)` : ""} · — sin charla. Toca un día libre para programarlo.</div>
+      </section>
+      ${ed ? `
+      <section class="card p-4 mt-3 ch-form" id="chForm">
+        <div class="flex items-center justify-between gap-2"><b class="text-lg" style="color:var(--brand-dark)">${ed.id ? "Editar charla" : "Programar charla"}</b><button id="chCancel" class="pl-btn" aria-label="Cerrar">✕</button></div>
+        <div class="grid gap-3 mt-3 lab-form2">
+          <div><label class="adm-lbl" for="chFecha">Fecha *</label><input id="chFecha" type="date" class="input" min="${hoy}" value="${escA(ed.fecha || "")}">
+            <label class="flex items-center gap-2 text-xs mt-1"><input id="chDefecto" type="checkbox" ${ed.fecha === "" && ed.id ? "checked" : ""}> Sin fecha: charla por defecto (se usa los días sin charla programada)</label></div>
+          <div><label class="adm-lbl" for="chTema">Tema *</label><input id="chTema" class="input" maxlength="120" value="${escA(ed.tema || "")}" placeholder="Ej.: Seguridad operativa y EPP"></div>
+          <div style="grid-column:1/-1"><label class="adm-lbl" for="chTit">Título *</label><input id="chTit" class="input" maxlength="300" value="${escA(ed.titulo || "")}" placeholder="Ej.: Uso de EPP y detección de riesgos en vía pública"></div>
+          <div style="grid-column:1/-1"><label class="adm-lbl" for="chDesc">Descripción (opcional)</label><textarea id="chDesc" class="input" rows="2" maxlength="600">${escA(ed.descripcion || "")}</textarea></div>
+          <div style="grid-column:1/-1"><label class="adm-lbl" for="chUrl">URL del video de YouTube *</label><input id="chUrl" class="input" maxlength="300" value="${escA(ed.url || "")}" placeholder="https://www.youtube.com/watch?v=…">
+            <div id="chUrlInfo" class="text-xs mt-1" style="color:${vid ? "#12613B" : "var(--ink-soft)"}">${vid ? "✓ Enlace válido · video " + vid : "Pega el enlace del video (watch, youtu.be o shorts)"}</div></div>
         </div>
-        <div class="adm-prev">
-          <div class="font-bold mb-2">${ed.id ? "Editar charla" : "Nueva charla"}</div>
-          <label class="adm-lbl" for="chTema">Tema *</label><input id="chTema" class="input mb-2" maxlength="120" value="${escA(ed.tema || "")}" placeholder="Ej.: Uso de EPP">
-          <label class="adm-lbl" for="chTit">Título o descripción *</label><textarea id="chTit" class="input mb-2" rows="2" maxlength="300">${escA(ed.titulo || "")}</textarea>
-          <label class="adm-lbl" for="chUrl">URL del video de YouTube *</label><input id="chUrl" class="input mb-1" maxlength="300" value="${escA(ed.url || "")}" placeholder="https://www.youtube.com/watch?v=…">
-          <div id="chUrlInfo" class="text-xs mb-2" style="color:${vid ? "#12613B" : "var(--ink-soft)"}">${vid ? "✓ Enlace válido · video " + vid : "Pega el enlace del video (watch, youtu.be o shorts)"}</div>
-          ${vid ? `<img src="https://img.youtube.com/vi/${vid}/mqdefault.jpg" alt="" style="width:100%;border-radius:10px;margin-bottom:8px">` : ""}
-          <label class="flex items-center gap-2 text-sm mb-3"><input id="chAct" type="checkbox" ${ed.activa === false ? "" : "checked"}> Dejarla como charla vigente</label>
-          <div id="chErr" class="rd-err"></div>
-          <div class="flex gap-2">${ed.id ? `<button id="chCancel" class="btn-ghost flex-1">Cancelar</button>` : ""}<button id="chGuardar" class="btn-primary flex-1">Guardar charla</button></div>
-        </div>
-      </div>`;
+        ${vid ? `<img src="https://img.youtube.com/vi/${vid}/mqdefault.jpg" alt="" style="width:220px;border-radius:10px;margin-top:8px">` : ""}
+        <div id="chErr" class="rd-err"></div>
+        <div class="flex gap-2 mt-2" style="flex-wrap:wrap"><button id="chGuardar" class="btn-primary" style="width:auto;padding:12px 20px">${ed.id ? "Guardar cambios" : "Programar charla"}</button>
+          ${!ed.id ? `<span class="text-xs" style="color:var(--ink-soft);align-self:center">Al guardar, el formulario sigue abierto con el día siguiente para que programes la próxima.</span>` : ""}</div>
+      </section>` : ""}
+      ${lista.length ? `<div class="ch-grid mt-3">${lista.map(c => { const e = estadoCharla(c, d); return `
+        <article class="card ch-card ${e.k === "pausada" ? "ch-off" : ""}">
+          <div class="ch-card-cab"><span class="ch-tema">${escA(c.tema)}</span>${c.fecha ? `<span class="ch-fecha">📅 ${fechaPe(c.fecha)}</span>` : ""}<span class="ch-est ch-est-${e.k}">${e.t}</span></div>
+          <a class="ch-mini" href="${escA(c.url)}" target="_blank" rel="noopener" aria-label="Ver video"><img src="https://img.youtube.com/vi/${escA(c.videoId)}/hqdefault.jpg" alt="" loading="lazy" onerror="this.style.visibility='hidden'"><span class="ch-play">▶</span><span class="ch-yt">YouTube</span></a>
+          <b class="ch-card-tit">${escA(c.titulo)}</b>${c.descripcion ? `<div class="ch-card-desc">${escA(c.descripcion)}</div>` : ""}
+          <div class="ch-url"><div class="flex justify-between gap-2"><span class="ch-yt2">▶ YouTube</span><span class="text-xs" style="color:var(--ink-soft)">Por: ${escA(c.actualizadoPor || "—")}</span></div><code>${escA(c.url)}</code></div>
+          <div class="ch-pie">
+            <a href="${escA(c.url)}" target="_blank" rel="noopener" class="ch-ver">▶ Reproducir / ver charla</a>
+            <button class="ch-btn chSw" data-id="${escA(c.id)}" data-act="${!c.activa}">${c.activa ? "Pausar" : "Activar"}</button>
+            <button class="ch-ico chEd" data-id="${escA(c.id)}" aria-label="Editar" title="Editar">✎</button>
+            <button class="ch-ico chDel" data-id="${escA(c.id)}" aria-label="Eliminar" title="Eliminar">🗑</button>
+          </div>
+          ${state.chBorrar === c.id ? `<div class="ch-conf"><span>¿Eliminar esta charla?</span><button class="gis-chip chDelSi" data-id="${escA(c.id)}" style="border-color:var(--danger);color:var(--danger)">Sí, eliminar</button><button class="gis-chip chDelNo">No</button></div>` : ""}
+        </article>`; }).join("")}</div>`
+      : `<div class="card p-4 mt-3 text-sm" style="color:var(--ink-soft)">Aún no hay charlas. Usa «＋ Programar charla».</div>`}`;
+  }
+  function estilosCharlas() {
+    return `<style>
+      .ch-cab{padding:16px 18px;display:flex;gap:14px;align-items:center;justify-content:space-between;flex-wrap:wrap}
+      .ch-tit{display:block;font-size:16px;color:#0F1B2D;margin-bottom:2px}
+      .ch-dias{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:6px}
+      .ch-dia{border-radius:10px;padding:6px 2px;display:grid;justify-items:center;border:1.5px solid var(--line);background:#fff}
+      .ch-dia small{font-size:11px;color:var(--ink-soft)}.ch-dia b{font-size:15px}
+      .ch-dia-ok{background:#DDF3E7;border-color:#9BD3B0}.ch-dia-ok b{color:#12613B}
+      .ch-dia-no b{color:#B26B00}.ch-dia-hoy{outline:2px solid #0B5FA5;outline-offset:1px}
+      .ch-form{border:2px solid #7CCBEA}
+      .ch-grid{display:grid;gap:14px}
+      @media (min-width: 760px){ .ch-grid{grid-template-columns:repeat(2,minmax(0,1fr))} }
+      .ch-card{padding:14px;display:flex;flex-direction:column;gap:8px}
+      .ch-off{opacity:.6}
+      .ch-card-cab{display:flex;gap:6px;align-items:center;flex-wrap:wrap}
+      .ch-tema{font:600 11px ui-monospace,monospace;text-transform:uppercase;color:#0B5FA5;border:1px solid #9CC3E6;background:#F4F8FC;border-radius:6px;padding:3px 8px}
+      .ch-fecha{font:600 12px ui-monospace,monospace;background:#F1F4F7;border-radius:6px;padding:3px 8px;margin-left:auto}
+      .ch-est{font-size:12px;font-weight:800;text-transform:uppercase;border-radius:999px;padding:4px 10px}
+      .ch-card-cab .ch-fecha + .ch-est{margin-left:0}.ch-card-cab .ch-tema + .ch-est{margin-left:auto}
+      .ch-est-hoy{background:#1E9E4A;color:#fff}.ch-est-prog{background:#E1F3FB;color:#0B4A6B}.ch-est-defecto{background:#FFF4DB;color:#8A5A00}.ch-est-pausada{background:#EEF1F4;color:#5B6B7F}
+      .ch-mini{position:relative;display:block;border-radius:12px;overflow:hidden;aspect-ratio:16/7;background:#0F1B2D}
+      .ch-mini img{width:100%;height:100%;object-fit:cover;display:block}
+      .ch-play{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);width:44px;height:44px;border-radius:50%;background:#E8132B;color:#fff;display:flex;align-items:center;justify-content:center;font-size:16px;padding-left:3px}
+      .ch-yt{position:absolute;left:8px;bottom:8px;background:#000;color:#fff;font-size:11px;font-weight:800;border-radius:6px;padding:2px 7px}
+      .ch-card-tit{font-size:15px;color:#0F1B2D}
+      .ch-card-desc{font-size:13px;color:var(--ink-soft)}
+      .ch-url{background:#F7FAFC;border:1px solid var(--line);border-radius:12px;padding:8px 10px;display:grid;gap:4px}
+      .ch-url code{font-size:12px;color:#334155;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+      .ch-yt2{font-size:11px;font-weight:800;color:#C0162B;border:1px solid #F3B4AC;background:#FFF5F4;border-radius:6px;padding:1px 7px}
+      .ch-pie{display:flex;gap:8px;align-items:center;border-top:1px solid var(--line);padding-top:10px;margin-top:auto}
+      .ch-ver{flex:1;font-weight:800;color:#0B5FA5;text-decoration:none;font-size:14px}
+      .ch-btn{background:#F1F4F7;border-radius:8px;padding:6px 10px;font-weight:700;font-size:13px}
+      .ch-ico{width:32px;height:32px;border-radius:8px;color:#5B6B7F}
+      .ch-conf{display:flex;gap:8px;align-items:center;flex-wrap:wrap;font-size:13px;font-weight:600}
+    </style>`;
   }
   function htmlAdminCatalogo() {
     const d = state.adminRd;
@@ -3076,20 +3156,42 @@
       return !error;
     };
     if (state.adminTab === "charlas") {
+      const abrirForm = datos => { state.adminCharlaEd = datos; renderAdmin(); const f = document.getElementById("chForm"); if (f) f.scrollIntoView({ behavior: "smooth", block: "start" }); };
+      // primer día libre desde hoy (para proponer la fecha al programar)
+      const libre = () => { let f = d.hoy || todayISO(); for (let i = 0; i < 120 && d.charlas.some(c => c.activa && c.fecha === f); i++) f = sumarDia(f, 1); return f; };
+      const n = document.getElementById("chNueva"); if (n) n.onclick = () => abrirForm({ fecha: libre() });
+      app.querySelectorAll(".chDia").forEach(b => b.onclick = () => {
+        const c = d.charlas.find(x => x.activa && x.fecha === b.dataset.f);
+        abrirForm(c ? { ...c } : { fecha: b.dataset.f });
+      });
       const url = document.getElementById("chUrl");
       if (url) url.oninput = () => { const v = idYoutubeCliente(url.value); const i = document.getElementById("chUrlInfo"); i.style.color = v ? "#12613B" : url.value ? "var(--danger)" : "var(--ink-soft)"; i.textContent = v ? "✓ Enlace válido · video " + v : url.value ? "No parece un enlace de YouTube" : "Pega el enlace del video"; };
+      const fe = document.getElementById("chFecha"), def = document.getElementById("chDefecto");
+      if (def) { const sync = () => { fe.disabled = def.checked; if (def.checked) fe.value = ""; }; def.onchange = sync; if (def.checked) sync(); }
       const g = document.getElementById("chGuardar");
       if (g) g.onclick = async () => {
-        const datos = { id: (state.adminCharlaEd || {}).id || "", tema: document.getElementById("chTema").value, titulo: document.getElementById("chTit").value, url: url.value, activa: document.getElementById("chAct").checked };
+        const ed = state.adminCharlaEd || {};
+        const datos = { id: ed.id || "", fecha: def.checked ? "" : fe.value, tema: document.getElementById("chTema").value, titulo: document.getElementById("chTit").value,
+                        descripcion: document.getElementById("chDesc").value, url: url.value, activa: ed.id ? ed.activa !== false : true };
         const err = document.getElementById("chErr");
+        if (!def.checked && !datos.fecha) { err.textContent = "Elige la fecha (o marca «Sin fecha» para la charla por defecto)"; return; }
         if (!datos.tema.trim() || !datos.titulo.trim()) { err.textContent = "Completa el tema y el título"; return; }
         if (!idYoutubeCliente(datos.url)) { err.textContent = "La URL no es un enlace válido de YouTube"; return; }
         state.adminCharlaEd = datos; g.disabled = true; g.textContent = "Verificando video…";
-        await llamar("rd_admin_charla", datos, "chErr");
+        const ok = await llamar("rd_admin_charla", datos, "chErr");
+        if (ok && !datos.id && datos.fecha) {           // sigue programando: el formulario queda listo para el día siguiente libre
+          let f = sumarDia(datos.fecha, 1); const dd = state.adminRd;
+          for (let i = 0; i < 120 && dd.charlas.some(c => c.activa && c.fecha === f); i++) f = sumarDia(f, 1);
+          state.adminCharlaEd = { fecha: f, tema: datos.tema }; renderAdmin();
+          const fo = document.getElementById("chForm"); if (fo) fo.scrollIntoView({ block: "start" });
+        }
       };
       const cc = document.getElementById("chCancel"); if (cc) cc.onclick = () => { state.adminCharlaEd = null; renderAdmin(); };
-      app.querySelectorAll(".chEd").forEach(b => b.onclick = () => { state.adminCharlaEd = { ...d.charlas.find(c => c.id === b.dataset.id) }; renderAdmin(); });
-      app.querySelectorAll(".chSw").forEach(b => b.onclick = () => llamar("rd_admin_charla_estado", { id: b.dataset.id, activa: b.getAttribute("aria-checked") !== "true" }));
+      app.querySelectorAll(".chEd").forEach(b => b.onclick = () => abrirForm({ ...d.charlas.find(c => c.id === b.dataset.id) }));
+      app.querySelectorAll(".chSw").forEach(b => b.onclick = () => llamar("rd_admin_charla_estado", { id: b.dataset.id, activa: b.dataset.act === "true" }));
+      app.querySelectorAll(".chDel").forEach(b => b.onclick = () => { state.chBorrar = b.dataset.id; renderAdmin(); });
+      app.querySelectorAll(".chDelNo").forEach(b => b.onclick = () => { state.chBorrar = null; renderAdmin(); });
+      app.querySelectorAll(".chDelSi").forEach(b => b.onclick = () => { state.chBorrar = null; llamar("rd_admin_charla_borrar", { id: b.dataset.id }); });
     }
     if (state.adminTab === "catalogo") {
       const n = document.getElementById("caNueva");
@@ -3143,7 +3245,7 @@
     return orden;
   }
   function paradasRuta() {
-    return state.pendientes.filter(p => esSupervisor() || p.para === state.operario).map(p => {
+    return state.pendientes.filter(p => (esSupervisor() || p.para === state.operario) && esDeHoy(p)).map(p => {
       const cache = NIS_REMOTO[p.nis] || nisLocal(p.nis) || {};
       const lat = p.latNis ?? cache.latNis, lon = p.lonNis ?? cache.lonNis;
       return { ...p, lat: lat == null || lat === "" ? null : Number(lat), lon: lon == null || lon === "" ? null : Number(lon) };
@@ -3923,69 +4025,85 @@
     };
   }
 
-  /* ---------------- PLANIFICADOR DE RUTAS ---------------- */
-  // Usa la misma ruta (hoja RUTA) que la pestaña "Ruta" de cada formulario: no hay una segunda lista.
-  function paradasPlan() {
-    const f = state.plFiltro || "TODOS", quien = state.plQuien || "";
-    return aplicarOrden(paradasRuta()).filter(p => (f === "TODOS" || formDe(p) === f) && (!quien || p.para === quien));
-  }
+  /* ---------------- PLANIFICADOR DE RUTAS ----------------
+     Usa la misma ruta (hoja RUTA) que la pestaña «Ruta» de cada formulario: no hay una segunda lista.
+     La ruta es del día: cada operario la planifica en la mañana y al día siguiente empieza vacía (ver rutaDeHoy).
+     Orden de la pantalla: 1) NIS de mi ruta  2) calcular la ruta óptima (1, 2, 3… y Google Maps)  3) el mapa. */
+  const claveCalculo = () => "ecrf_ruta_calc_" + (state.operario || "") + "_" + todayISO();
   function renderPlanificador() {
-    const todas = paradasPlan();
+    const todas = aplicarOrden(paradasRuta());
     const con = todas.filter(p => p.lat != null && p.lon != null), sin = todas.filter(p => p.lat == null || p.lon == null);
-    const yo = state.coords && state.coords.lat != null ? state.coords : state.gpsUltimo || null;
-    let total = 0; con.forEach((p, i) => { if (i) total += distKm(con[i - 1], p); else if (yo) total += distKm(yo, p); });
+    const yo = state.gpsUltimo || (state.coords && state.coords.lat != null ? state.coords : null);
+    // ¿ya se calculó la ruta con los NIS que hay ahora? (si se agregó uno después, hay que volver a calcular)
+    const calc = leerLS(claveCalculo(), []);
+    const calculada = con.length > 0 && con.every(p => calc.includes(p.id));
+    let total = 0; con.forEach((p, i) => { total += i ? distKm(con[i - 1], p) : yo ? distKm(yo, p) : 0; });
     const tramos = []; for (let i = 0; i < con.length; i += PARADAS_TRAMO) tramos.push(con.slice(i, i + PARADAS_TRAMO));
     const q = state.plQuery || "", r = q.length === 7 ? (NIS_REMOTO[q] || nisLocal(q)) : null, est = q.length === 7 ? estadoBusqueda(q) : "";
-    const quienes = [...new Set(state.pendientes.map(p => p.para).filter(Boolean))];
+    const hoyTxt = new Date().toLocaleDateString("es-PE", { weekday: "long", day: "numeric", month: "long" });
     document.getElementById("app").innerHTML = `${estilosGis()}
-      ${cabeceraGis("Planificador de rutas", "optimización de paradas en campo", ICO_RUTA)}
-      <div class="gis-wrap px-4 py-4 pb-24 gis-split">
-        <div class="gis-panel">
-          <div class="gis-kpis">
-            <div class="rd-dato"><small>Paradas</small><b>${todas.length}</b></div>
-            <div class="rd-dato"><small>En el mapa</small><b>${con.length}</b></div>
-            <div class="rd-dato"><small>Recorrido aprox.</small><b>${fmtKm(con.length ? total : null)}</b></div>
+      ${cabeceraGis("Planificador de rutas", "tu ruta de hoy", ICO_RUTA)}
+      <div class="gis-wrap px-4 py-4 pb-24 pl-col">
+        <!-- 1) NIS de mi ruta -->
+        <div class="card p-4">
+          <div class="pl-paso"><span>1</span><b>NIS de mi ruta de hoy</b></div>
+          <div class="text-xs mb-3" style="color:var(--ink-soft)">Ruta del <b>${escA(hoyTxt)}</b>. Planifica solo lo de hoy: mañana la ruta empieza vacía.</div>
+          <div class="flex gap-2">
+            <input id="plNis" class="input" inputmode="numeric" maxlength="7" placeholder="NIS de 7 dígitos" value="${escA(q)}" autocomplete="off">
+            <select id="plForm" class="input" style="width:auto"><option value="GPFO0381">0381</option><option value="GPFO0405">0405</option><option value="GPFO0416">0416</option></select>
           </div>
-          <div class="card p-4 mt-3">
-            <label class="gis-lbl" for="plNis">Agregar NIS a la ruta</label>
-            <div class="flex gap-2">
-              <input id="plNis" class="input" inputmode="numeric" maxlength="7" placeholder="NIS de 7 dígitos" value="${escA(q)}" autocomplete="off">
-              <select id="plForm" class="input" style="width:auto"><option value="GPFO0381">0381</option><option value="GPFO0405">0405</option><option value="GPFO0416">0416</option></select>
-            </div>
-            <div class="text-sm mt-2" style="color:var(--ink-soft)">${
-              r ? `<b style="color:var(--ink)">${escA(r.direccion || "")}</b> · ${escA(r.distrito || "")} · Sector ${escA(r.sector || "")}${r.latNis == null ? " · <span style='color:#6B4A00'>sin coordenadas</span>" : ""}`
-              : est === "buscando" ? "Buscando en la base…" : est === "noexiste" ? `<span style="color:var(--danger);font-weight:600">No está en la base de NIS.</span>` : est === "sinred" ? "Sin internet." : "Se completa con la base de NIS."}</div>
-            ${esSupervisor() ? `<select id="plPara" class="input mt-2">${listaUsuarios().filter(u => (u.rol || "OPERARIO") === "OPERARIO").map(u => `<option>${escA(u.name)}</option>`).join("")}<option>${escA(state.operario)}</option></select>` : ""}
-            <button id="plAgregar" class="btn-primary w-full mt-2" ${r ? "" : "disabled"}>+ Agregar a la ruta</button>
-          </div>
-          <div class="flex gap-2 mt-3" style="flex-wrap:wrap">
-            ${["TODOS", "GPFO0381", "GPFO0405", "GPFO0416"].map(f => `<button class="gis-chip plFil" data-f="${f}" aria-pressed="${(state.plFiltro || "TODOS") === f}">${f === "TODOS" ? "Todos" : FORM_CORTO[f]}</button>`).join("")}
-          </div>
-          ${esSupervisor() && quienes.length ? `<select id="plQuien" class="input mt-2"><option value="">Todos los operarios</option>${quienes.map(n => `<option ${n === state.plQuien ? "selected" : ""}>${escA(n)}</option>`).join("")}</select>` : ""}
-          <div class="grid gap-2 mt-3" style="grid-template-columns:1fr 1fr">
-            <button id="plOrdenar" class="btn-ghost" ${con.length > 1 ? "" : "disabled"}>↻ Ordenar por cercanía</button>
-            <button id="plYo" class="btn-ghost">◎ ${yo ? "Actualizar ubicación" : "Usar mi ubicación"}</button>
-          </div>
-          ${tramos.map((t, i) => `<a href="${urlTramo(t)}" target="_blank" rel="noopener" class="btn-primary w-full mt-2" style="display:flex;justify-content:center;text-decoration:none">▶ Google Maps${tramos.length > 1 ? ` · tramo ${i + 1} (paradas ${i * PARADAS_TRAMO + 1}–${i * PARADAS_TRAMO + t.length})` : ""}</a>`).join("")}
-          <div class="gis-lbl mt-4">Orden de visita</div>
-          ${todas.length ? `<ol class="pl-lista">${todas.map(p => {
-            const i = con.indexOf(p), d = i > 0 ? distKm(con[i - 1], p) : i === 0 && yo ? distKm(yo, p) : null;
-            return `<li class="pl-item">
-              <span class="pl-num" style="background:${i >= 0 ? "#03204C" : "#B9C6D3"}">${i >= 0 ? i + 1 : "–"}</span>
+          <div class="text-sm mt-2" style="color:var(--ink-soft)">${
+            r ? `<b style="color:var(--ink)">${escA(r.direccion || "")}</b> · ${escA(r.distrito || "")} · Sector ${escA(r.sector || "")}${r.latNis == null ? " · <span style='color:#6B4A00'>sin coordenadas</span>" : ""}`
+            : est === "buscando" ? "Buscando en la base…" : est === "noexiste" ? `<span style="color:var(--danger);font-weight:600">No está en la base de NIS.</span>` : est === "sinred" ? "Sin internet." : "Se completa con la base de NIS."}</div>
+          <button id="plAgregar" class="btn-primary w-full mt-2" ${r ? "" : "disabled"}>+ Agregar a mi ruta</button>
+          <div class="gis-lbl mt-4">NIS seleccionados (${todas.length})</div>
+          ${todas.length ? `<div class="pl-nis-grid">${todas.map(p => `
+            <div class="pl-nis">
               <div class="min-w-0 flex-1"><b>NIS ${escA(p.nis)}</b> <span class="pl-form">${escA(FORM_CORTO[formDe(p)] || "")}</span>
-                <div class="text-sm" style="color:var(--ink-soft)">${escA(p.direccion || "")}${p.distrito ? " · " + escA(p.distrito) : ""}</div>
-                <div class="text-xs" style="color:var(--ink-soft)">${i < 0 ? "Sin ubicación en la base" : d != null ? (i === 0 ? "Desde tu ubicación: " : "Desde la anterior: ") + fmtKm(d) : ""}${esSupervisor() ? " · " + escA(p.para || "") : ""}</div>
-                ${state.plQuitar === p.id ? `<div class="flex gap-2 mt-2"><span class="text-sm" style="font-weight:600">¿Quitar de la ruta?</span><button class="gis-chip plSi" data-id="${p.id}" style="border-color:var(--danger);color:var(--danger)">Sí, quitar</button><button class="gis-chip plNo">No</button></div>` : ""}
+                <div class="text-sm" style="color:var(--ink-soft)">${escA(p.direccion || "")}</div>
+                <div class="text-xs" style="color:var(--ink-soft)">${escA(p.distrito || "")}${p.lat == null ? " · <span style='color:#6B4A00'>sin coordenadas</span>" : ""}</div>
+                ${state.plQuitar === p.id ? `<div class="flex gap-2 mt-2" style="flex-wrap:wrap"><span class="text-sm" style="font-weight:600">¿Quitar?</span><button class="gis-chip plSi" data-id="${p.id}" style="border-color:var(--danger);color:var(--danger)">Sí, quitar</button><button class="gis-chip plNo">No</button></div>` : ""}
               </div>
               <div class="pl-acc">
-                ${i >= 0 ? `<button class="pl-btn plSube" data-id="${p.id}" aria-label="Subir" ${i === 0 ? "disabled" : ""}>↑</button><button class="pl-btn plBaja" data-id="${p.id}" aria-label="Bajar" ${i === con.length - 1 ? "disabled" : ""}>↓</button>` : ""}
                 <button class="pl-btn plReg" data-id="${p.id}" aria-label="Registrar formulario" title="Registrar">✎</button>
                 <button class="pl-btn plQuitar" data-id="${p.id}" aria-label="Quitar" style="color:var(--danger)">✕</button>
-              </div></li>`; }).join("")}</ol>`
-          : `<div class="card p-4 text-sm" style="color:var(--ink-soft)">No hay NIS en la ruta. Agrégalos aquí, desde el Mapa de NIS o desde la pestaña «Ruta» de cada formulario.</div>`}
-          ${sin.length ? `<div class="text-xs mt-2 p-2 rounded-lg" style="background:#FFF1C7;color:#6B4A00">${sin.length} NIS sin coordenadas en la base: no salen en el mapa ni en Google Maps.</div>` : ""}
+              </div>
+            </div>`).join("")}</div>`
+          : `<div class="text-sm" style="color:var(--ink-soft)">Aún no hay NIS en tu ruta de hoy.</div>`}
+          ${sin.length ? `<div class="text-xs mt-2 p-2 rounded-lg" style="background:#FFF1C7;color:#6B4A00">${sin.length} NIS sin coordenadas en la base: no entran en el cálculo ni en Google Maps.</div>` : ""}
         </div>
-        <div class="gis-mapa" id="plMapa" role="region" aria-label="Mapa de la ruta"></div>
+
+        <!-- 2) Ruta óptima -->
+        <div class="card p-4 mt-3" id="plCalcCard">
+          <div class="pl-paso"><span>2</span><b>Ruta óptima</b></div>
+          <button id="plOrdenar" class="btn-primary w-full" ${con.length ? "" : "disabled"}>${calculada ? "↻ Volver a calcular la ruta óptima" : "Calcular ruta óptima"}</button>
+          <div class="text-xs mt-2" style="color:var(--ink-soft)">${!con.length ? "Agrega NIS con coordenadas para calcular la ruta." : calculada ? "Orden de visita desde tu ubicación. Puedes ajustarlo con ↑ ↓." : calc.length ? `<span style="color:#6B4A00;font-weight:600">Agregaste NIS después del cálculo: vuelve a calcular la ruta.</span>` : "Ordena tus NIS desde tu ubicación GPS para recorrer la menor distancia."}</div>
+          ${calculada ? `
+          <div class="gis-kpis mt-3">
+            <div class="rd-dato"><small>Paradas</small><b>${con.length}</b></div>
+            <div class="rd-dato"><small>Recorrido aprox.</small><b>${fmtKm(total)}</b></div>
+            <div class="rd-dato"><small>Inicio</small><b>${yo ? "Tu GPS" : "1.ª parada"}</b></div>
+          </div>
+          ${tramos.map((t, i) => `<a href="${urlTramo(t)}" target="_blank" rel="noopener" class="btn-primary w-full mt-2 plGmaps" style="display:flex;justify-content:center;text-decoration:none;background:#1E9E4A">▶ Abrir en Google Maps${tramos.length > 1 ? ` · tramo ${i + 1} (paradas ${i * PARADAS_TRAMO + 1}–${i * PARADAS_TRAMO + t.length})` : ""}</a>`).join("")}
+          <ol class="pl-lista mt-3">${con.map((p, i) => {
+            const d = i > 0 ? distKm(con[i - 1], p) : yo ? distKm(yo, p) : null;
+            return `<li class="pl-item">
+              <span class="pl-num" style="background:#03204C">${i + 1}</span>
+              <div class="min-w-0 flex-1"><b>NIS ${escA(p.nis)}</b> <span class="pl-form">${escA(FORM_CORTO[formDe(p)] || "")}</span>
+                <div class="text-sm" style="color:var(--ink-soft)">${escA(p.direccion || "")}${p.distrito ? " · " + escA(p.distrito) : ""}</div>
+                <div class="text-xs" style="color:var(--ink-soft)">${d != null ? (i === 0 ? "Desde tu ubicación: " : "Desde la anterior: ") + fmtKm(d) : ""}</div>
+              </div>
+              <div class="pl-acc">
+                <button class="pl-btn plSube" data-id="${p.id}" aria-label="Subir" ${i === 0 ? "disabled" : ""}>↑</button>
+                <button class="pl-btn plBaja" data-id="${p.id}" aria-label="Bajar" ${i === con.length - 1 ? "disabled" : ""}>↓</button>
+              </div></li>`; }).join("")}</ol>` : ""}
+        </div>
+
+        <!-- 3) Mapa -->
+        <div class="card p-4 mt-3">
+          <div class="pl-paso"><span>3</span><b>Mapa de la ruta</b></div>
+          <div class="pl-mapa" id="plMapa" role="region" aria-label="Mapa de la ruta"></div>
+        </div>
       </div>`;
     const inp = document.getElementById("plNis");
     inp.oninput = async () => {
@@ -3995,20 +4113,26 @@
     };
     document.getElementById("plAgregar").onclick = async () => {
       if (!r) return;
-      const form = document.getElementById("plForm").value, para = esSupervisor() ? document.getElementById("plPara").value : state.operario;
-      if (state.pendientes.some(p => p.nis === q && p.para === para && formDe(p) === form)) { toast("Ese NIS ya está en la ruta", true); return; }
+      const form = document.getElementById("plForm").value, para = state.operario;
+      if (paradasRuta().some(p => p.nis === q && formDe(p) === form)) { toast("Ese NIS ya está en tu ruta de hoy", true); return; }
       await agregarPendiente({ form, nis: q, ccss: r.ccss || "", latNis: r.latNis ?? null, lonNis: r.lonNis ?? null, direccion: r.direccion || "", urb: r.urb || "", distrito: r.distrito || "",
                                sector: String(r.sector || ""), manual: false, para, preparadoPor: state.operario, creadoEn: Date.now() });
-      state.plQuery = ""; toast("NIS " + q + " agregado a la ruta"); renderPlanificador();
+      state.plQuery = ""; toast("NIS " + q + " agregado a tu ruta de hoy"); renderPlanificador();
     };
-    document.querySelectorAll(".plFil").forEach(b => b.onclick = () => { state.plFiltro = b.dataset.f; renderPlanificador(); });
-    const qs = document.getElementById("plQuien"); if (qs) qs.onchange = () => { state.plQuien = qs.value; renderPlanificador(); };
     const guardarOrden = lista => { const resto = leerLS(claveOrden(), []).filter(id => !lista.includes(id)); guardarLS(claveOrden(), lista.concat(resto)); };
-    document.getElementById("plOrdenar").onclick = () => {
-      const orden = ordenarCercania(con, yo ? { lat: yo.lat, lon: yo.lon } : null);
-      guardarOrden(orden.map(p => p.id).concat(sin.map(p => p.id))); toast("Ruta ordenada por cercanía" + (yo ? " desde tu ubicación" : "")); renderPlanificador();
+    // calcular: ordena por cercanía desde el GPS (primero la última posición conocida; si hay una lectura nueva, se usa esa)
+    document.getElementById("plOrdenar").onclick = async () => {
+      const b = document.getElementById("plOrdenar"); b.disabled = true; b.textContent = "Calculando…";
+      let ini = state.gpsUltimo || null;
+      const nueva = await Promise.race([ubicacionAhora(), new Promise(ok => setTimeout(() => ok(null), 4000))]);
+      if (nueva) ini = nueva;
+      const lista = aplicarOrden(paradasRuta()).filter(p => p.lat != null && p.lon != null);
+      const orden = ordenarCercania(lista, ini ? { lat: ini.lat, lon: ini.lon } : null);
+      guardarOrden(orden.map(p => p.id).concat(paradasRuta().filter(p => p.lat == null || p.lon == null).map(p => p.id)));
+      guardarLS(claveCalculo(), orden.map(p => p.id));
+      toast("Ruta óptima calculada" + (ini ? " desde tu ubicación" : ""));
+      if (state.vista === "PLANIFICADOR_RUTAS") { renderPlanificador(); const c = document.getElementById("plCalcCard"); if (c) c.scrollIntoView({ behavior: "smooth", block: "start" }); }
     };
-    document.getElementById("plYo").onclick = async () => { toast("Buscando tu ubicación…"); const c = await ubicacionAhora(); if (!c) toast("No se pudo obtener tu ubicación", true); if (state.vista === "PLANIFICADOR_RUTAS") renderPlanificador(); };
     const mover = (id, delta) => { const ids = con.map(p => p.id), i = ids.indexOf(id), j = i + delta; if (j < 0 || j >= ids.length) return;
       [ids[i], ids[j]] = [ids[j], ids[i]]; guardarOrden(ids.concat(sin.map(p => p.id))); renderPlanificador(); };
     document.querySelectorAll(".plSube").forEach(b => b.onclick = () => mover(b.dataset.id, -1));
@@ -4022,9 +4146,9 @@
       state.nisSel = { nis: p.nis, direccion: p.direccion || "", urb: p.urb || "", distrito: p.distrito || "", sector: p.sector || "", ccss: p.ccss || "", latNis: p.latNis ?? null, lonNis: p.lonNis ?? null, manual: !!p.manual };
       state.pendienteId = p.id; state.fecha = todayISO(); state.hora = nowHM(); ensureLocation(); render();
     });
-    pintarPlan(con, yo);
+    pintarPlan(con, yo, calculada);
   }
-  async function pintarPlan(con, yo) {
+  async function pintarPlan(con, yo, calculada) {
     const turno = ++turnoMapa;
     try { await cargarLeaflet(); } catch (e) { const m = document.getElementById("plMapa"); if (m) m.innerHTML = `<div class="gis-sinmapa">No se pudo cargar el mapa. Revisa tu internet.</div>`; return; }
     if (turno !== turnoMapa) return;
@@ -4032,12 +4156,15 @@
     if (!document.getElementById("plMapa")) return;
     planL = L.map("plMapa"); capaBase(planL);
     const lim = [];
-    con.forEach((p, i) => { L.marker([p.lat, p.lon], { icon: pinNum(i + 1) }).addTo(planL)
-      .bindPopup(`<b>${i + 1}. NIS ${escA(p.nis)}</b><br>${escA(p.direccion || "")}<br><small>${escA(FORM_CORTO[formDe(p)] || "")}</small><br><a href="https://www.google.com/maps/dir/?api=1&destination=${p.lat},${p.lon}" target="_blank" rel="noopener">Ir a este punto</a>`);
+    // con la ruta calculada, cada punto lleva su número de visita (1, 2, 3…); antes, un punto sin número
+    con.forEach((p, i) => { L.marker([p.lat, p.lon], { icon: calculada ? pinNum(i + 1) : pinNum("•", "#5B6B7F") }).addTo(planL)
+      .bindPopup(`<b>${calculada ? (i + 1) + ". " : ""}NIS ${escA(p.nis)}</b><br>${escA(p.direccion || "")}<br><small>${escA(FORM_CORTO[formDe(p)] || "")}</small><br><a href="https://www.google.com/maps/dir/?api=1&destination=${p.lat},${p.lon}" target="_blank" rel="noopener">Ir a este punto</a>`);
       lim.push([p.lat, p.lon]); });
-    const linea = (yo ? [[yo.lat, yo.lon]] : []).concat(con.map(p => [p.lat, p.lon]));
-    if (linea.length > 1) L.polyline(linea, { color: "#33B1E4", weight: 4, dashArray: "8 8" }).addTo(planL);
-    if (yo) { L.circleMarker([yo.lat, yo.lon], { radius: 8, color: "#fff", weight: 3, fillColor: "#1A73E8", fillOpacity: 1 }).addTo(planL).bindPopup("Estás aquí"); lim.push([yo.lat, yo.lon]); }
+    if (calculada) {
+      const linea = (yo ? [[yo.lat, yo.lon]] : []).concat(con.map(p => [p.lat, p.lon]));
+      if (linea.length > 1) L.polyline(linea, { color: "#33B1E4", weight: 4, dashArray: "8 8" }).addTo(planL);
+    }
+    if (yo) { L.marker([yo.lat, yo.lon], { icon: ICONO_AQUI(), zIndexOffset: 1000, keyboard: false }).addTo(planL); lim.push([yo.lat, yo.lon]); }
     if (lim.length) planL.fitBounds(lim, { padding: [40, 40], maxZoom: 17 }); else planL.setView([-12.06, -77.04], 11);
     setTimeout(() => planL && planL.invalidateSize(), 150);
   }
@@ -4047,11 +4174,11 @@
     { t: "Identificación", c: [["placa", "Placa"], ["codigoUnidad", "Código de unidad"], ["codigoActivo", "Código de activo"], ["tipoFlota", "Tipo de flota"], ["tipoUnidad", "Tipo de unidad"], ["estado", "Estado operativo", "estado"]] },
     { t: "Ficha técnica", c: [["marca", "Marca"], ["modelo", "Modelo"], ["anoFabricacion", "Año de fabricación"], ["combustible", "Combustible"], ["color", "Color"], ["numeroMotor", "N.° de motor"],
       ["cilindros", "Cilindros"], ["cilindrada", "Cilindrada"], ["traccion", "Tracción"], ["numeroSerie", "N.° de serie (VIN)"], ["ruedas", "Ruedas"], ["numeroPasajeros", "Pasajeros"], ["numeroAsientos", "Asientos"]] },
-    { t: "Dimensiones y capacidad", c: [["longitud", "Longitud"], ["ancho", "Ancho"], ["altura", "Altura"], ["cargaUtil", "Carga útil"]] },
-    { t: "SOAT", c: [["soatPoliza", "N.° de póliza"], ["soatAseguradora", "Aseguradora"], ["soatDesde", "Vigente desde", "fecha"], ["soatHasta", "Vigente hasta", "fecha"], ["soatEnlace", "Enlace del documento (Drive)", "url"]] },
-    { t: "Revisión técnica (CITV)", c: [["citvCertificado", "N.° de certificado"], ["citvEntidad", "Entidad"], ["citvHasta", "Vigente hasta", "fecha"], ["citvEnlace", "Enlace del documento (Drive)", "url"]] },
-    { t: "Tarjeta de propiedad", c: [["tarjetaNumero", "N.° de tarjeta"], ["tarjetaPartida", "Partida registral"], ["tarjetaEnlace", "Enlace del documento (Drive)", "url"]] },
-    { t: "Mantenimiento preventivo", c: [["mantUltima", "Último mantenimiento", "fecha"], ["mantProxima", "Próximo mantenimiento", "fecha"], ["mantKm", "Kilometraje del último"], ["mantDetalle", "Detalle"], ["mantEnlace", "Enlace del documento (Drive)", "url"]] },
+    { t: "Dimensiones y capacidad", c: [["longitud", "Longitud"], ["ancho", "Ancho"], ["altura", "Altura"], ["cargaUtil", "Carga útil"], ["dimNota", "Nota (módulo o furgón)"]] },
+    { t: "SOAT", doc: "soatDoc", docTxt: "la póliza del SOAT", c: [["soatPoliza", "N.° de póliza"], ["soatAseguradora", "Aseguradora"], ["soatDesde", "Vigente desde", "fecha"], ["soatHasta", "Vigente hasta", "fecha"], ["soatEnlace", "Enlace del documento (Drive)", "url"]] },
+    { t: "Revisión técnica (CITV)", doc: "citvDoc", docTxt: "el certificado de revisión técnica", c: [["citvCertificado", "N.° de certificado"], ["citvEntidad", "Entidad"], ["citvHasta", "Vigente hasta", "fecha"], ["citvEnlace", "Enlace del documento (Drive)", "url"]] },
+    { t: "Tarjeta de propiedad", doc: "tarjetaDoc", docTxt: "la tarjeta de propiedad", c: [["tarjetaNumero", "N.° de tarjeta"], ["tarjetaPartida", "Partida registral"], ["tarjetaTitulo", "N.° de título"], ["tarjetaFechaTitulo", "Fecha de título", "fecha"], ["tarjetaEnlace", "Enlace del documento (Drive)", "url"]] },
+    { t: "Mantenimiento preventivo", doc: "mantDoc", docTxt: "la orden de trabajo del mantenimiento", c: [["mantUltima", "Último mantenimiento", "fecha"], ["mantProxima", "Próximo mantenimiento", "fecha"], ["mantKm", "Kilometraje del último"], ["mantDetalle", "Detalle"], ["mantEnlace", "Enlace del documento (Drive)", "url"]] },
     { t: "Alertas", c: [["diasAlerta", "Avisar con cuántos días de anticipación", "num"]] }
   ];
   const ESTADOS_VEH = ["Operativo", "En mantenimiento", "En reserva", "Fuera de servicio"];
@@ -4088,7 +4215,39 @@
     if (!d) { cargarLab(); return; }
     const re = document.getElementById("labReint"); if (re) re.onclick = () => { state.labDatos = null; renderLaboratorio(); };
     if (!d.error && tab === "recorridos") activarLabRecorridos(d);
+    if (!d.error && tab === "vehiculo") activarLabVehiculo(d);
     const ed = document.getElementById("labEditar"); if (ed) ed.onclick = () => { abrirModulo("ADMIN"); state.adminTab = "vehiculo"; renderAdmin(); };
+  }
+  // ---------- Vista «Vehículo»: ficha de la unidad móvil (diseño Laboratorio ECRF — Unidad Móvil) ----------
+  const urlVerDrive = id => "https://drive.google.com/file/d/" + encodeURIComponent(id) + "/view";
+  const urlBajarDrive = id => "https://drive.google.com/uc?export=download&id=" + encodeURIComponent(id);
+  const urlFotoDrive = (id, w) => "https://drive.google.com/thumbnail?id=" + encodeURIComponent(id) + "&sz=w" + (w || 1000);
+  // Dibujo de reemplazo mientras no se sube la foto real
+  const LAB_DIBUJO = {
+    frontal: `<svg viewBox="0 0 400 220" class="lab-dibujo" aria-hidden="true"><rect width="400" height="220" fill="#EAF1F8"/><rect y="176" width="400" height="44" fill="#2B3445"/><path d="M20 198h40M90 198h40M160 198h40M230 198h40M300 198h40" stroke="#F2C230" stroke-width="4"/>
+      <rect x="110" y="40" width="180" height="22" rx="4" fill="#03204C"/><rect x="185" y="30" width="30" height="10" rx="3" fill="#F2A900"/>
+      <path d="M118 62h164l14 50H104z" fill="#3A4556"/><rect x="96" y="110" width="208" height="62" rx="10" fill="#fff" stroke="#9AA7B6"/>
+      <rect x="96" y="124" width="208" height="16" fill="#0B4A8B"/><rect x="104" y="114" width="26" height="12" rx="2" fill="#F8E27A"/><rect x="270" y="114" width="26" height="12" rx="2" fill="#F8E27A"/>
+      <rect x="150" y="144" width="100" height="16" rx="4" fill="#3A4556"/><rect x="170" y="160" width="60" height="12" rx="2" fill="#fff" stroke="#C0392B"/>
+      <rect x="104" y="170" width="20" height="16" rx="3" fill="#1F2633"/><rect x="276" y="170" width="20" height="16" rx="3" fill="#1F2633"/></svg>`,
+    lateral: `<svg viewBox="0 0 400 220" class="lab-dibujo" aria-hidden="true"><rect width="400" height="220" fill="#EAF1F8"/><rect y="176" width="400" height="44" fill="#2B3445"/><path d="M20 198h40M90 198h40M160 198h40M230 198h40M300 198h40" stroke="#F2C230" stroke-width="4"/>
+      <rect x="190" y="50" width="170" height="110" rx="4" fill="#fff" stroke="#9AA7B6"/><path d="M190 90h-60l-36 30v40h96z" fill="#fff" stroke="#9AA7B6"/><path d="M140 96h46v26h-74z" fill="#3A4556"/>
+      <rect x="86" y="128" width="274" height="14" fill="#0B4A8B"/><rect x="208" y="44" width="16" height="8" rx="2" fill="#F2A900"/>
+      <circle cx="140" cy="166" r="20" fill="#1F2633"/><circle cx="140" cy="166" r="8" fill="#9AA7B6"/><circle cx="320" cy="166" r="20" fill="#1F2633"/><circle cx="320" cy="166" r="8" fill="#9AA7B6"/></svg>`
+  };
+  function estadoDocLab(hasta, hoy, lim) {
+    const d = diasHasta(hasta, hoy);
+    if (d === null) return { k: "sin", chip: "Sin fecha", txt: "Registra la fecha de vencimiento en el Panel de administración." };
+    if (d < 0) return { k: "vencido", chip: "¡Vencido!", txt: `¡Documento vencido! Expiró hace ${-d} día${d === -1 ? "" : "s"}. Unidad no autorizada para circulación.` };
+    if (d <= lim) return { k: "pronto", chip: d === 0 ? "Vence hoy" : `Vence en ${d} día${d === 1 ? "" : "s"}`, txt: d === 0 ? "Vence hoy: renuévalo antes de circular." : `Vence en ${d} día${d === 1 ? "" : "s"}: programa la renovación.` };
+    return { k: "ok", chip: "Vigente", txt: `Vigente: vence en ${d} días.` };
+  }
+  function pieDocLab(v, k, enlace) {
+    const id = v[k], nom = v[k + "Nombre"] || "Documento";
+    if (id) return `<div class="lab2-pie"><span class="lab2-arch" title="${escA(nom)}">📄 ${escA(nom)}</span>
+      <a class="lab2-btn" href="${urlVerDrive(id)}" target="_blank" rel="noopener">👁 Ver</a><a class="lab2-btn" href="${urlBajarDrive(id)}" target="_blank" rel="noopener">⬇ Descargar</a></div>`;
+    if (/^https:\/\//.test(enlace || "")) return `<div class="lab2-pie"><span class="lab2-arch">📄 Documento en Drive</span><a class="lab2-btn" href="${escA(enlace)}" target="_blank" rel="noopener">👁 Ver</a></div>`;
+    return `<div class="lab2-pie"><span class="lab2-arch" style="color:var(--ink-soft)">Sin documento adjunto</span></div>`;
   }
   function htmlLabVehiculo(d) {
     const v = d.vehiculo || {};
@@ -4096,28 +4255,207 @@
       <b class="block mt-2">Aún no hay datos del vehículo laboratorio</b>
       <div class="text-sm mt-1" style="color:var(--ink-soft)">${esAdmin() ? "Regístralos en el Panel de administración, pestaña «Laboratorio (vehículo)»." : "El administrador debe registrarlos en el Panel de administración."}</div>
       ${esAdmin() ? `<button id="labEditar" class="btn-primary mt-3" style="width:auto;padding:12px 20px">Registrar vehículo</button>` : ""}</div>`;
-    const al = alertasLab(v, d.hoy), malas = al.filter(a => a.nivel !== "ok");
+    const lim = Number(v.diasAlerta) || 7, hoy = d.hoy;
     const est = String(v.estado || "Operativo"), colEst = /operativo/i.test(est) ? NIVEL.ok : /fuera/i.test(est) ? NIVEL.vencido : NIVEL.pronto;
-    const doc = (u, t) => /^https:\/\//.test(u || "") ? `<a href="${escA(u)}" target="_blank" rel="noopener" class="gis-chip" style="text-decoration:none">📄 ${t}</a>` : "";
+    const soat = estadoDocLab(v.soatHasta, hoy, lim), citv = estadoDocLab(v.citvHasta, hoy, lim), mant = estadoDocLab(v.mantProxima, hoy, lim);
+    const malos = [["Seguro Obligatorio de Accidentes de Tránsito (SOAT)", soat, v.soatHasta], ["Certificado de Inspección Técnica Vehicular (CITV)", citv, v.citvHasta], ["Mantenimiento preventivo", mant, v.mantProxima]]
+      .filter(([, e]) => e.k === "vencido" || e.k === "pronto");
+    const [placaA, placaB] = String(v.placa).toUpperCase().includes("-") ? String(v.placa).toUpperCase().split("-") : [String(v.placa).toUpperCase().slice(0, 3), String(v.placa).toUpperCase().slice(3)];
+    const fila = (n, val, extra) => val ? `<div class="lab2-fila"><span>${n}</span><b ${extra || ""}>${escA(val)}</b></div>` : "";
+    const foto = (k, titulo) => `<figure class="lab2-foto">
+        ${v[k] ? `<img src="${urlFotoDrive(v[k], 900)}" alt="${titulo}" loading="lazy">` : LAB_DIBUJO[k === "fotoFrontal" ? "frontal" : "lateral"]}
+        <figcaption>${titulo}</figcaption>
+        ${v[k] ? `<button class="lab2-ampliar labAmpliar" data-id="${escA(v[k])}" data-t="${titulo}">🔍 Ampliar</button>` : `<span class="lab2-sinfoto">Foto pendiente</span>`}
+      </figure>`;
+    const chipCls = e => e.k === "vencido" ? "lab2-chip-mal" : e.k === "pronto" ? "lab2-chip-ojo" : e.k === "ok" ? "lab2-chip-ok" : "lab2-chip-gris";
+    const tarjetaDoc = (cls, etiqueta, estado, titulo, sub, cuerpo, pie) => `
+      <article class="lab2-doc ${estado && estado.k === "vencido" ? "lab2-doc-mal" : estado && estado.k === "pronto" ? "lab2-doc-ojo" : ""}">
+        <div class="lab2-doc-cab"><span class="lab2-etq ${cls}">${etiqueta}</span>${estado ? `<span class="lab2-chip ${chipCls(estado)}">${estado.chip}</span>` : ""}</div>
+        <b class="lab2-doc-tit">${titulo}</b>${sub ? `<div class="lab2-doc-sub">${sub}</div>` : ""}
+        <div class="lab2-caja">${cuerpo}</div>${pie}
+      </article>`;
     return `
-      ${malas.length ? `<div class="lab-alerta" role="alert"><b>⚠ Documentos por atender</b>${malas.map(a => `<div>${escA(a.n)}: <b>${txtAlerta(a)}</b> (${fechaPe(a.f)})</div>`).join("")}</div>` : ""}
-      <div class="card p-4 lab-cab">
-        <div class="lab-placa"><small>PERÚ</small><b>${escA(v.placa)}</b></div>
-        <div class="min-w-0 flex-1">
-          <div class="flex items-center gap-2" style="flex-wrap:wrap"><b class="text-lg" style="color:var(--brand-dark)">${escA(v.codigoUnidad || "Laboratorio ECRF")}</b>
-            <span class="badge" style="background:${colEst[0]};color:${colEst[1]}">${escA(est)}</span></div>
-          <div class="text-sm" style="color:var(--ink-soft)">${escA(v.tipoUnidad || "")}</div>
-          <div class="text-sm" style="color:var(--ink-soft)">${escA([v.marca, v.modelo, v.anoFabricacion].filter(Boolean).join(" · "))}</div>
+      <section class="card lab2-cab">
+        <div class="lab2-cab-izq">
+          <span class="lab2-ico">${ICO_LAB}</span>
+          <div class="min-w-0">
+            <div class="lab2-tags"><span class="lab2-tag">GIS & Logística · ECRF</span>${v.codigoUnidad ? `<span>Unidad: <b>${escA(v.codigoUnidad)}</b></span>` : ""}${v.codigoActivo ? `<span>Activo: <b>${escA(v.codigoActivo)}</b></span>` : ""}</div>
+            <h2 class="lab2-tit">Laboratorio ECRF — Unidad Móvil</h2>
+            <p class="lab2-desc">Ficha técnica, fotos oficiales, control de SOAT, revisión técnica vehicular y mantenimiento preventivo.</p>
+          </div>
         </div>
-        ${esAdmin() ? `<button id="labEditar" class="btn-ghost" style="width:auto;padding:8px 14px">Editar</button>` : ""}
+        <div class="lab2-cab-der">
+          <div class="lab2-placa" aria-label="Placa ${escA(v.placa)}"><div class="lab2-placa-top"><span class="lab2-bandera"></span><b>PERÚ</b><span></span></div>
+            <div class="lab2-placa-num">${escA(placaA)}<i>-</i>${escA(placaB)}</div><div class="lab2-placa-pie"><span>REPÚBLICA DEL PERÚ</span><span>SUNARP</span></div></div>
+          <button id="labIrRec" class="lab2-rec">↻ Registro de recorrido <small>(Patio ECRF)</small></button>
+          ${esAdmin() ? `<button id="labEditar" class="lab2-editar">✎ Editar en el panel</button>` : ""}
+        </div>
+        <div class="lab2-cab-pie"><span>Estado operativo: <span class="badge" style="background:${colEst[0]};color:${colEst[1]}">● ${escA(est)}</span></span>
+          ${v.tipoUnidad ? `<span>Tipo: <b>${escA(v.tipoUnidad)}</b></span>` : ""}${v.actualizadoEn ? `<span class="lab2-act">Última actualización: ${escA(v.actualizadoEn)}</span>` : ""}</div>
+      </section>
+      ${malos.length ? `<section class="lab2-aviso" role="alert">
+        <span class="lab2-aviso-ico">⚠</span>
+        <div class="min-w-0 flex-1"><div><span class="lab2-aviso-etq">Aviso preventivo</span> <b>Documento(s) vehicular(es) a ${lim} días de vencimiento o expirado(s)</b></div>
+          <div class="lab2-aviso-txt">${malos.map(([n, e]) => `${escA(n)}: ${e.k === "vencido" ? "¡VENCIDO!" : e.chip.toLowerCase()}`).join(" | ")}</div></div>
+        <button id="labVerAlerta" class="lab2-aviso-btn">Ver ventana de alerta</button>
+      </section>` : ""}
+      <section class="card p-4 mt-3">
+        <div class="lab2-sec-cab"><div><h3 class="lab2-h">● Registro fotográfico oficial de la unidad</h3><div class="lab2-sub">Registro visual para inspección de campo y verificación de flota SEDAPAL</div></div>
+          <span class="lab2-gris">${[v.fotoFrontal, v.fotoLateral].filter(Boolean).length} de 2 fotografías</span></div>
+        <div class="lab2-fotos">${foto("fotoFrontal", "Foto 1: Vista frontal")}${foto("fotoLateral", "Foto 2: Vista lateral")}</div>
+      </section>
+      <div class="lab2-tres mt-3">
+        <section class="card p-4"><div class="lab2-card-cab"><span class="lab2-mini" style="background:#E1F3FB;color:#0B5FA5">▦</span><div><h3 class="lab2-h">Identificación de unidad</h3><div class="lab2-sub">Datos de registro patrimonial SEDAPAL</div></div></div>
+          ${fila("Placa oficial", v.placa, 'class="lab2-pill"')}${fila("Código de unidad", v.codigoUnidad)}${fila("Código de activo", v.codigoActivo)}${fila("Tipo de flota", v.tipoFlota)}${fila("Tipo de unidad", v.tipoUnidad)}
+          <div class="lab2-fila"><span>Estado operacional</span><b class="badge" style="background:${colEst[0]};color:${colEst[1]}">${escA(est)}</b></div></section>
+        <section class="card p-4"><div class="lab2-card-cab"><span class="lab2-mini" style="background:#EEF0FF;color:#4B4FC7">⚙</span><div><h3 class="lab2-h">Mecánica & motor</h3><div class="lab2-sub">Especificaciones técnicas del fabricante</div></div></div>
+          ${fila("Marca", v.marca)}${fila("Modelo", v.modelo)}${fila("Año de fabricación", v.anoFabricacion)}${fila("Combustible", v.combustible)}${fila("Color oficial", v.color)}${fila("N.° de motor", v.numeroMotor, 'class="lab2-mono"')}
+          ${fila("Cilindros", v.cilindros)}${fila("Cilindrada", v.cilindrada)}${fila("Tracción", v.traccion)}${fila("N.° de serie / chasis", v.numeroSerie, 'class="lab2-mono"')}${fila("Ruedas", v.ruedas)}</section>
+        <section class="card p-4"><div class="lab2-card-cab"><span class="lab2-mini" style="background:#FFF4DB;color:#B26B00">◈</span><div><h3 class="lab2-h">Dimensiones & capacidad</h3><div class="lab2-sub">Medidas del furgón y aforo técnico</div></div></div>
+          ${fila("Longitud total", v.longitud)}${fila("Ancho", v.ancho)}${fila("Altura máxima", v.altura)}${fila("Carga útil neta", v.cargaUtil)}${fila("N.° de pasajeros", v.numeroPasajeros)}${fila("N.° de asientos", v.numeroAsientos)}
+          ${v.dimNota ? `<div class="lab2-nota">ⓘ ${escA(v.dimNota)}</div>` : ""}</section>
       </div>
-      <div class="lab-docs mt-3">${al.map(a => `<div class="lab-doc" style="background:${NIVEL[a.nivel][0]};color:${NIVEL[a.nivel][1]}"><small>${escA(a.n)}</small><b>${txtAlerta(a)}</b></div>`).join("")}</div>
-      <div class="lab-secs mt-3">${LAB_SECCIONES.filter(s => s.t !== "Alertas").map(s => {
-        const filas = s.c.filter(([k, , tipo]) => tipo !== "url" && v[k]);
-        const docu = s.c.filter(([, , tipo]) => tipo === "url").map(([k]) => doc(v[k], "Ver documento")).join("");
-        if (!filas.length && !docu) return "";
-        return `<section class="card p-4"><h3 class="lab-st">${s.t}</h3><dl class="lab-dl">${filas.map(([k, n, tipo]) => `<dt>${n}</dt><dd>${escA(tipo === "fecha" ? fechaPe(v[k]) : v[k])}</dd>`).join("")}</dl>${docu ? `<div class="mt-2">${docu}</div>` : ""}</section>`;
-      }).join("")}</div>`;
+      <section class="card p-4 mt-3">
+        <div class="lab2-sec-cab"><div><h3 class="lab2-h">🛡 Control documentario, vigencias & soporte adjunto</h3><div class="lab2-sub">Expediente digital con visualización y descarga de documentos oficiales (PDF / imagen)</div></div>
+          <span class="lab2-gris">Monitoreo preventivo ${lim} días calendario</span></div>
+        <div class="lab2-docs">
+          ${tarjetaDoc("lab2-etq-soat", "SOAT obligatorio", soat, `Póliza N.°: ${escA(v.soatPoliza || "—")}`, escA(v.soatAseguradora || ""),
+            `${fila("Vigencia desde", v.soatDesde ? fechaPe(v.soatDesde) : "")}${fila("Vigencia hasta", v.soatHasta ? fechaPe(v.soatHasta) : "—")}<div class="lab2-fila lab2-prev"><span>Estado preventivo</span><b class="lab2-est-${soat.k}">${soat.txt}</b></div>`,
+            pieDocLab(v, "soatDoc", v.soatEnlace))}
+          ${tarjetaDoc("lab2-etq-citv", "Inspección técnica CITV", citv, `Certificado: ${escA(v.citvCertificado || "—")}`, escA(v.citvEntidad || ""),
+            `${fila("Fecha límite / vencimiento", v.citvHasta ? fechaPe(v.citvHasta) : "—")}<div class="lab2-fila lab2-prev"><span>Estado preventivo</span><b class="lab2-est-${citv.k}">${citv.txt}</b></div>`,
+            pieDocLab(v, "citvDoc", v.citvEnlace))}
+          ${tarjetaDoc("lab2-etq-sunarp", "SUNARP / Registro", { k: "gris", chip: "Permanente" }, "Tarjeta de propiedad vehicular", v.tarjetaNumero ? "Tarjeta N.° " + escA(v.tarjetaNumero) : "",
+            `${fila("Partida registral", v.tarjetaPartida || "—")}${fila("Título", v.tarjetaTitulo || "—")}${fila("Fecha de título", v.tarjetaFechaTitulo ? fechaPe(v.tarjetaFechaTitulo) : "—")}`,
+            pieDocLab(v, "tarjetaDoc", v.tarjetaEnlace))}
+          ${tarjetaDoc("lab2-etq-mant", "Mantenimiento periódico", mant.k === "ok" ? { k: "ok", chip: "En regla" } : mant.k === "sin" ? null : mant, `Kilometraje: ${escA(v.mantKm ? v.mantKm + (/km/i.test(v.mantKm) ? "" : " km") : "—")}`, "",
+            `${fila("Último mantenimiento", v.mantUltima ? fechaPe(v.mantUltima) : "—")}${fila("Próxima fecha programada", v.mantProxima ? fechaPe(v.mantProxima) : "—", 'style="color:#0B5FA5"')}${v.mantDetalle ? `<div class="lab2-det">${escA(v.mantDetalle)}</div>` : ""}`,
+            pieDocLab(v, "mantDoc", v.mantEnlace))}
+        </div>
+      </section>`;
+  }
+  // Ventanas del Laboratorio: foto ampliada y detalle de alertas
+  function ventanaLab(html, etiqueta) {
+    const el = document.createElement("div"); el.id = "labDetalle"; el.className = "lab-modal";
+    el.innerHTML = `<div class="lab-modal-in card p-4" role="dialog" aria-label="${etiqueta}">${html}</div>`;
+    document.body.appendChild(el);
+    const cerrar = () => el.remove();
+    el.querySelectorAll(".labCerrar").forEach(b => b.onclick = cerrar); el.onclick = ev => { if (ev.target === el) cerrar(); };
+  }
+  function activarLabVehiculo(d) {
+    const v = d.vehiculo || {};
+    const r = document.getElementById("labIrRec"); if (r) r.onclick = () => { state.labTab = "recorridos"; renderLaboratorio(); window.scrollTo(0, 0); };
+    document.querySelectorAll(".labAmpliar").forEach(b => b.onclick = () => ventanaLab(`
+      <div class="flex items-center justify-between gap-2 mb-2"><b style="color:var(--brand-dark)">${escA(b.dataset.t)}</b><button class="pl-btn labCerrar" aria-label="Cerrar">✕</button></div>
+      <img src="${urlFotoDrive(b.dataset.id, 2000)}" alt="${escA(b.dataset.t)}" style="width:100%;border-radius:12px">`, b.dataset.t));
+    const a = document.getElementById("labVerAlerta");
+    if (a) a.onclick = () => {
+      const lim = Number(v.diasAlerta) || 7;
+      const items = [["SOAT", v.soatHasta, "soatDoc", v.soatEnlace], ["Revisión técnica (CITV)", v.citvHasta, "citvDoc", v.citvEnlace], ["Mantenimiento preventivo", v.mantProxima, "mantDoc", v.mantEnlace]]
+        .map(([n, f, k, en]) => ({ n, f, k, en, e: estadoDocLab(f, d.hoy, lim) })).filter(x => x.e.k === "vencido" || x.e.k === "pronto");
+      ventanaLab(`<div class="flex items-center justify-between gap-2"><b class="text-lg" style="color:#8A1F14">⚠ Documentos por atender</b><button class="pl-btn labCerrar" aria-label="Cerrar">✕</button></div>
+        <div class="text-sm mt-1" style="color:var(--ink-soft)">Unidad ${escA(v.placa)} · aviso con ${lim} días de anticipación</div>
+        ${items.map(x => `<div class="lab2-alerta-it lab2-doc-${x.e.k === "vencido" ? "mal" : "ojo"}"><b>${escA(x.n)}</b><div class="text-sm">Vence: <b>${fechaPe(x.f)}</b> · <b class="lab2-est-${x.e.k}">${x.e.txt}</b></div>${pieDocLab(v, x.k, x.en)}</div>`).join("")}
+        <div class="text-xs mt-3" style="color:var(--ink-soft)">Cuando renueves un documento, súbelo en el Panel de administración → Laboratorio (vehículo): las fechas se actualizan aquí.</div>`, "Documentos por atender");
+    };
+  }
+
+  // ---------- Panel: subir documentos (PDF) y fotos; del PDF se leen los datos para completar el formulario ----------
+  let pdfjsListo = null;
+  function cargarPdfJs() {
+    if (window.pdfjsLib) return Promise.resolve(window.pdfjsLib);
+    return pdfjsListo || (pdfjsListo = new Promise((ok, mal) => {
+      const s = document.createElement("script");
+      s.src = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js";
+      s.onload = () => { window.pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js"; ok(window.pdfjsLib); };
+      s.onerror = () => { pdfjsListo = null; mal(new Error("pdfjs")); };
+      document.head.appendChild(s);
+    }));
+  }
+  async function textoDePdf(buf) {
+    const lib = await cargarPdfJs();
+    const pdf = await lib.getDocument({ data: buf }).promise;
+    let t = "";
+    for (let i = 1; i <= Math.min(pdf.numPages, 4); i++) {
+      const c = await (await pdf.getPage(i)).getTextContent();
+      t += c.items.map(x => x.str + (x.hasEOL ? "\n" : " ")).join("") + "\n";
+    }
+    return t.replace(/[ \t]+/g, " ");
+  }
+  const MESES_ES = { enero: 1, febrero: 2, marzo: 3, abril: 4, mayo: 5, junio: 6, julio: 7, agosto: 8, septiembre: 9, setiembre: 9, octubre: 10, noviembre: 11, diciembre: 12 };
+  // todas las fechas del texto, con su posición: 18/09/2026, 18-09-2026, 2026-09-18, 18 de septiembre de 2026
+  function fechasDeTexto(t) {
+    const out = [], iso = (y, m, d) => (y >= 1990 && y <= 2100 && m >= 1 && m <= 12 && d >= 1 && d <= 31) ? `${y}-${String(m).padStart(2, "0")}-${String(d).padStart(2, "0")}` : null;
+    let m;
+    const r1 = /\b(\d{1,2})[\/.\-](\d{1,2})[\/.\-](\d{4})\b/g; while ((m = r1.exec(t))) { const f = iso(+m[3], +m[2], +m[1]); if (f) out.push({ f, i: m.index }); }
+    const r2 = /\b(\d{4})-(\d{2})-(\d{2})\b/g; while ((m = r2.exec(t))) { const f = iso(+m[1], +m[2], +m[3]); if (f) out.push({ f, i: m.index }); }
+    const r3 = /\b(\d{1,2})\s+de\s+([a-záéíóú]+)\s+(?:de|del)\s+(\d{4})\b/gi; while ((m = r3.exec(t))) { const mes = MESES_ES[m[2].toLowerCase()]; const f = mes && iso(+m[3], mes, +m[1]); if (f) out.push({ f, i: m.index }); }
+    return out.sort((a, b) => a.i - b.i);
+  }
+  // fecha que aparece poco después de alguna de las palabras clave
+  function fechaTras(t, fechas, re, usadas) {
+    let m; const r = new RegExp(re.source, "gi");
+    while ((m = r.exec(t))) { const x = fechas.find(z => z.i >= m.index && z.i - m.index < 90 && !(usadas || []).includes(z)); if (x) { if (usadas) usadas.push(x); return x.f; } }
+    return "";
+  }
+  const ASEGURADORAS = [["la positiva", "La Positiva Seguros"], ["rimac", "Rímac Seguros"], ["rímac", "Rímac Seguros"], ["pacifico", "Pacífico Seguros"], ["pacífico", "Pacífico Seguros"], ["mapfre", "Mapfre Perú"],
+    ["interseguro", "Interseguro"], ["protecta", "Protecta Security"], ["qualitas", "Qualitas"], ["chubb", "Chubb Perú"], ["hdi", "HDI Seguros"], ["crecer", "Crecer Seguros"], ["afocat", "AFOCAT"]];
+  function datosDePdf(tipo, t) {
+    const fechas = fechasDeTexto(t), r = {}, usadas = [];
+    const num = (re) => { const m = t.match(re); return m ? m[m.length - 1].trim() : ""; };
+    if (tipo === "soatDoc") {
+      r.soatPoliza = num(/p[oó]liza\s*(?:de\s+seguro\s*)?(?:n(?:ro|[°ºo])?\.?\s*)?[:#]?\s*((?=[A-Z0-9\-\/]*\d)[A-Z0-9][A-Z0-9\-\/]{4,})/i);
+      const a = ASEGURADORAS.find(([k]) => t.toLowerCase().includes(k)); if (a) r.soatAseguradora = a[1];
+      r.soatDesde = fechaTras(t, fechas, /vigencia|desde|inicio/, usadas);
+      r.soatHasta = fechaTras(t, fechas, /hasta|vencimiento|vence|fin\b|t[eé]rmino/, usadas);
+      if (!r.soatHasta && fechas.length >= 2) { const s = fechas.map(x => x.f).sort(); r.soatDesde = r.soatDesde || s[0]; r.soatHasta = s[s.length - 1]; }
+    } else if (tipo === "citvDoc") {
+      r.citvCertificado = num(/certificado\s*(?:de\s+inspecci[oó]n\s+t[eé]cnica\s+vehicular\s*)?(?:n(?:ro|[°ºo])?\.?\s*)?[:#]?\s*((?=[A-Z0-9\-\/]*\d)[A-Z0-9][A-Z0-9\-\/]{4,})/i);
+      const e = t.match(/(centro de inspecci[oó]n t[eé]cnica vehicular[^\n]{0,50}|[A-ZÁÉÍÓÚ][\wÁÉÍÓÚáéíóú .&]{2,40}\bS\.?A\.?C?\.?)/i); if (e) r.citvEntidad = e[1].trim().replace(/\s+/g, " ");
+      r.citvHasta = fechaTras(t, fechas, /vencimiento|vence|vigencia|v[aá]lido hasta|pr[oó]xima inspecci[oó]n|hasta/);
+      if (!r.citvHasta && fechas.length) r.citvHasta = fechas.map(x => x.f).sort().pop();
+    } else if (tipo === "tarjetaDoc") {
+      r.tarjetaPartida = num(/partida\s*(?:registral|electr[oó]nica)?\s*(?:n(?:ro|[°ºo])?\.?\s*)?[:#]?\s*(\d{6,})/i);
+      r.tarjetaTitulo = num(/t[ií]tulo\s*(?:n(?:ro|[°ºo])?\.?\s*)?[:#]?\s*(\d{4}\s*[-–]\s*\d{3,}|\d{6,})/i).replace(/\s/g, "");
+      r.tarjetaNumero = num(/tarjeta\s*(?:de\s+identificaci[oó]n\s+vehicular|de\s+propiedad)?\s*(?:n(?:ro|[°ºo])?\.?\s*)?[:#]\s*((?=[A-Z0-9]*\d)[A-Z0-9]{6,})/i);
+      r.tarjetaFechaTitulo = fechaTras(t, fechas, /fecha\s+(?:de\s+)?t[ií]tulo|fecha\s+de\s+inscripci[oó]n|t[ií]tulo/) || (fechas[0] && fechas[0].f) || "";
+    } else if (tipo === "mantDoc") {
+      const k = t.match(/(\d{1,3}(?:[.,\s]\d{3})+|\d{4,6})\s*km/i); if (k) r.mantKm = k[1].replace(/[.,\s]/g, "");
+      r.mantProxima = fechaTras(t, fechas, /pr[oó]xim[oa]|siguiente/, usadas);
+      r.mantUltima = fechaTras(t, fechas, /fecha|realizad|servicio|ingreso|emisi[oó]n/, usadas) || (fechas.find(x => !usadas.includes(x)) || {}).f || "";
+    }
+    Object.keys(r).forEach(k => { if (!r[k]) delete r[k]; });
+    return r;
+  }
+  const leerArchivo = (f, como) => new Promise((ok, mal) => { const fr = new FileReader(); fr.onload = () => ok(fr.result); fr.onerror = () => mal(fr.error); fr[como](f); });
+  const ETQ_CAMPO = Object.fromEntries(LAB_SECCIONES.flatMap(s => s.c).map(([k, n]) => [k, n]));
+  async function subirArchivoLab(campo, file) {
+    const msg = state.labDocMsg = state.labDocMsg || {};
+    const pintar = () => { if (state.admin && state.adminTab === "vehiculo") { const y = window.scrollY; renderAdmin(); window.scrollTo(0, y); } };
+    const esPdf = file.type === "application/pdf" || /\.pdf$/i.test(file.name);
+    if (file.size > 10 * 1024 * 1024) { msg[campo] = { mal: "El archivo pesa más de 10 MB" }; return pintar(); }
+    msg[campo] = { info: esPdf ? "Leyendo el PDF…" : "Preparando la imagen…" }; pintar();
+    let datos, sugeridos = {};
+    try {
+      if (esPdf) {
+        const buf = await leerArchivo(file, "readAsArrayBuffer");
+        try { const t = await textoDePdf(buf); sugeridos = t.trim().length > 30 ? datosDePdf(campo, t) : null; } catch (e) { sugeridos = undefined; }
+        datos = String(await leerArchivo(file, "readAsDataURL")).replace(/^data:[^;]*;base64,/, "data:application/pdf;base64,");
+      } else datos = await fotoReducida(file, campo.startsWith("foto") ? 1600 : 2200);
+      msg[campo] = { info: "Subiendo al Drive…" }; pintar();
+      state.labDatos = await rdApi("lab_archivo", { campo, archivo: datos, nombre: file.name });
+      const nuevo = state.labDatos.vehiculo || {};
+      state.adminVeh = state.adminVeh || {};
+      state.adminVeh[campo] = nuevo[campo]; state.adminVeh[campo + "Nombre"] = nuevo[campo + "Nombre"]; state.adminVeh.actualizadoEn = nuevo.actualizadoEn;
+      const llenos = Object.keys(sugeridos || {});
+      llenos.forEach(k => { state.adminVeh[k] = sugeridos[k]; });
+      state.labSugeridos = llenos;
+      msg[campo] = campo.startsWith("foto") ? { ok: "Foto guardada ✅" }
+        : llenos.length ? { ok: `Documento guardado ✅ Del PDF se completaron: ${llenos.map(k => ETQ_CAMPO[k] || k).join(", ")}. Revisa los datos marcados y pulsa «Guardar datos del vehículo».` }
+        : { ok: "Documento guardado ✅", info: sugeridos === null ? "El PDF parece escaneado (sin texto): completa los datos a mano." : sugeridos === undefined ? "No se pudo leer el texto del PDF: completa los datos a mano." : "No se encontraron datos reconocibles en el PDF: completa los datos a mano." };
+      toast(campo.startsWith("foto") ? "Foto guardada" : "Documento guardado");
+    } catch (e) { msg[campo] = { mal: msgError(e) }; }
+    pintar();
   }
   function htmlLabRecorridos(d) {
     const v = d.vehiculo || {}, ec = d.enCurso;
@@ -4177,10 +4515,11 @@
         : `<div class="card p-4 text-sm" style="color:var(--ink-soft)">Todavía no hay recorridos terminados.</div>`}`;
   }
   // Foto del odómetro: se reduce a 1280 px antes de enviarla
-  function fotoReducida(file) {
+  function fotoReducida(file, max) {
+    max = max || 1280;
     return new Promise((ok, mal) => {
       const img = new Image(), url = URL.createObjectURL(file);
-      img.onload = () => { const k = Math.min(1, 1280 / Math.max(img.width, img.height)); const c = document.createElement("canvas");
+      img.onload = () => { const k = Math.min(1, max / Math.max(img.width, img.height)); const c = document.createElement("canvas");
         c.width = Math.round(img.width * k); c.height = Math.round(img.height * k); c.getContext("2d").drawImage(img, 0, 0, c.width, c.height);
         URL.revokeObjectURL(url); ok(c.toDataURL("image/jpeg", 0.78)); };
       img.onerror = () => { URL.revokeObjectURL(url); mal(new Error("foto")); };
@@ -4254,16 +4593,31 @@
     if (!d) { cargarLab(); return `<div class="text-sm py-6" style="color:var(--ink-soft)">Cargando…</div>`; }
     if (d.error) return `<div class="card p-4 text-sm" style="color:var(--danger)">${escA(d.error)}</div>`;
     const v = state.adminVeh || (state.adminVeh = { diasAlerta: "7", estado: "Operativo", ...(d.vehiculo || {}) });
-    const campo = ([k, n, tipo]) => `<div ${k === "tipoUnidad" || k === "modelo" || k === "mantDetalle" || tipo === "url" ? 'style="grid-column:1/-1"' : ""}>
+    const sug = state.labSugeridos || [];
+    const campo = ([k, n, tipo]) => `<div ${k === "tipoUnidad" || k === "modelo" || k === "mantDetalle" || k === "dimNota" || tipo === "url" ? 'style="grid-column:1/-1"' : ""}>
       <label class="gis-lbl" for="veh_${k}">${n}${k === "placa" ? " *" : ""}</label>
       ${tipo === "estado" ? `<select id="veh_${k}" class="input vehCampo" data-k="${k}">${ESTADOS_VEH.map(e => `<option ${e === v[k] ? "selected" : ""}>${e}</option>`).join("")}</select>`
-        : `<input id="veh_${k}" class="input vehCampo" data-k="${k}" ${tipo === "fecha" ? 'type="date"' : tipo === "num" ? 'type="number" min="1" max="90"' : tipo === "url" ? 'type="url" placeholder="https://drive.google.com/…"' : ""} value="${escA(v[k] || "")}">`}</div>`;
-    return `<div class="adm-veh">${LAB_SECCIONES.map(s => `<section class="card p-4"><h3 class="lab-st">${s.t}</h3><div class="grid gap-3 lab-form2">${s.c.map(campo).join("")}</div></section>`).join("")}</div>
+        : `<input id="veh_${k}" class="input vehCampo${sug.includes(k) ? " adm-sug" : ""}" data-k="${k}" ${tipo === "fecha" ? 'type="date"' : tipo === "num" ? 'type="number" min="1" max="90"' : tipo === "url" ? 'type="url" placeholder="https://drive.google.com/…"' : ""} value="${escA(v[k] || "")}">`}</div>`;
+    const msg = state.labDocMsg || {};
+    const aviso = k => { const m = msg[k]; return m ? `${m.ok ? `<div class="adm-doc-ok">${escA(m.ok)}</div>` : ""}${m.info ? `<div class="adm-doc-info">${escA(m.info)}</div>` : ""}${m.mal ? `<div class="rd-err">${escA(m.mal)}</div>` : ""}` : ""; };
+    const actual = k => v[k] ? `<a href="${urlVerDrive(v[k])}" target="_blank" rel="noopener">📄 ${escA(v[k + "Nombre"] || "Ver documento actual")}</a>` : `<span style="color:var(--ink-soft)">Sin documento subido</span>`;
+    const subirDoc = s => `<div class="adm-doc">
+        <div class="adm-doc-fila"><div class="min-w-0"><b>Documento PDF</b><div class="text-sm">${actual(s.doc)}</div></div>
+          <input type="file" accept="application/pdf,image/*" id="up_${s.doc}" class="labUp" data-campo="${s.doc}" hidden>
+          <label for="up_${s.doc}" class="btn-ghost adm-doc-btn">⬆ ${v[s.doc] ? "Reemplazar" : "Subir"} PDF</label></div>
+        <div class="text-xs" style="color:var(--ink-soft)">Sube ${s.docTxt} en PDF: la app lee el documento y completa los datos de abajo para que los revises.</div>${aviso(s.doc)}</div>`;
+    const fotoAdm = (k, t) => `<div class="adm-foto">${v[k] ? `<img src="${urlFotoDrive(v[k], 500)}" alt="${t}">` : LAB_DIBUJO[k === "fotoFrontal" ? "frontal" : "lateral"]}
+        <b>${t}</b><input type="file" accept="image/*" id="up_${k}" class="labUp" data-campo="${k}" hidden><label for="up_${k}" class="btn-ghost adm-doc-btn">📷 ${v[k] ? "Cambiar" : "Subir"} foto</label>${aviso(k)}</div>`;
+    return `<div class="adm-veh">
+      <section class="card p-4" style="grid-column:1/-1"><h3 class="lab-st">Fotos oficiales de la unidad</h3>
+        ${v.placa && (state.labDatos.vehiculo || {}).placa ? `<div class="adm-fotos">${fotoAdm("fotoFrontal", "Vista frontal")}${fotoAdm("fotoLateral", "Vista lateral")}</div>` : `<div class="text-sm" style="color:var(--ink-soft)">Primero guarda los datos del vehículo (al menos la placa) para subir fotos y documentos.</div>`}</section>
+      ${LAB_SECCIONES.map(s => `<section class="card p-4"><h3 class="lab-st">${s.t}</h3>${s.doc && (state.labDatos.vehiculo || {}).placa ? subirDoc(s) : ""}<div class="grid gap-3 lab-form2">${s.c.map(campo).join("")}</div></section>`).join("")}</div>
       <div class="rd-err" id="vehErr"></div>
       <div class="adm-guardar-veh"><button id="vehGuardar" class="btn-primary">Guardar datos del vehículo</button></div>`;
   }
   function activarAdminVehiculo(app) {
-    app.querySelectorAll(".vehCampo").forEach(i => i.oninput = i.onchange = () => { state.adminVeh[i.dataset.k] = i.value; });
+    app.querySelectorAll(".vehCampo").forEach(i => i.oninput = i.onchange = () => { state.adminVeh[i.dataset.k] = i.value; i.classList.remove("adm-sug"); });
+    app.querySelectorAll(".labUp").forEach(i => i.onchange = () => { const f = i.files && i.files[0]; if (f) subirArchivoLab(i.dataset.campo, f); });
     const b = document.getElementById("vehGuardar"); if (!b) return;
     b.onclick = async () => {
       const e = document.getElementById("vehErr"); e.textContent = "";
@@ -4272,7 +4626,7 @@
       const malo = LAB_SECCIONES.flatMap(s => s.c).find(([k, , t]) => t === "url" && v[k] && !/^https:\/\//.test(v[k]));
       if (malo) { e.textContent = "El enlace de «" + malo[1] + "» debe empezar con https://"; return; }
       b.disabled = true; b.textContent = "Guardando…";
-      try { state.labDatos = await rdApi("lab_vehiculo", { vehiculo: v }); state.adminVeh = null; toast("Vehículo guardado ✅"); }
+      try { state.labDatos = await rdApi("lab_vehiculo", { vehiculo: v }); state.adminVeh = null; state.labSugeridos = []; state.labDocMsg = {}; toast("Vehículo guardado ✅"); }
       catch (x) { e.textContent = msgError(x); }
       b.disabled = false; b.textContent = "Guardar datos del vehículo";
       if (state.admin) { const y = window.scrollY; renderAdmin(); window.scrollTo(0, y); }
@@ -4318,12 +4672,100 @@
       .mn-cerca-item b{display:block;font-size:14px}.mn-cerca-item small{display:block;font-size:12px;color:var(--ink-soft)}
       .mn-m{flex:0 0 52px;text-align:center;font-weight:800;font-size:13px;color:#12613B;background:#DDF3E7;border-radius:8px;padding:4px 0;font-variant-numeric:tabular-nums}
       .pl-lista{display:grid;gap:8px}
+      .pl-col{max-width:980px;margin:0 auto}
+      .pl-paso{display:flex;align-items:center;gap:10px;margin-bottom:10px}
+      .pl-paso span{width:28px;height:28px;border-radius:50%;background:#03204C;color:#fff;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:14px;flex:0 0 28px}
+      .pl-paso b{font-size:17px;color:var(--brand-dark)}
+      .pl-nis-grid{display:grid;gap:8px;grid-template-columns:repeat(auto-fill,minmax(250px,1fr))}
+      .pl-nis{display:flex;gap:8px;align-items:flex-start;background:#F7FAFC;border:1px solid var(--line);border-radius:14px;padding:10px}
+      .pl-mapa{height:60vh;min-height:340px;border-radius:14px;overflow:hidden;border:1px solid var(--line);background:#dfe7ee}
       .pl-item{display:flex;gap:10px;align-items:flex-start;background:#fff;border:1px solid var(--line);border-radius:14px;padding:10px}
       .pl-num{width:30px;height:30px;border-radius:50%;color:#fff;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:13px;flex:0 0 30px}
       .pl-form{font-size:11px;font-weight:700;background:#E1F3FB;color:#0B4A6B;border-radius:6px;padding:2px 6px;white-space:nowrap}
       .pl-acc{display:flex;flex-direction:column;gap:4px}
       .pl-btn{width:32px;height:32px;border-radius:9px;border:1.5px solid var(--line);background:#fff;font-weight:800;color:var(--ink)}
       .pl-btn:disabled{opacity:.3}
+      /* Laboratorio ECRF — Unidad Móvil */
+      .lab2-cab{padding:18px 18px 12px;display:grid;gap:14px;border-top:5px solid #0B5FA5}
+      @media (min-width: 900px){ .lab2-cab{grid-template-columns:1fr auto} .lab2-cab-pie{grid-column:1/-1} }
+      .lab2-cab-izq{display:flex;gap:14px;align-items:flex-start}
+      .lab2-ico{width:52px;height:52px;border-radius:14px;background:#0B4A8B;color:#fff;display:flex;align-items:center;justify-content:center;flex:0 0 52px}
+      .lab2-ico svg{width:30px;height:30px}
+      .lab2-tags{display:flex;gap:8px;flex-wrap:wrap;align-items:center;font-size:12px;color:var(--ink-soft)}
+      .lab2-tag{background:#E1F3FB;color:#0B4A6B;font-weight:800;text-transform:uppercase;letter-spacing:.04em;border-radius:8px;padding:2px 8px;font-size:11px}
+      .lab2-tit{font-size:22px;font-weight:900;color:#0F1B2D;line-height:1.2;margin:4px 0 2px}
+      .lab2-desc{font-size:13px;color:var(--ink-soft);margin:0}
+      .lab2-cab-der{display:flex;flex-direction:column;gap:8px;align-items:stretch;min-width:240px}
+      .lab2-placa{border:3px solid #0F1B2D;border-radius:12px;background:#fff;padding:4px 10px 6px;box-shadow:inset 0 0 0 2px #fff,inset 0 0 0 3px #CFD8E3}
+      .lab2-placa-top{display:flex;justify-content:space-between;align-items:center;font-size:12px;letter-spacing:.35em;color:#0F1B2D}
+      .lab2-bandera{width:22px;height:14px;background:linear-gradient(90deg,#D91023 33%,#fff 33% 66%,#D91023 66%);border:1px solid #ccc;border-radius:2px}
+      .lab2-placa-top span:last-child{width:22px}
+      .lab2-placa-num{font:900 38px/1.1 "Roboto Mono",ui-monospace,monospace;letter-spacing:.12em;text-align:center;color:#0F1B2D}
+      .lab2-placa-num i{font-style:normal;margin:0 .15em}
+      .lab2-placa-pie{display:flex;justify-content:space-between;font-size:9px;font-weight:700;color:#5B6B7F;letter-spacing:.06em}
+      .lab2-rec{background:#0B4A8B;color:#fff;border-radius:12px;padding:12px 14px;font-weight:800;font-size:15px}
+      .lab2-rec small{font-weight:500;opacity:.85}
+      .lab2-editar{border:1.5px solid var(--line);border-radius:12px;padding:8px 12px;font-weight:700;font-size:13px;color:var(--brand-dark);background:#fff}
+      .lab2-cab-pie{display:flex;gap:10px 18px;flex-wrap:wrap;align-items:center;font-size:13px;color:var(--ink-soft);border-top:1px solid var(--line);padding-top:12px}
+      .lab2-act{margin-left:auto;font-size:12px}
+      .lab2-aviso{margin-top:12px;border-radius:16px;padding:14px 16px;display:flex;gap:12px;align-items:center;flex-wrap:wrap;color:#fff;background:linear-gradient(90deg,#F39200,#E8432E 55%,#D6102A)}
+      .lab2-aviso-ico{width:40px;height:40px;border-radius:10px;background:rgba(255,255,255,.2);display:flex;align-items:center;justify-content:center;font-size:20px;flex:0 0 40px}
+      .lab2-aviso-etq{background:rgba(255,255,255,.25);border-radius:6px;padding:1px 7px;font-size:11px;font-weight:800;text-transform:uppercase}
+      .lab2-aviso-txt{font-size:13px;margin-top:4px;opacity:.95}
+      .lab2-aviso-btn{background:#fff;color:#C0162B;font-weight:800;border-radius:10px;padding:9px 14px;font-size:14px}
+      .lab2-sec-cab{display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;align-items:flex-start;margin-bottom:12px}
+      .lab2-h{font-size:16px;font-weight:800;color:#0F1B2D;margin:0}
+      .lab2-sub{font-size:12px;color:var(--ink-soft)}
+      .lab2-gris{font-size:12px;color:var(--ink-soft);background:#F1F4F7;border-radius:8px;padding:4px 10px}
+      .lab2-fotos{display:grid;gap:12px}
+      @media (min-width: 700px){ .lab2-fotos{grid-template-columns:1fr 1fr} }
+      .lab2-foto{position:relative;margin:0;border-radius:14px;overflow:hidden;border:1px solid var(--line);background:#EAF1F8;aspect-ratio:16/9}
+      .lab2-foto img,.lab2-foto .lab-dibujo{width:100%;height:100%;object-fit:cover;display:block}
+      .lab2-foto figcaption{position:absolute;top:10px;left:10px;background:#0B4A8B;color:#fff;font-size:12px;font-weight:800;border-radius:8px;padding:4px 10px}
+      .lab2-ampliar,.lab2-sinfoto{position:absolute;right:10px;bottom:10px;background:#fff;border-radius:10px;padding:6px 10px;font-size:13px;font-weight:700;color:#0F1B2D;box-shadow:0 1px 4px rgba(0,0,0,.25)}
+      .lab2-sinfoto{color:var(--ink-soft);font-weight:600}
+      .lab2-tres{display:grid;gap:12px}
+      @media (min-width: 900px){ .lab2-tres{grid-template-columns:repeat(3,minmax(0,1fr))} }
+      .lab2-card-cab{display:flex;gap:10px;align-items:flex-start;margin-bottom:10px}
+      .lab2-mini{width:34px;height:34px;border-radius:10px;display:flex;align-items:center;justify-content:center;font-weight:800;flex:0 0 34px}
+      .lab2-fila{display:flex;justify-content:space-between;gap:12px;padding:8px 0;border-bottom:1px solid #EEF2F6;font-size:13px}
+      .lab2-fila span{color:var(--ink-soft);flex:0 0 auto;max-width:45%}
+      .lab2-fila b{text-align:right;color:#0F1B2D;font-weight:700}
+      .lab2-pill{background:#F1F4F7;border-radius:6px;padding:1px 8px;font-family:ui-monospace,monospace}
+      .lab2-mono{font-family:ui-monospace,monospace;font-size:12px}
+      .lab2-nota{margin-top:12px;background:#F7FAFC;border:1px solid var(--line);border-radius:12px;padding:10px 12px;font-size:12px;color:var(--ink-soft)}
+      .lab2-docs{display:grid;gap:12px}
+      @media (min-width: 800px){ .lab2-docs{grid-template-columns:1fr 1fr} }
+      .lab2-doc{border:1.5px solid var(--line);border-radius:16px;padding:14px;background:#fff;display:flex;flex-direction:column;gap:6px}
+      .lab2-doc-mal{background:#FFF5F4;border-color:#F3B4AC}
+      .lab2-doc-ojo{background:#FFFBEB;border-color:#F5D68A}
+      .lab2-doc-cab{display:flex;justify-content:space-between;align-items:center;gap:8px}
+      .lab2-etq{font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.04em;color:#fff;border-radius:999px;padding:3px 10px}
+      .lab2-etq-soat{background:#03204C}.lab2-etq-citv{background:#5B3BC4}.lab2-etq-sunarp{background:#1E7A46}.lab2-etq-mant{background:#1F2633}
+      .lab2-chip{font-size:11px;font-weight:800;border-radius:999px;padding:3px 9px;text-transform:uppercase}
+      .lab2-chip-mal{background:#E8432E;color:#fff}.lab2-chip-ojo{background:#F2A900;color:#3A2A00}.lab2-chip-ok{background:#DDF3E7;color:#12613B}.lab2-chip-gris{background:#EEF1F4;color:#5B6B7F}
+      .lab2-doc-tit{font-size:15px;color:#0F1B2D}
+      .lab2-doc-sub{font-size:12px;color:var(--ink-soft);margin-top:-4px}
+      .lab2-caja{background:#fff;border:1px solid var(--line);border-radius:12px;padding:4px 12px;margin-top:4px}
+      .lab2-caja .lab2-fila:last-child{border-bottom:0}
+      .lab2-prev b{max-width:62%}
+      .lab2-est-vencido{color:#D6102A !important}.lab2-est-pronto{color:#8A5A00 !important}.lab2-est-ok{color:#12613B !important}.lab2-est-sin{color:var(--ink-soft) !important}
+      .lab2-det{font-size:12px;color:var(--ink-soft);padding:8px 0}
+      .lab2-pie{display:flex;gap:8px;align-items:center;margin-top:auto;padding-top:8px}
+      .lab2-arch{flex:1;min-width:0;font-size:13px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+      .lab2-btn{border:1.5px solid var(--line);border-radius:10px;padding:6px 10px;font-size:13px;font-weight:700;color:#0B4A8B;background:#F4F8FC;text-decoration:none;white-space:nowrap}
+      .lab2-alerta-it{border:1.5px solid var(--line);border-radius:12px;padding:10px 12px;margin-top:10px;display:grid;gap:4px}
+      .lab2-doc-mal.lab2-alerta-it{background:#FFF5F4;border-color:#F3B4AC}
+      .adm-doc{background:#F4F8FC;border:1.5px dashed #9CC3E6;border-radius:12px;padding:10px 12px;margin-bottom:12px;display:grid;gap:6px}
+      .adm-doc-fila{display:flex;gap:10px;align-items:center;justify-content:space-between}
+      .adm-doc-fila a{color:#0B5FA5;font-weight:600}
+      .adm-doc-btn{width:auto !important;padding:8px 12px !important;cursor:pointer;white-space:nowrap}
+      .adm-doc-ok{font-size:13px;font-weight:600;color:#12613B}
+      .adm-doc-info{font-size:13px;color:#6B4A00}
+      .adm-fotos{display:grid;gap:12px;grid-template-columns:repeat(auto-fill,minmax(220px,1fr))}
+      .adm-foto{display:grid;gap:6px;justify-items:start}
+      .adm-foto img,.adm-foto .lab-dibujo{width:100%;aspect-ratio:16/9;object-fit:cover;border-radius:10px;border:1px solid var(--line)}
+      .input.adm-sug{background:#FFF8D6;border-color:#E3B341}
       .lab-alerta{background:#FBE3E0;color:#8A1F14;border-radius:14px;padding:12px 14px;margin-bottom:12px;display:grid;gap:4px;font-size:14px}
       .lab-cab{display:flex;gap:14px;align-items:center;flex-wrap:wrap}
       .lab-placa{border:3px solid #0F1B2D;border-radius:10px;background:#fff;padding:2px 12px 6px;text-align:center;min-width:120px}
