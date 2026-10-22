@@ -2182,7 +2182,42 @@
     ? (!state.verDe || r.operario === state.verDe) : r.operario === state.operario);
   const regsDelForm = () => regsVisibles().filter(r => formDe(r) === state.form);
 
+  /* ---------- Alerta al ingresar: documentos del vehículo laboratorio por vencer o vencidos ----------
+     Se muestra una vez cada vez que se abre la app. Los días de anticipación se configuran en el Panel de administración →
+     Laboratorio (vehículo) → «Avisar con cuántos días de anticipación». */
+  let alertaLabPedida = false;
+  async function revisarAlertaLab() {
+    const clave = "ecrf_alerta_lab_" + (state.operario || "");
+    if (alertaLabPedida || !state.operario || state.gpsEstado !== "ok" || !apiListo() || !enLinea()) return;
+    try { if (sessionStorage.getItem(clave)) return; } catch (e) {}
+    alertaLabPedida = true;
+    let r; try { r = await rdApi("lab_alertas"); } catch (e) { alertaLabPedida = false; return; }
+    try { sessionStorage.setItem(clave, "1"); } catch (e) {}
+    if (!r || !r.alertas || !r.alertas.length || !state.operario) return;
+    const fPe = iso => String(iso || "").split("-").reverse().join("/");
+    const txt = a => a.dias < 0 ? `Vencido hace ${-a.dias} día${a.dias === -1 ? "" : "s"}` : a.dias === 0 ? "Vence hoy" : `Vence en ${a.dias} día${a.dias === 1 ? "" : "s"}`;
+    const el = document.createElement("div"); el.id = "alertaLab";
+    el.style.cssText = "position:fixed;inset:0;z-index:95;background:rgba(3,32,76,.6);display:flex;align-items:center;justify-content:center;padding:16px;box-sizing:border-box";
+    el.innerHTML = `<div role="alertdialog" aria-labelledby="alTit" style="background:#fff;border-radius:18px;width:100%;max-width:440px;max-height:calc(100dvh - 32px);overflow:auto;box-shadow:0 10px 40px rgba(0,0,0,.35)">
+      <div style="background:linear-gradient(90deg,#F39200,#E8432E 55%,#D6102A);color:#fff;padding:16px 18px;border-radius:18px 18px 0 0;display:flex;gap:12px;align-items:center">
+        <span style="font-size:26px">⚠</span><div><b id="alTit" style="font-size:17px;display:block">Documentos del vehículo por atender</b>
+        <small style="opacity:.95">Unidad ${escA(r.placa)} · aviso con ${r.diasAlerta} días de anticipación</small></div></div>
+      <div style="padding:14px 18px;display:grid;gap:10px">
+        ${r.alertas.map(a => `<div style="border:1.5px solid ${a.dias < 0 ? "#F3B4AC" : "#F5D68A"};background:${a.dias < 0 ? "#FFF5F4" : "#FFFBEB"};border-radius:12px;padding:10px 12px">
+          <b style="color:#0F1B2D">${escA(a.n)}</b><div style="font-size:14px;margin-top:2px"><b style="color:${a.dias < 0 ? "#D6102A" : "#8A5A00"}">${txt(a)}</b> · vence el ${fPe(a.hasta)}</div>
+          ${a.dias < 0 && a.n !== "Mantenimiento preventivo" ? `<div style="font-size:12px;color:#8A1F14;margin-top:4px">Unidad no autorizada para circulación hasta renovarlo.</div>` : ""}</div>`).join("")}
+        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:4px">
+          ${r.veLab ? `<button id="alVer" class="btn-primary" style="flex:1;min-width:160px">Ver Laboratorio ECRF</button>` : ""}
+          <button id="alOk" class="btn-ghost" style="flex:1;min-width:120px">Entendido</button></div>
+      </div></div>`;
+    document.body.appendChild(el);
+    const cerrar = () => el.remove();
+    el.querySelector("#alOk").onclick = cerrar;
+    el.onclick = ev => { if (ev.target === el) cerrar(); };
+    const v = el.querySelector("#alVer"); if (v) v.onclick = () => { cerrar(); abrirModulo("LABORATORIO_ECRF"); };
+  }
   function renderMenu() {
+    setTimeout(revisarAlertaLab, 400);
     const app = document.getElementById("app");
     app.classList.add("max-w-md");
     app.innerHTML = `
@@ -2230,7 +2265,7 @@
         <button class="form-card" id="btnAdmin" style="background:#03204C;border-color:#03204C;color:#fff">
           <span class="form-ico" style="display:flex;align-items:center;justify-content:center;background:rgba(255,255,255,.12);color:#fff">${ICO_ADMIN}</span>
           <span class="flex-1 min-w-0"><b class="block text-lg leading-tight">Panel de administración</b>
-            <span class="text-sm" style="color:#C9D8EA">Módulos, charlas, catálogo y vehículo · solo administradores</span></span>
+            <span class="text-sm" style="color:#C9D8EA">Módulos, charlas, dominios y vehículo · solo administradores</span></span>
         </button>` : tarjetaModulo(m)).join("")).join("");
         })()}
         <div class="mt-2 flex justify-center"><span id="syncBadge"></span></div>
@@ -2240,7 +2275,7 @@
     if (bAdm) bAdm.onclick = () => abrirModulo("ADMIN");
     document.querySelectorAll("#app .form-card[data-form]:not(:disabled)").forEach(b => b.onclick = () => abrirModulo(b.dataset.form));
     document.getElementById("btnSalir").onclick = () => {
-      localStorage.removeItem("gpfo_operario"); localStorage.removeItem("ecrf_sesion"); sessionStorage.removeItem("ecrf_form");
+      localStorage.removeItem("gpfo_operario"); localStorage.removeItem("ecrf_sesion"); sessionStorage.removeItem("ecrf_form"); alertaLabPedida = false;
       state.operario = null; state.form = null; state.rd = false; state.pinBuffer = ""; render();
     };
     pintarEstadoSync();
@@ -2362,12 +2397,12 @@
         <div class="adm-tabs">
           <button class="adm-tab" data-admtab="modulos" aria-current="${tab === "modulos"}">Módulos del menú</button>
           <button class="adm-tab" data-admtab="charlas" aria-current="${tab === "charlas"}">Charlas de seguridad</button>
-          <button class="adm-tab" data-admtab="catalogo" aria-current="${tab === "catalogo"}">Catálogo de actividades</button>
+          <button class="adm-tab" data-admtab="catalogo" aria-current="${tab === "catalogo"}">Dominios</button>
           <button class="adm-tab" data-admtab="vehiculo" aria-current="${tab === "vehiculo"}">Laboratorio (vehículo)</button>
           <button class="adm-tab" disabled title="Próximamente">Usuarios · próximamente</button>
         </div>
         ${tab === "charlas" ? estilosGis() + estilosCharlas() + htmlAdminCharlas()
-          : tab === "catalogo" ? `<div class="text-sm mb-3" style="color:var(--ink-soft)">Actividades que los trabajadores eligen al planificar su día. No se borran: se desactivan.</div>` + htmlAdminCatalogo()
+          : tab === "catalogo" ? `<div class="text-sm mb-3" style="color:var(--ink-soft)">Dominios: listas de valores que los trabajadores eligen en la app. Los valores no se borran: se desactivan, y los registros anteriores conservan su texto.</div>` + htmlAdminCatalogo()
           : tab === "vehiculo" ? `<div class="text-sm mb-3" style="color:var(--ink-soft)">Ficha del vehículo laboratorio que ven todos en «Laboratorio ECRF». Las fechas de SOAT, revisión técnica y mantenimiento generan las alertas de vencimiento.</div>` + estilosGis() + htmlAdminVehiculo() : `
         <div class="text-sm mb-3" style="color:var(--ink-soft)">Activa o desactiva cada módulo, cambia su orden y su nombre, y elige qué roles lo ven en el menú. Los cambios llegan a todos los celulares la próxima vez que abran la app con internet.</div>
         <div class="adm-grid">
@@ -2554,7 +2589,12 @@
         .rd-step{display:flex;align-items:center;gap:10px;font-weight:800;color:var(--brand-dark);margin-bottom:10px}
         .rd-step span{width:28px;height:28px;border-radius:50%;background:var(--brand-dark);color:#fff;display:inline-flex;align-items:center;justify-content:center;font-size:14px}
         .rd-video{position:relative;width:100%;aspect-ratio:16/9;background:#0F1B2D;border-radius:12px;overflow:hidden}
-        .rd-video iframe,.rd-video>div{position:absolute;inset:0;width:100%;height:100%}
+        .rd-video iframe,.rd-video>div,.rd-video video{position:absolute;inset:0;width:100%;height:100%;border:0}
+        .rd-video video{object-fit:contain;background:#000}
+        .rd-capa{z-index:2;cursor:pointer;background:transparent}
+        .rd-capa.rd-capa-toca{pointer-events:none}
+        .rd-vctl{display:grid;grid-template-columns:1fr auto;gap:8px}
+        .rd-vctl .btn-ghost{width:auto;padding:0 16px}
         .rd-barra{height:10px;border-radius:999px;background:#E3EAF1;overflow:hidden}
         .rd-barra>i{display:block;height:100%;background:linear-gradient(90deg,#33B1E4,#0B5FA5);transition:width .4s}
         .rd-dato{background:var(--bg,#F2F5F8);border-radius:10px;padding:8px 10px}
@@ -2657,10 +2697,13 @@
         <div class="card p-4">
           <div class="rd-step"><span>1</span>Charla de seguridad</div>
           ${!ch ? `<div class="text-sm p-3 rounded-lg" style="background:#E1F3FB;color:#0B4A6B">El administrador aún no configuró una charla de seguridad. Puedes registrar tus actividades.</div>` : `
-          <div class="text-xs font-bold" style="color:var(--brand)">${escA(ch.tema)}</div>
-          <div class="font-bold mb-2">${escA(ch.titulo)}</div>
+          ${ch.tema ? `<div class="text-xs font-bold" style="color:var(--brand)">${escA(ch.tema)}</div>` : ""}
+          <div class="font-bold">${escA(ch.titulo)}</div>
+          ${ch.descripcion ? `<div class="text-sm mb-2" style="color:var(--ink-soft)">${escA(ch.descripcion)}</div>` : `<div class="mb-2"></div>`}
           ${completada ? `<div class="p-3 rounded-lg text-sm font-semibold mb-2" style="background:#DDF3E7;color:#12613B">✅ Charla completada</div>`
-            : `<div class="rd-video mb-2"><div id="rdPlayer"></div></div>`}
+            : `<div class="rd-video mb-2"><div id="rdPlayer"></div><div id="rdCapa" class="rd-capa" aria-hidden="true"></div></div>
+               <div class="rd-vctl mb-2"><button id="rdVPlay" class="btn-primary" disabled>▶ Reproducir</button><button id="rdVAtras" class="btn-ghost" disabled>⏪ 10 s</button></div>
+               <div class="text-xs mb-2" style="color:var(--ink-soft)">Debes ver el video completo: puedes pausar y retroceder, pero no adelantar.</div>`}
           <div class="rd-barra mb-1"><i id="rdBarra" style="width:${completada ? 100 : cv && cv.duracion ? Math.min(100, Math.round(cv.visto / cv.duracion * 100)) : 0}%"></i></div>
           <div class="text-xs mb-2" style="color:var(--ink-soft)" id="rdAvance">${completada ? "Visto al 100 %" : cv && cv.duracion ? `Visto ${Math.min(100, Math.round(cv.visto / cv.duracion * 100))} %` : "Reproduce el video hasta el final"}</div>
           <div class="grid grid-cols-3 gap-2 text-sm">
@@ -2738,7 +2781,9 @@
     }
   }
 
-  // ---------- reproductor de YouTube con evidencia técnica ----------
+  // ---------- reproductor de la charla con evidencia técnica ----------
+  // Solo se puede reproducir, pausar y retroceder: no hay barra para adelantar, el video está cubierto por una capa
+  // (no se puede tocar el título ni el logo de YouTube) y si de alguna forma se adelanta, vuelve al punto máximo visto.
   let ytListo = null, rdPlayer = null, rdTimer = null;
   function cargarApiYoutube() {
     if (window.YT && window.YT.Player) return Promise.resolve();
@@ -2756,25 +2801,69 @@
     clearInterval(rdTimer); rdTimer = null;
     if (rdPlayer) { try { rdPlayer.destroy(); } catch (e) {} rdPlayer = null; }
   }
+  // Enlace que el reproductor del celular puede abrir directamente (Drive, OneDrive y SharePoint)
+  function urlVideoDirecta(ch) {
+    const u = String(ch.url || "").trim();
+    if (ch.fuente === "drive") return "https://drive.usercontent.google.com/download?id=" + encodeURIComponent(ch.videoId) + "&export=download&confirm=t";
+    if (ch.fuente === "onedrive") return "https://api.onedrive.com/v1.0/shares/u!" + btoa(unescape(encodeURIComponent(u))).replace(/=+$/, "").replace(/\//g, "_").replace(/\+/g, "-") + "/root/content";
+    if (ch.fuente === "sharepoint") return u + (u.includes("?") ? "&" : "?") + "download=1";
+    return "";
+  }
+  // Adaptador común: YouTube (API del iframe) o video del celular (<video>)
+  function reproductorCharla(ch, cont, eventos) {
+    if (ch.fuente && ch.fuente !== "youtube") {
+      const v = document.createElement("video");
+      v.setAttribute("playsinline", ""); v.preload = "metadata"; v.src = urlVideoDirecta(ch); v.disablePictureInPicture = true;
+      v.setAttribute("controlslist", "nodownload noplaybackrate noremoteplayback");
+      cont.appendChild(v);
+      v.addEventListener("loadedmetadata", () => eventos.listo());
+      v.addEventListener("playing", () => eventos.reproduce());
+      v.addEventListener("pause", () => { if (!v.ended) eventos.pausa(); });
+      v.addEventListener("ended", () => eventos.fin());
+      v.addEventListener("error", () => eventos.error("No se pudo abrir el video. El enlace debe ser público («cualquier persona con el enlace»)."));
+      return { tipo: "html", play: () => v.play(), pause: () => v.pause(), tiempo: () => v.currentTime, duracion: () => v.duration || 0,
+        ir: t => { v.currentTime = t; }, reproduciendo: () => !v.paused && !v.ended, destroy: () => { v.pause(); v.removeAttribute("src"); v.load(); v.remove(); } };
+    }
+    const div = document.createElement("div"); div.id = "rdYt"; cont.appendChild(div);
+    let p = null;
+    p = new YT.Player("rdYt", {
+      videoId: ch.videoId, width: "100%", height: "100%",
+      playerVars: { controls: 0, disablekb: 1, fs: 0, rel: 0, modestbranding: 1, playsinline: 1, iv_load_policy: 3, cc_load_policy: 0 },
+      events: {
+        onReady: () => eventos.listo(),
+        onError: ev => eventos.error(({ 2: "El enlace del video no es válido.", 5: "El video no se puede reproducir en este equipo.", 100: "El video no existe o es privado.", 101: "El dueño del video no permite verlo dentro de la app.", 150: "El dueño del video no permite verlo dentro de la app." }[ev.data] || "No se pudo reproducir el video."), ev.data),
+        onStateChange: ev => { const S = YT.PlayerState; if (ev.data === S.PLAYING) eventos.reproduce(); else if (ev.data === S.PAUSED) eventos.pausa(); else if (ev.data === S.ENDED) eventos.fin(); }
+      }
+    });
+    return { tipo: "yt", play: () => p.playVideo && p.playVideo(), pause: () => p.pauseVideo && p.pauseVideo(), tiempo: () => (p.getCurrentTime ? p.getCurrentTime() : 0) || 0,
+      duracion: () => (p.getDuration ? p.getDuration() : 0) || 0, ir: t => p.seekTo && p.seekTo(t, true),
+      reproduciendo: () => !!(p.getPlayerState && p.getPlayerState() === YT.PlayerState.PLAYING), destroy: () => { try { p.destroy(); } catch (e) {} } };
+  }
   async function montarVideo(ch, cv) {
     detenerVideo();
     const msg = t => { const m = document.getElementById("rdVMsg"); if (m) m.textContent = t || ""; };
+    const fmt = s => Math.floor(s / 60) + ":" + String(Math.floor(s % 60)).padStart(2, "0");
     const pinta = (visto, dur, est) => {
       const pct = dur ? Math.min(100, Math.round(visto / dur * 100)) : 0;
       const b = document.getElementById("rdBarra"); if (b) b.style.width = pct + "%";
-      const a = document.getElementById("rdAvance"); if (a) a.textContent = `Visto ${pct} %` + (dur ? ` · ${Math.floor(visto / 60)}:${String(Math.floor(visto % 60)).padStart(2, "0")} de ${Math.floor(dur / 60)}:${String(Math.floor(dur % 60)).padStart(2, "0")}` : "");
+      const a = document.getElementById("rdAvance"); if (a) a.textContent = `Visto ${pct} %` + (dur ? ` · ${fmt(visto)} de ${fmt(dur)}` : "");
       if (est) { const e = document.getElementById("rdVEst"); if (e) e.textContent = RD_VIDEO_TXT[est] || est; }
     };
-    try { await cargarApiYoutube(); }
-    catch (e) { msg("No se pudo cargar el reproductor de YouTube. Revisa tu conexión e inténtalo de nuevo."); return; }
-    if (!document.getElementById("rdPlayer")) return;
+    const cont = document.getElementById("rdPlayer"); if (!cont) return;
+    if (!ch.fuente || ch.fuente === "youtube") {
+      try { await cargarApiYoutube(); }
+      catch (e) { msg("No se pudo cargar el reproductor de YouTube. Revisa tu conexión e inténtalo de nuevo."); return; }
+      if (!document.getElementById("rdPlayer")) return;
+    }
     // "visto" = segundos distintos del video reproducidos de corrido (ver dos veces el mismo tramo no suma, adelantar no cuenta)
     const cubiertos = new Set();
+    let visto = 0, ultimo = null, dur = 0, maximo = 0, inicioEnviado = !!(cv && cv.inicio), ultimoEnvio = 0, enviandoFin = false;
     const marca = (a, b) => { if (!(b > a) || b - a > 1.6) return; for (let s = Math.floor(a); s < Math.ceil(b - 0.05); s++) cubiertos.add(s); visto = Math.min(dur || Infinity, cubiertos.size); };
-    let visto = 0, ultimo = null, dur = 0, inicioEnviado = !!(cv && cv.inicio), ultimoEnvio = 0, enviandoFin = false;
+    const bPlay = document.getElementById("rdVPlay"), bAtras = document.getElementById("rdVAtras"), capa = document.getElementById("rdCapa");
+    const botonPlay = () => { if (bPlay) bPlay.innerHTML = rdPlayer && rdPlayer.reproduciendo() ? "⏸ Pausar" : "▶ Reproducir"; };
     const enviar = async (evento, extra) => {
       try {
-        const r = await rdApi("rd_video", { evento, duracion: dur, visto: Math.round(visto), posicion: rdPlayer && rdPlayer.getCurrentTime ? rdPlayer.getCurrentTime() : 0, ...(extra || {}) });
+        const r = await rdApi("rd_video", { evento, duracion: dur, visto: Math.round(visto), posicion: rdPlayer ? rdPlayer.tiempo() : 0, ...(extra || {}) });
         if (r.reporte) {
           state.rdDatos.reporte = { ...(state.rdDatos.reporte || {}), ...r.reporte, actividades: (state.rdDatos.reporte || {}).actividades };
           const ini = document.getElementById("rdVIni"); if (ini && r.reporte.charla.inicio) ini.textContent = horaDe(r.reporte.charla.inicio);
@@ -2784,40 +2873,45 @@
         return r;
       } catch (e) { msg(msgError(e) + ". El avance del video no se pudo registrar; si vuelve la señal, repite el final del video."); return null; }
     };
-    rdPlayer = new YT.Player("rdPlayer", {
-      videoId: ch.videoId, width: "100%", height: "100%",
-      playerVars: { rel: 0, modestbranding: 1, playsinline: 1 },
-      events: {
-        onReady: () => { dur = rdPlayer.getDuration() || 0; pinta(visto, dur); },
-        onError: ev => {
-          const t = { 2: "El enlace del video no es válido.", 5: "El video no se puede reproducir en este equipo.", 100: "El video no existe o es privado.", 101: "El dueño del video no permite verlo dentro de la app.", 150: "El dueño del video no permite verlo dentro de la app." }[ev.data] || "No se pudo reproducir el video.";
-          msg(t + " Avisa al administrador. No se registrará la charla como vista.");
-          enviar("error", { codigoError: ev.data });
-        },
-        onStateChange: async ev => {
-          const S = YT.PlayerState;
-          if (ev.data === S.PLAYING) {
-            dur = rdPlayer.getDuration() || dur; msg(""); ultimo = rdPlayer.getCurrentTime();
-            if (!inicioEnviado) { inicioEnviado = true; enviar("inicio"); }
-            if (!rdTimer) rdTimer = setInterval(() => {
-              if (!rdPlayer || !rdPlayer.getPlayerState || rdPlayer.getPlayerState() !== YT.PlayerState.PLAYING) return;
-              const t = rdPlayer.getCurrentTime();
-              if (ultimo !== null) marca(ultimo, t);          // solo cuenta lo reproducido sin saltos
-              ultimo = t; pinta(visto, dur, "EN_CURSO");
-              if (Date.now() - ultimoEnvio > 30000) { ultimoEnvio = Date.now(); enviar("progreso"); }
-            }, 1000);
-          } else if (ev.data === S.PAUSED) { if (ultimo !== null) marca(ultimo, rdPlayer.getCurrentTime()); ultimo = null; enviar("pausa"); }
-          else if (ev.data === S.ENDED) {
-            clearInterval(rdTimer); rdTimer = null;
-            if (ultimo !== null) marca(ultimo, dur || rdPlayer.getDuration()); ultimo = null; pinta(visto, dur);
-            if (enviandoFin) return; enviandoFin = true;
-            const r = await enviar("fin"); enviandoFin = false;
-            if (r && r.reporte && r.reporte.charla.estado === "COMPLETADO") { toast("Charla completada ✅ Ya puedes registrar tus actividades"); detenerVideo(); renderRdHoy(); }
-            else if (r) msg(r.msg || "El video no se vio completo. Vuelve a reproducirlo desde el inicio sin adelantarlo.");
-          }
-        }
+    // vigila cada medio segundo: cuenta lo visto y, si el video saltó hacia adelante, lo regresa al punto máximo visto
+    const vigilar = () => {
+      if (!rdPlayer || !rdPlayer.reproduciendo()) return;
+      const t = rdPlayer.tiempo();
+      if (t > maximo + 2) { rdPlayer.ir(maximo); ultimo = maximo; avisoHasta = Date.now() + 5000; msg("No se puede adelantar el video: debes verlo completo."); return; }
+      if (ultimo !== null) marca(ultimo, t);
+      ultimo = t; maximo = Math.max(maximo, t); pinta(visto, dur, "EN_CURSO");
+      if (Date.now() - ultimoEnvio > 30000) { ultimoEnvio = Date.now(); enviar("progreso"); }
+    };
+    let intentoPlay = null, avisoHasta = 0;
+    rdPlayer = reproductorCharla(ch, cont, {
+      listo: () => { dur = rdPlayer.duracion() || 0; pinta(visto, dur); if (bPlay) bPlay.disabled = false; if (bAtras) bAtras.disabled = false; },
+      error: (t, codigo) => { msg(t + " Avisa al administrador. No se registrará la charla como vista."); enviar("error", { codigoError: codigo || "video" }); },
+      reproduce: () => {
+        clearTimeout(intentoPlay); if (capa) capa.classList.remove("rd-capa-toca");
+        dur = rdPlayer.duracion() || dur; if (Date.now() > avisoHasta) msg(""); ultimo = rdPlayer.tiempo(); botonPlay();
+        if (!inicioEnviado) { inicioEnviado = true; enviar("inicio"); }
+        if (!rdTimer) rdTimer = setInterval(vigilar, 500);
+      },
+      pausa: () => { if (ultimo !== null) marca(ultimo, Math.min(rdPlayer.tiempo(), maximo + 1)); ultimo = null; botonPlay(); enviar("pausa"); },
+      fin: async () => {
+        clearInterval(rdTimer); rdTimer = null; botonPlay();
+        if (ultimo !== null) marca(ultimo, dur || rdPlayer.duracion()); ultimo = null; pinta(visto, dur);
+        if (enviandoFin) return; enviandoFin = true;
+        const r = await enviar("fin"); enviandoFin = false;
+        if (r && r.reporte && r.reporte.charla.estado === "COMPLETADO") { toast("Charla completada ✅ Ya puedes registrar tus actividades"); detenerVideo(); renderRdHoy(); }
+        else if (r) msg(r.msg || "El video no se vio completo. Vuelve a reproducirlo desde el inicio.");
       }
     });
+    if (bPlay) bPlay.onclick = () => {
+      if (!rdPlayer) return;
+      if (rdPlayer.reproduciendo()) { rdPlayer.pause(); return; }
+      const r = rdPlayer.play(); if (r && r.catch) r.catch(() => {});
+      // algunos celulares no dejan iniciar YouTube desde un botón externo: se habilita un solo toque sobre el video
+      clearTimeout(intentoPlay);
+      intentoPlay = setTimeout(() => { if (rdPlayer && !rdPlayer.reproduciendo() && capa && rdPlayer.tipo === "yt") { capa.classList.add("rd-capa-toca"); msg("Toca el video una vez para empezar."); } }, 2500);
+    };
+    if (bAtras) bAtras.onclick = () => { if (!rdPlayer) return; const t = Math.max(0, rdPlayer.tiempo() - 10); rdPlayer.ir(t); ultimo = rdPlayer.reproduciendo() ? t : null; };
+    if (capa) capa.onclick = ev => { ev.preventDefault(); if (bPlay && !capa.classList.contains("rd-capa-toca")) bPlay.click(); };
   }
 
   // ---------- ETAPA 2: cierre ----------
@@ -3036,12 +3130,12 @@
     // próximos 14 días: qué charla toca cada día
     const defecto = d.charlas.find(c => c.activa && !c.fecha);
     const dias = Array.from({ length: 14 }, (_, i) => { const f = sumarDia(hoy, i); return { f, c: d.charlas.find(c => c.activa && c.fecha === f) }; });
-    const vid = ed ? idYoutubeCliente(ed.url || "") : "";
+    const fv = ed ? fuenteVideoCliente(ed.url || "") : null;
     const fechaTxt = f => { const x = new Date(f + "T12:00:00"); return DIAS_CORTOS[x.getDay()] + " " + x.getDate() + "/" + (x.getMonth() + 1); };
     return `
       <section class="card ch-cab">
         <div class="min-w-0"><b class="ch-tit">🛡 Programación y catálogo de charlas de seguridad diarias</b>
-          <div class="text-sm" style="color:var(--ink-soft)">Programa las charlas en video de <b>YouTube</b> por fecha para el inicio de jornada. Cada día los trabajadores ven la charla de ese día; las de días pasados se borran solas.</div></div>
+          <div class="text-sm" style="color:var(--ink-soft)">Programa las charlas en video de <b>YouTube, Google Drive, OneDrive o SharePoint</b> por fecha para el inicio de jornada. Cada día los trabajadores ven la charla de ese día; las de días pasados se borran solas.</div></div>
         <button id="chNueva" class="btn-primary" style="width:auto;padding:12px 18px;white-space:nowrap">＋ Programar charla</button>
       </section>
       <section class="card p-4 mt-3">
@@ -3056,23 +3150,24 @@
         <div class="grid gap-3 mt-3 lab-form2">
           <div><label class="adm-lbl" for="chFecha">Fecha *</label><input id="chFecha" type="date" class="input" min="${hoy}" value="${escA(ed.fecha || "")}">
             <label class="flex items-center gap-2 text-xs mt-1"><input id="chDefecto" type="checkbox" ${ed.fecha === "" && ed.id ? "checked" : ""}> Sin fecha: charla por defecto (se usa los días sin charla programada)</label></div>
-          <div><label class="adm-lbl" for="chTema">Tema *</label><input id="chTema" class="input" maxlength="120" value="${escA(ed.tema || "")}" placeholder="Ej.: Seguridad operativa y EPP"></div>
           <div style="grid-column:1/-1"><label class="adm-lbl" for="chTit">Título *</label><input id="chTit" class="input" maxlength="300" value="${escA(ed.titulo || "")}" placeholder="Ej.: Uso de EPP y detección de riesgos en vía pública"></div>
           <div style="grid-column:1/-1"><label class="adm-lbl" for="chDesc">Descripción (opcional)</label><textarea id="chDesc" class="input" rows="2" maxlength="600">${escA(ed.descripcion || "")}</textarea></div>
-          <div style="grid-column:1/-1"><label class="adm-lbl" for="chUrl">URL del video de YouTube *</label><input id="chUrl" class="input" maxlength="300" value="${escA(ed.url || "")}" placeholder="https://www.youtube.com/watch?v=…">
-            <div id="chUrlInfo" class="text-xs mt-1" style="color:${vid ? "#12613B" : "var(--ink-soft)"}">${vid ? "✓ Enlace válido · video " + vid : "Pega el enlace del video (watch, youtu.be o shorts)"}</div></div>
+          <div style="grid-column:1/-1"><label class="adm-lbl" for="chUrl">Enlace del video *</label><input id="chUrl" class="input" maxlength="300" value="${escA(ed.url || "")}" placeholder="YouTube, Google Drive, OneDrive o SharePoint">
+            <div id="chUrlInfo" class="text-xs mt-1">${infoUrlCharla(fv, ed.url)}</div>
+            <div class="text-xs mt-1" style="color:var(--ink-soft)">En Google Drive, OneDrive y SharePoint el archivo debe estar compartido como «cualquier persona con el enlace».</div></div>
         </div>
-        ${vid ? `<img src="https://img.youtube.com/vi/${vid}/mqdefault.jpg" alt="" style="width:220px;border-radius:10px;margin-top:8px">` : ""}
+        <div id="chPrev" class="ch-prev">${previaCharla(fv, ed.url)}</div>
         <div id="chErr" class="rd-err"></div>
         <div class="flex gap-2 mt-2" style="flex-wrap:wrap"><button id="chGuardar" class="btn-primary" style="width:auto;padding:12px 20px">${ed.id ? "Guardar cambios" : "Programar charla"}</button>
           ${!ed.id ? `<span class="text-xs" style="color:var(--ink-soft);align-self:center">Al guardar, el formulario sigue abierto con el día siguiente para que programes la próxima.</span>` : ""}</div>
       </section>` : ""}
       ${lista.length ? `<div class="ch-grid mt-3">${lista.map(c => { const e = estadoCharla(c, d); return `
         <article class="card ch-card ${e.k === "pausada" ? "ch-off" : ""}">
-          <div class="ch-card-cab"><span class="ch-tema">${escA(c.tema)}</span>${c.fecha ? `<span class="ch-fecha">📅 ${fechaPe(c.fecha)}</span>` : ""}<span class="ch-est ch-est-${e.k}">${e.t}</span></div>
-          <a class="ch-mini" href="${escA(c.url)}" target="_blank" rel="noopener" aria-label="Ver video"><img src="https://img.youtube.com/vi/${escA(c.videoId)}/hqdefault.jpg" alt="" loading="lazy" onerror="this.style.visibility='hidden'"><span class="ch-play">▶</span><span class="ch-yt">YouTube</span></a>
+          <div class="ch-card-cab">${c.tema ? `<span class="ch-tema">${escA(c.tema)}</span>` : `<span class="ch-tema">${FUENTES[c.fuente] || "YouTube"}</span>`}${c.fecha ? `<span class="ch-fecha">📅 ${fechaPe(c.fecha)}</span>` : ""}<span class="ch-est ch-est-${e.k}">${e.t}</span></div>
+          ${c.fuente && c.fuente !== "youtube" ? `<a class="ch-mini ch-mini-${c.fuente}" href="${escA(c.url)}" target="_blank" rel="noopener" aria-label="Ver video"><span class="ch-mini-etq">${FUENTES[c.fuente]}</span><b>Video en ${FUENTES[c.fuente]}</b><small>Se reproduce dentro de la app, sin adelantar</small><span class="ch-play ch-play-sm">▶</span></a>`
+            : `<a class="ch-mini" href="${escA(c.url)}" target="_blank" rel="noopener" aria-label="Ver video"><img src="https://img.youtube.com/vi/${escA(c.videoId)}/hqdefault.jpg" alt="" loading="lazy" onerror="this.style.visibility='hidden'"><span class="ch-play">▶</span><span class="ch-yt">YouTube</span></a>`}
           <b class="ch-card-tit">${escA(c.titulo)}</b>${c.descripcion ? `<div class="ch-card-desc">${escA(c.descripcion)}</div>` : ""}
-          <div class="ch-url"><div class="flex justify-between gap-2"><span class="ch-yt2">▶ YouTube</span><span class="text-xs" style="color:var(--ink-soft)">Por: ${escA(c.actualizadoPor || "—")}</span></div><code>${escA(c.url)}</code></div>
+          <div class="ch-url"><div class="flex justify-between gap-2"><span class="ch-yt2 ch-yt2-${c.fuente || "youtube"}">▶ ${FUENTES[c.fuente] || "YouTube"}</span><span class="text-xs" style="color:var(--ink-soft)">Por: ${escA(c.actualizadoPor || "—")}</span></div><code>${escA(c.url)}</code></div>
           <div class="ch-pie">
             <a href="${escA(c.url)}" target="_blank" rel="noopener" class="ch-ver">▶ Reproducir / ver charla</a>
             <button class="ch-btn chSw" data-id="${escA(c.id)}" data-act="${!c.activa}">${c.activa ? "Pausar" : "Activar"}</button>
@@ -3082,6 +3177,22 @@
           ${state.chBorrar === c.id ? `<div class="ch-conf"><span>¿Eliminar esta charla?</span><button class="gis-chip chDelSi" data-id="${escA(c.id)}" style="border-color:var(--danger);color:var(--danger)">Sí, eliminar</button><button class="gis-chip chDelNo">No</button></div>` : ""}
         </article>`; }).join("")}</div>`
       : `<div class="card p-4 mt-3 text-sm" style="color:var(--ink-soft)">Aún no hay charlas. Usa «＋ Programar charla».</div>`}`;
+  }
+  function infoUrlCharla(fv, url) {
+    if (!url) return `<span style="color:var(--ink-soft)">Pega el enlace del video</span>`;
+    if (!fv) return `<span style="color:var(--danger)">El enlace debe ser de YouTube, Google Drive, OneDrive o SharePoint</span>`;
+    return `<span style="color:#12613B">✓ Enlace de ${FUENTES[fv.fuente]}${fv.fuente === "youtube" ? " · video " + fv.id : ""}</span>`;
+  }
+  // vista previa: YouTube muestra la miniatura; Drive/OneDrive/SharePoint prueban abrir el video como lo hará el celular
+  function previaCharla(fv, url) {
+    if (!fv) return "";
+    if (fv.fuente === "youtube") return `<img src="https://img.youtube.com/vi/${fv.id}/mqdefault.jpg" alt="" style="width:220px;border-radius:10px">`;
+    return `<video id="chPrevVideo" src="${escA(urlVideoDirecta({ fuente: fv.fuente, videoId: fv.id, url }))}" preload="metadata" playsinline muted controls style="width:260px;border-radius:10px;background:#000"></video><div id="chPrevEst" class="text-xs mt-1" style="color:var(--ink-soft)">Probando el video…</div>`;
+  }
+  function probarPrevia() {
+    const v = document.getElementById("chPrevVideo"), e = document.getElementById("chPrevEst"); if (!v || !e) return;
+    v.onloadedmetadata = () => { e.style.color = "#12613B"; e.textContent = `✓ El video se puede reproducir (dura ${Math.floor(v.duration / 60)}:${String(Math.floor(v.duration % 60)).padStart(2, "0")})`; };
+    v.onerror = () => { e.style.color = "var(--danger)"; e.textContent = "✗ No se pudo abrir el video: revisa que esté compartido como «cualquier persona con el enlace»."; };
   }
   function estilosCharlas() {
     return `<style>
@@ -3105,6 +3216,13 @@
       .ch-est-hoy{background:#1E9E4A;color:#fff}.ch-est-prog{background:#E1F3FB;color:#0B4A6B}.ch-est-defecto{background:#FFF4DB;color:#8A5A00}.ch-est-pausada{background:#EEF1F4;color:#5B6B7F}
       .ch-mini{position:relative;display:block;border-radius:12px;overflow:hidden;aspect-ratio:16/7;background:#0F1B2D}
       .ch-mini img{width:100%;height:100%;object-fit:cover;display:block}
+      .ch-mini-drive,.ch-mini-onedrive,.ch-mini-sharepoint{display:flex;flex-direction:column;justify-content:center;gap:4px;padding:16px;color:#fff;text-decoration:none}
+      .ch-mini-drive{background:linear-gradient(135deg,#0B4D2E,#137A47)}.ch-mini-onedrive{background:linear-gradient(135deg,#0B3A75,#1565C0)}.ch-mini-sharepoint{background:linear-gradient(135deg,#0B3A6E,#1F2F6B)}
+      .ch-mini-etq{align-self:flex-start;background:rgba(255,255,255,.18);border:1px solid rgba(255,255,255,.4);border-radius:6px;padding:2px 8px;font-size:11px;font-weight:800}
+      .ch-mini small{opacity:.85;font-size:12px}
+      .ch-play-sm{left:auto;right:16px;top:auto;bottom:12px;transform:none;width:34px;height:34px;font-size:13px}
+      .ch-yt2-drive{color:#137A47;border-color:#9BD3B0;background:#EAF6EE}.ch-yt2-onedrive,.ch-yt2-sharepoint{color:#1565C0;border-color:#9CC3E6;background:#F4F8FC}
+      .ch-prev{margin-top:10px}
       .ch-play{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);width:44px;height:44px;border-radius:50%;background:#E8132B;color:#fff;display:flex;align-items:center;justify-content:center;font-size:16px;padding-left:3px}
       .ch-yt{position:absolute;left:8px;bottom:8px;background:#000;color:#fff;font-size:11px;font-weight:800;border-radius:6px;padding:2px 7px}
       .ch-card-tit{font-size:15px;color:#0F1B2D}
@@ -3119,25 +3237,50 @@
       .ch-conf{display:flex;gap:8px;align-items:center;flex-wrap:wrap;font-size:13px;font-weight:600}
     </style>`;
   }
+  const DOMINIOS_APP = [
+    { k: "actividades", n: "Actividades planificadas", d: "Campo «Actividad» del Reporte diario de actividades", ej: "Ej.: Detección acústica de fugas" },
+    { k: "motivos", n: "Motivos de salida del vehículo", d: "Campo «Motivo de salida» del Laboratorio ECRF (recorridos)", ej: "Ej.: Traslado de equipos" }
+  ];
   function htmlAdminCatalogo() {
     const d = state.adminRd;
     if (!d) { cargarAdminRd(); return `<div class="text-sm py-6" style="color:var(--ink-soft)">Cargando…</div>`; }
     if (d.error) return `<div class="card p-4 text-sm" style="color:var(--danger)">${escA(d.error)}</div>`;
+    const dom = DOMINIOS_APP.find(x => x.k === state.domSel) || DOMINIOS_APP[0];
+    const valores = (d.dominios && d.dominios[dom.k]) || (dom.k === "actividades" ? d.catalogo : []) || [];
     return `
-      <div class="card p-4 mb-3" style="max-width:760px">
-        <label class="adm-lbl" for="caNueva">Nueva actividad</label>
-        <div class="flex gap-2"><input id="caNueva" class="input" maxlength="300" placeholder="Ej.: Detección acústica de fugas" value="${escA(state.caNueva || "")}"><button id="caAgregar" class="btn-primary" style="width:auto;padding:0 18px">Agregar</button></div>
+      <div class="dom-lista">${DOMINIOS_APP.map(x => { const n = ((d.dominios && d.dominios[x.k]) || (x.k === "actividades" ? d.catalogo : []) || []);
+        return `<button class="dom-item domSel" data-k="${x.k}" aria-pressed="${x.k === dom.k}"><b>${x.n}</b><small>${x.d}</small><span>${n.filter(v => v.activo).length} activos de ${n.length}</span></button>`; }).join("")}</div>
+      <div class="card p-4 mb-3 mt-3" style="max-width:760px">
+        <div class="font-bold" style="color:var(--brand-dark)">${dom.n}</div>
+        <div class="text-xs mb-2" style="color:var(--ink-soft)">${dom.d}</div>
+        <label class="adm-lbl" for="caNueva">Nuevo valor</label>
+        <div class="flex gap-2"><input id="caNueva" class="input" maxlength="300" placeholder="${dom.ej}" value="${escA(state.caNueva || "")}"><button id="caAgregar" class="btn-primary" style="width:auto;padding:0 18px">Agregar</button></div>
         <div id="caErr" class="rd-err"></div>
       </div>
       <div style="max-width:760px">
-        <div class="text-xs mb-2" style="color:var(--ink-soft)">${d.catalogo.length} actividad(es) · Las desactivadas no se ofrecen a los trabajadores, pero los reportes anteriores conservan su descripción original.</div>
-        ${d.catalogo.map(a => `
+        <div class="text-xs mb-2" style="color:var(--ink-soft)">${valores.length} valor(es) · Los desactivados no se ofrecen en la app.</div>
+        ${valores.map(a => `
           <div class="adm-mod ${a.activo ? "" : "off"}" style="grid-template-areas:none;grid-template-columns:1fr auto auto;display:grid;align-items:center">
             <input class="input caDesc" data-id="${escA(a.id)}" maxlength="300" value="${escA(a.descripcion)}">
             <button class="btn-ghost caGuardar" data-id="${escA(a.id)}" style="width:auto;padding:8px 12px">Guardar</button>
-            <button class="adm-sw caSw" role="switch" data-id="${escA(a.id)}" aria-checked="${a.activo}" aria-label="Activa"></button>
+            <button class="adm-sw caSw" role="switch" data-id="${escA(a.id)}" aria-checked="${a.activo}" aria-label="Activo"></button>
           </div>`).join("")}
-      </div>`;
+      </div>
+      <style>.dom-lista{display:grid;gap:10px;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));max-width:760px}
+        .dom-item{text-align:left;border:1.5px solid var(--line);background:#fff;border-radius:14px;padding:12px 14px;display:grid;gap:2px}
+        .dom-item[aria-pressed="true"]{border-color:#0B5FA5;background:#F4F8FC;box-shadow:inset 0 0 0 1px #0B5FA5}
+        .dom-item b{color:var(--brand-dark)}.dom-item small{font-size:12px;color:var(--ink-soft)}.dom-item span{font-size:12px;font-weight:700;color:#0B5FA5;margin-top:4px}</style>`;
+  }
+  // Fuente del video de la charla (mismas reglas que el servidor)
+  const FUENTES = { youtube: "YouTube", drive: "Google Drive", onedrive: "OneDrive", sharepoint: "SharePoint" };
+  function fuenteVideoCliente(url) {
+    const s = String(url || "").trim();
+    const yt = idYoutubeCliente(s); if (yt) return { fuente: "youtube", id: yt };
+    if (!/^https:\/\//i.test(s)) return null;
+    const dr = s.match(/drive\.google\.com\/(?:file\/d\/|open\?(?:.*&)?id=|uc\?(?:.*&)?id=)([\w-]{20,})/); if (dr) return { fuente: "drive", id: dr[1] };
+    if (/^https:\/\/(1drv\.ms|onedrive\.live\.com)\//i.test(s)) return { fuente: "onedrive", id: "" };
+    if (/^https:\/\/[\w.-]+\.sharepoint\.com\//i.test(s)) return { fuente: "sharepoint", id: "" };
+    return null;
   }
   function idYoutubeCliente(url) {
     const m = String(url || "").trim().match(/(?:youtube\.com\/(?:watch\?(?:.*&)?v=|embed\/|shorts\/|live\/|v\/)|youtu\.be\/)([A-Za-z0-9_-]{11})(?![A-Za-z0-9_-])/);
@@ -3165,24 +3308,25 @@
         abrirForm(c ? { ...c } : { fecha: b.dataset.f });
       });
       const url = document.getElementById("chUrl");
-      if (url) url.oninput = () => { const v = idYoutubeCliente(url.value); const i = document.getElementById("chUrlInfo"); i.style.color = v ? "#12613B" : url.value ? "var(--danger)" : "var(--ink-soft)"; i.textContent = v ? "✓ Enlace válido · video " + v : url.value ? "No parece un enlace de YouTube" : "Pega el enlace del video"; };
+      if (url) url.oninput = () => { const fv = fuenteVideoCliente(url.value); document.getElementById("chUrlInfo").innerHTML = infoUrlCharla(fv, url.value); document.getElementById("chPrev").innerHTML = previaCharla(fv, url.value); probarPrevia(); };
+      probarPrevia();
       const fe = document.getElementById("chFecha"), def = document.getElementById("chDefecto");
       if (def) { const sync = () => { fe.disabled = def.checked; if (def.checked) fe.value = ""; }; def.onchange = sync; if (def.checked) sync(); }
       const g = document.getElementById("chGuardar");
       if (g) g.onclick = async () => {
         const ed = state.adminCharlaEd || {};
-        const datos = { id: ed.id || "", fecha: def.checked ? "" : fe.value, tema: document.getElementById("chTema").value, titulo: document.getElementById("chTit").value,
+        const datos = { id: ed.id || "", fecha: def.checked ? "" : fe.value, tema: ed.tema || "", titulo: document.getElementById("chTit").value,
                         descripcion: document.getElementById("chDesc").value, url: url.value, activa: ed.id ? ed.activa !== false : true };
         const err = document.getElementById("chErr");
         if (!def.checked && !datos.fecha) { err.textContent = "Elige la fecha (o marca «Sin fecha» para la charla por defecto)"; return; }
-        if (!datos.tema.trim() || !datos.titulo.trim()) { err.textContent = "Completa el tema y el título"; return; }
-        if (!idYoutubeCliente(datos.url)) { err.textContent = "La URL no es un enlace válido de YouTube"; return; }
+        if (!datos.titulo.trim()) { err.textContent = "Completa el título"; return; }
+        if (!fuenteVideoCliente(datos.url)) { err.textContent = "El enlace debe ser de YouTube, Google Drive, OneDrive o SharePoint"; return; }
         state.adminCharlaEd = datos; g.disabled = true; g.textContent = "Verificando video…";
         const ok = await llamar("rd_admin_charla", datos, "chErr");
         if (ok && !datos.id && datos.fecha) {           // sigue programando: el formulario queda listo para el día siguiente libre
           let f = sumarDia(datos.fecha, 1); const dd = state.adminRd;
           for (let i = 0; i < 120 && dd.charlas.some(c => c.activa && c.fecha === f); i++) f = sumarDia(f, 1);
-          state.adminCharlaEd = { fecha: f, tema: datos.tema }; renderAdmin();
+          state.adminCharlaEd = { fecha: f }; renderAdmin();
           const fo = document.getElementById("chForm"); if (fo) fo.scrollIntoView({ block: "start" });
         }
       };
@@ -3194,12 +3338,15 @@
       app.querySelectorAll(".chDelSi").forEach(b => b.onclick = () => { state.chBorrar = null; llamar("rd_admin_charla_borrar", { id: b.dataset.id }); });
     }
     if (state.adminTab === "catalogo") {
+      const dom = (DOMINIOS_APP.find(x => x.k === state.domSel) || DOMINIOS_APP[0]).k;
+      const valores = (d.dominios && d.dominios[dom]) || d.catalogo || [];
+      app.querySelectorAll(".domSel").forEach(b => b.onclick = () => { state.domSel = b.dataset.k; state.caNueva = ""; renderAdmin(); });
       const n = document.getElementById("caNueva");
       n.oninput = () => { state.caNueva = n.value; };
-      document.getElementById("caAgregar").onclick = () => { if (!n.value.trim()) { document.getElementById("caErr").textContent = "Escribe la actividad"; return; } state.caNueva = n.value; llamar("rd_admin_catalogo", { descripcion: n.value }, "caErr"); };
+      document.getElementById("caAgregar").onclick = () => { if (!n.value.trim()) { document.getElementById("caErr").textContent = "Escribe el valor"; return; } state.caNueva = n.value; llamar("rd_admin_catalogo", { dominio: dom, descripcion: n.value }, "caErr"); };
       n.onkeydown = e => { if (e.key === "Enter") document.getElementById("caAgregar").click(); };
-      app.querySelectorAll(".caGuardar").forEach(b => b.onclick = () => { const a = d.catalogo.find(x => x.id === b.dataset.id); const v = app.querySelector(`.caDesc[data-id="${b.dataset.id}"]`).value; llamar("rd_admin_catalogo", { id: a.id, descripcion: v, activo: a.activo }); });
-      app.querySelectorAll(".caSw").forEach(b => b.onclick = () => { const a = d.catalogo.find(x => x.id === b.dataset.id); llamar("rd_admin_catalogo", { id: a.id, descripcion: a.descripcion, activo: !a.activo }); });
+      app.querySelectorAll(".caGuardar").forEach(b => b.onclick = () => { const a = valores.find(x => x.id === b.dataset.id); const v = app.querySelector(`.caDesc[data-id="${b.dataset.id}"]`).value; llamar("rd_admin_catalogo", { dominio: dom, id: a.id, descripcion: v, activo: a.activo }); });
+      app.querySelectorAll(".caSw").forEach(b => b.onclick = () => { const a = valores.find(x => x.id === b.dataset.id); llamar("rd_admin_catalogo", { dominio: dom, id: a.id, descripcion: a.descripcion, activo: !a.activo }); });
     }
   }
 
@@ -3369,7 +3516,7 @@
   function navAgrupado() {
     const mods = modulosMenu();
     const grupos = GRUPOS_NAV.map(g => ({ ...g, items: mods.filter(m => (GRUPO_DE[m.id] || "FORM") === g.id) }));
-    if (esAdmin()) grupos.find(g => g.id === "GESTION").items.push({ id: "ADMIN", titulo: "Panel de administración", descripcion: "Módulos, charlas, catálogo y vehículo" });
+    if (esAdmin()) grupos.find(g => g.id === "GESTION").items.push({ id: "ADMIN", titulo: "Panel de administración", descripcion: "Módulos, charlas, dominios y vehículo" });
     return grupos.filter(g => g.items.length);
   }
   const navActual = () => state.admin ? "ADMIN" : state.rd ? "REPORTE_DIARIO" : state.vista ? state.vista : state.form ? state.form : "";
@@ -3423,7 +3570,7 @@
       <div class="lat-pie"><span>SEDAPAL · ECRF</span><button id="latSalir">Salir</button></div>`;
     el.querySelectorAll("[data-nav]").forEach(b => b.onclick = () => b.dataset.nav ? abrirModulo(b.dataset.nav) : abrirModulo(""));
     el.querySelector("#latSalir").onclick = () => {
-      localStorage.removeItem("gpfo_operario"); localStorage.removeItem("ecrf_sesion"); sessionStorage.removeItem("ecrf_form");
+      localStorage.removeItem("gpfo_operario"); localStorage.removeItem("ecrf_sesion"); sessionStorage.removeItem("ecrf_form"); alertaLabPedida = false;
       salirVistaGis(false); state.operario = null; state.form = null; state.rd = false; state.admin = false; state.vista = null; state.pinBuffer = ""; render();
     };
   }
@@ -3651,13 +3798,20 @@
       (u ? Promise.resolve(u) : ubicacionAhora()).then(c => { if (c && c.lat != null && state.vista === "PLANO_GIS") cargarPlano(c.lat, c.lon, "gps"); });
     }
   }
-  // Ventana de un NIS en el mapa: datos y atajos a los formularios con ese NIS ya cargado
+  // Datos comerciales de cada NIS (diámetros, frecuencia y horas de abastecimiento), por número de NIS
+  const NIS_COM = {};
+  const conUnidad = (v, u) => v === "" || v == null ? "—" : String(v).replace(".", ",") + " " + u;
+  // Ventana de un NIS en el mapa: datos, datos comerciales y atajos a los formularios con ese NIS ya cargado
   function ventanaNis(nis, d, m) {
     const atajo = (f, t) => `<button class="mnIrForm" data-f="${f}" data-n="${nis}">${t}</button>`;
+    const c = NIS_COM[nis];
     return `<div class="mn-pop">
       <div class="mn-pop-tit">NIS ${escA(nis)}${m != null ? ` <span>${m} m</span>` : ""}</div>
       <dl><dt>Dirección</dt><dd>${escA(d.direccion || "—")}</dd><dt>Localidad</dt><dd>${escA(d.urb || "—")}</dd>
         <dt>Distrito</dt><dd>${escA(d.distrito || "—")}</dd><dt>Sector</dt><dd>${escA(d.sector || "—")}</dd>${d.ccss ? `<dt>CCSS</dt><dd>${escA(d.ccss)}</dd>` : ""}</dl>
+      ${c ? `<div class="mn-pop-com"><b>Datos comerciales</b>
+        <dl><dt>Diámetro medidor</dt><dd>${escA(conUnidad(c.dm, "mm"))}</dd><dt>Diámetro conex.</dt><dd>${escA(conUnidad(c.dc, "mm"))}</dd>
+          <dt>Frecuencia</dt><dd>${escA(c.fr || "—")}</dd><dt>Horas abastec.</dt><dd>${escA(conUnidad(c.hp, "h"))}</dd></dl></div>` : ""}
       <div class="mn-pop-at">${atajo("GPFO0381", "Toma de presiones")}${atajo("GPFO0405", "Verificación de reparación")}${atajo("GPFO0416", "Verificación por muestreo")}</div>
     </div>`;
   }
@@ -3710,7 +3864,10 @@
     if (nis.status === "fulfilled") {
       const n = nis.value;
       // lo encontrado queda guardado como cualquier NIS consultado (sirve sin internet y para los formularios)
-      (n.items || []).forEach(x => { if (NIS_REMOTO[x.nis] === undefined || NIS_REMOTO[x.nis] === null) NIS_REMOTO[x.nis] = datosNis(x); });
+      (n.items || []).forEach(x => {
+        if (NIS_REMOTO[x.nis] === undefined || NIS_REMOTO[x.nis] === null) NIS_REMOTO[x.nis] = datosNis(x);
+        if (x.dm !== undefined) NIS_COM[x.nis] = { dm: x.dm, dc: x.dc, fr: x.fr, hp: x.hp };
+      });
       guardarCacheNis();
       nd.nis = n.items || []; nd.totalNis = n.total || nd.nis.length;
     } else {
@@ -4179,7 +4336,7 @@
     { t: "Revisión técnica (CITV)", doc: "citvDoc", docTxt: "el certificado de revisión técnica", c: [["citvCertificado", "N.° de certificado"], ["citvEntidad", "Entidad"], ["citvHasta", "Vigente hasta", "fecha"], ["citvEnlace", "Enlace del documento (Drive)", "url"]] },
     { t: "Tarjeta de propiedad", doc: "tarjetaDoc", docTxt: "la tarjeta de propiedad", c: [["tarjetaNumero", "N.° de tarjeta"], ["tarjetaPartida", "Partida registral"], ["tarjetaTitulo", "N.° de título"], ["tarjetaFechaTitulo", "Fecha de título", "fecha"], ["tarjetaEnlace", "Enlace del documento (Drive)", "url"]] },
     { t: "Mantenimiento preventivo", doc: "mantDoc", docTxt: "la orden de trabajo del mantenimiento", c: [["mantUltima", "Último mantenimiento", "fecha"], ["mantProxima", "Próximo mantenimiento", "fecha"], ["mantKm", "Kilometraje del último"], ["mantDetalle", "Detalle"], ["mantEnlace", "Enlace del documento (Drive)", "url"]] },
-    { t: "Alertas", c: [["diasAlerta", "Avisar con cuántos días de anticipación", "num"]] }
+    { t: "Alertas", c: [["diasAlerta", "Avisar con cuántos días de anticipación (aviso en el Laboratorio y ventana al ingresar a la app)", "num"]] }
   ];
   const ESTADOS_VEH = ["Operativo", "En mantenimiento", "En reserva", "Fuera de servicio"];
   const fechaPe = iso => /^\d{4}-\d{2}-\d{2}$/.test(String(iso || "")) ? String(iso).split("-").reverse().join("/") : (iso || "—");
@@ -4660,7 +4817,10 @@
       .rg-aqui{color:#0B5FA5;font:700 14px Roboto,Arial,sans-serif;background:none;border:0;padding:2px 0;white-space:nowrap}
       .mn-pop{font:14px Roboto,Arial,sans-serif;color:#0F1B2D}
       .mn-pop-tit{font-weight:800;font-size:16px;color:#03204C;margin-bottom:6px}.mn-pop-tit span{font-size:12px;font-weight:700;color:#12613B;background:#DDF3E7;border-radius:6px;padding:2px 6px;margin-left:4px}
-      .mn-pop dl{display:grid;grid-template-columns:auto 1fr;gap:3px 10px;margin:0 0 8px}.mn-pop dt{color:#4A5A6E;font-size:12px;font-weight:700}.mn-pop dd{margin:0;font-weight:600}
+      .mn-pop dl{display:grid;grid-template-columns:auto 1fr;gap:3px 10px;margin:0 0 8px}
+      .mn-pop-com{background:#F4F8FC;border:1px solid #CFE3F3;border-radius:10px;padding:6px 10px;margin:0 0 8px}
+      .mn-pop-com>b{display:block;font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:#0B5FA5;margin-bottom:4px}
+      .mn-pop-com dl{margin:0}.mn-pop dt{color:#4A5A6E;font-size:12px;font-weight:700}.mn-pop dd{margin:0;font-weight:600}
       .mn-pop-at{display:grid;gap:5px}.mn-pop-at button{background:#0B5FA5;color:#fff;border-radius:9px;padding:8px 10px;font-weight:700;font-size:13px;text-align:left}
       .mn-pop-ficha{margin-top:8px;color:#0B5FA5;font-weight:700;font-size:13px}
       .mn-atajos{display:grid;gap:8px;grid-template-columns:repeat(3,minmax(0,1fr))}
@@ -4695,12 +4855,13 @@
       .lab2-tag{background:#E1F3FB;color:#0B4A6B;font-weight:800;text-transform:uppercase;letter-spacing:.04em;border-radius:8px;padding:2px 8px;font-size:11px}
       .lab2-tit{font-size:22px;font-weight:900;color:#0F1B2D;line-height:1.2;margin:4px 0 2px}
       .lab2-desc{font-size:13px;color:var(--ink-soft);margin:0}
-      .lab2-cab-der{display:flex;flex-direction:column;gap:8px;align-items:stretch;min-width:240px}
+      .lab2-cab-der{display:flex;flex-direction:column;gap:8px;align-items:stretch;min-width:0}
+      @media (min-width: 900px){ .lab2-cab-der{min-width:240px} }
       .lab2-placa{border:3px solid #0F1B2D;border-radius:12px;background:#fff;padding:4px 10px 6px;box-shadow:inset 0 0 0 2px #fff,inset 0 0 0 3px #CFD8E3}
       .lab2-placa-top{display:flex;justify-content:space-between;align-items:center;font-size:12px;letter-spacing:.35em;color:#0F1B2D}
       .lab2-bandera{width:22px;height:14px;background:linear-gradient(90deg,#D91023 33%,#fff 33% 66%,#D91023 66%);border:1px solid #ccc;border-radius:2px}
       .lab2-placa-top span:last-child{width:22px}
-      .lab2-placa-num{font:900 38px/1.1 "Roboto Mono",ui-monospace,monospace;letter-spacing:.12em;text-align:center;color:#0F1B2D}
+      .lab2-placa-num{font:900 clamp(26px,9vw,38px)/1.1 "Roboto Mono",ui-monospace,monospace;letter-spacing:.12em;text-align:center;color:#0F1B2D}
       .lab2-placa-num i{font-style:normal;margin:0 .15em}
       .lab2-placa-pie{display:flex;justify-content:space-between;font-size:9px;font-weight:700;color:#5B6B7F;letter-spacing:.06em}
       .lab2-rec{background:#0B4A8B;color:#fff;border-radius:12px;padding:12px 14px;font-weight:800;font-size:15px}
@@ -4717,14 +4878,14 @@
       .lab2-h{font-size:16px;font-weight:800;color:#0F1B2D;margin:0}
       .lab2-sub{font-size:12px;color:var(--ink-soft)}
       .lab2-gris{font-size:12px;color:var(--ink-soft);background:#F1F4F7;border-radius:8px;padding:4px 10px}
-      .lab2-fotos{display:grid;gap:12px}
+      .lab2-fotos{display:grid;gap:12px;grid-template-columns:minmax(0,1fr)}
       @media (min-width: 700px){ .lab2-fotos{grid-template-columns:1fr 1fr} }
       .lab2-foto{position:relative;margin:0;border-radius:14px;overflow:hidden;border:1px solid var(--line);background:#EAF1F8;aspect-ratio:16/9}
       .lab2-foto img,.lab2-foto .lab-dibujo{width:100%;height:100%;object-fit:cover;display:block}
       .lab2-foto figcaption{position:absolute;top:10px;left:10px;background:#0B4A8B;color:#fff;font-size:12px;font-weight:800;border-radius:8px;padding:4px 10px}
       .lab2-ampliar,.lab2-sinfoto{position:absolute;right:10px;bottom:10px;background:#fff;border-radius:10px;padding:6px 10px;font-size:13px;font-weight:700;color:#0F1B2D;box-shadow:0 1px 4px rgba(0,0,0,.25)}
       .lab2-sinfoto{color:var(--ink-soft);font-weight:600}
-      .lab2-tres{display:grid;gap:12px}
+      .lab2-tres{display:grid;gap:12px;grid-template-columns:minmax(0,1fr)}
       @media (min-width: 900px){ .lab2-tres{grid-template-columns:repeat(3,minmax(0,1fr))} }
       .lab2-card-cab{display:flex;gap:10px;align-items:flex-start;margin-bottom:10px}
       .lab2-mini{width:34px;height:34px;border-radius:10px;display:flex;align-items:center;justify-content:center;font-weight:800;flex:0 0 34px}
@@ -4734,7 +4895,9 @@
       .lab2-pill{background:#F1F4F7;border-radius:6px;padding:1px 8px;font-family:ui-monospace,monospace}
       .lab2-mono{font-family:ui-monospace,monospace;font-size:12px}
       .lab2-nota{margin-top:12px;background:#F7FAFC;border:1px solid var(--line);border-radius:12px;padding:10px 12px;font-size:12px;color:var(--ink-soft)}
-      .lab2-docs{display:grid;gap:12px}
+      .lab2-docs{display:grid;gap:12px;grid-template-columns:minmax(0,1fr)}
+      .lab2-doc,.lab2-tres>*,.lab2-fotos>*,.lab2-cab>*{min-width:0}
+      .lab2-doc-tit,.lab2-doc-sub,.lab2-fila b,.lab2-tit,.lab2-desc{overflow-wrap:anywhere}
       @media (min-width: 800px){ .lab2-docs{grid-template-columns:1fr 1fr} }
       .lab2-doc{border:1.5px solid var(--line);border-radius:16px;padding:14px;background:#fff;display:flex;flex-direction:column;gap:6px}
       .lab2-doc-mal{background:#FFF5F4;border-color:#F3B4AC}
@@ -4751,8 +4914,8 @@
       .lab2-prev b{max-width:62%}
       .lab2-est-vencido{color:#D6102A !important}.lab2-est-pronto{color:#8A5A00 !important}.lab2-est-ok{color:#12613B !important}.lab2-est-sin{color:var(--ink-soft) !important}
       .lab2-det{font-size:12px;color:var(--ink-soft);padding:8px 0}
-      .lab2-pie{display:flex;gap:8px;align-items:center;margin-top:auto;padding-top:8px}
-      .lab2-arch{flex:1;min-width:0;font-size:13px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+      .lab2-pie{display:flex;gap:8px;align-items:center;margin-top:auto;padding-top:8px;flex-wrap:wrap}
+      .lab2-arch{flex:1 1 140px;min-width:0;font-size:13px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
       .lab2-btn{border:1.5px solid var(--line);border-radius:10px;padding:6px 10px;font-size:13px;font-weight:700;color:#0B4A8B;background:#F4F8FC;text-decoration:none;white-space:nowrap}
       .lab2-alerta-it{border:1.5px solid var(--line);border-radius:12px;padding:10px 12px;margin-top:10px;display:grid;gap:4px}
       .lab2-doc-mal.lab2-alerta-it{background:#FFF5F4;border-color:#F3B4AC}
@@ -4787,9 +4950,9 @@
       .lab-tabla th{text-align:left;font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:var(--ink-soft);padding:10px;border-bottom:1px solid var(--line)}
       .lab-tabla td{padding:10px;border-bottom:1px solid #EEF2F6}.lab-tabla tr.labFila{cursor:pointer}.lab-tabla tr.labFila:hover{background:#F6F9FC}
       .lab-tabla .num{text-align:right;font-variant-numeric:tabular-nums}
-      .lab-modal{position:fixed;inset:0;z-index:90;background:rgba(3,32,76,.55);display:flex;align-items:flex-end;justify-content:center;padding:16px}
-      .lab-modal-in{width:100%;max-width:560px;max-height:88vh;overflow:auto}
-      @media (min-width: 700px){ .lab-modal{align-items:center} }
+      .lab-modal{position:fixed;inset:0;z-index:90;background:rgba(3,32,76,.55);display:flex;align-items:center;justify-content:center;padding:16px;box-sizing:border-box}
+      .lab-modal-in{width:100%;max-width:560px;max-height:calc(100dvh - 32px);overflow:auto;margin:auto;box-sizing:border-box}
+      .lab-modal-in img{display:block;max-height:calc(100dvh - 120px);object-fit:contain}
       .lab-fotos{display:grid;grid-template-columns:1fr 1fr;gap:10px}.lab-fotos small{display:block;font-size:12px;color:var(--ink-soft);margin-bottom:4px}
       .lab-fotos img{border-radius:10px}
       .adm-guardar-veh{position:sticky;bottom:0;padding:12px 0 calc(12px + env(safe-area-inset-bottom,0px));background:linear-gradient(transparent,var(--bg) 30%)}
