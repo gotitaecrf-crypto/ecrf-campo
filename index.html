@@ -3677,6 +3677,7 @@
     const nCx = d && d.conex ? d.conex.filter(l => l.t === 1).length : 0, nEh = d && d.conex ? d.conex.filter(l => l.t === 2).length : 0;
     const desde = !d ? "" : d.origen === "gps" ? "de tu ubicación" : d.origen === "nis" ? "del NIS " + escA(d.nisCentro || "") : "del punto elegido";
     const lista = d && d.nis ? d.nis : [], ver = state.mnCercaVer || 30;
+    const modo = state.mnModo || "nis", mb = state.mnMedBusq;
     const muestra = k => `<canvas class="rg-muestra" data-k="${k}" width="44" height="22" aria-hidden="true"></canvas>`;
     const aviso = t => t ? `<div class="text-xs mt-1" style="color:#6B4A00">${escA(t)}</div>` : "";
     document.getElementById("app").innerHTML = `${estilosGis()}
@@ -3684,13 +3685,19 @@
       <div class="gis-wrap px-4 py-4 pb-24 gis-split rg-split">
         <div class="gis-panel">
           <div class="card p-4">
-            <label class="gis-lbl" for="mnNis">Buscar NIS</label>
+            <div class="flex items-center justify-between gap-2 mb-2"><label class="gis-lbl" style="margin:0" for="mnNis">Buscar por</label>
+              <div class="mn-modo" role="group" aria-label="Buscar por"><button class="mnModo" data-m="nis" aria-pressed="${modo === "nis"}">NIS</button><button class="mnModo" data-m="med" aria-pressed="${modo === "med"}">N° medidor</button></div></div>
             <div class="flex gap-2">
-              <input id="mnNis" class="input" inputmode="numeric" maxlength="7" placeholder="7 dígitos, ej. 2848378" value="${escA(q)}" autocomplete="off">
+              ${modo === "med" ? `<input id="mnNis" class="input" inputmode="text" autocapitalize="characters" maxlength="14" placeholder="Ej. DB24100687" value="${escA(state.mnMedQ || "")}" autocomplete="off" style="text-transform:uppercase">`
+                : `<input id="mnNis" class="input" inputmode="numeric" maxlength="7" placeholder="7 dígitos, ej. 2848378" value="${escA(q)}" autocomplete="off">`}
               <button id="mnBuscar" class="btn-primary" style="width:auto;padding:0 18px">Buscar</button>
             </div>
-            <div id="mnEstado" class="text-sm mt-2" style="color:var(--ink-soft)">${
-              est === "buscando" ? "Buscando en la base de NIS…" : est === "noexiste" ? `<span style="color:var(--danger);font-weight:600">El NIS ${escA(q)} no está en la base.</span>`
+            <div id="mnEstado" class="text-sm mt-2" style="color:var(--ink-soft)">${modo === "med" ? (
+              mb && mb.buscando ? "Buscando el medidor…" : mb && mb.error ? `<span style="color:var(--danger);font-weight:600">${escA(mb.error)}</span>`
+              : mb && mb.nis === null ? `<span style="color:var(--danger);font-weight:600">El medidor ${escA(mb.m)} no está en la base.</span>`
+              : mb && mb.nis ? `Medidor <b>${escA(mb.m)}</b> → NIS <b>${escA(mb.nis)}</b>${est === "noexiste" ? ` <span style="color:var(--danger)">(el NIS no está en la base)</span>` : ""}`
+              : "Escribe el número de medidor completo (letras y números).")
+              : est === "buscando" ? "Buscando en la base de NIS…" : est === "noexiste" ? `<span style="color:var(--danger);font-weight:600">El NIS ${escA(q)} no está en la base.</span>`
               : est === "sinred" ? "Sin internet: solo se encuentran los NIS consultados antes en este equipo." : q.length && q.length < 7 ? "El NIS tiene 7 dígitos." : "El plano se carga alrededor del NIS que busques."}</div>
             ${hist.length ? `<div class="gis-lbl mt-3">Últimos NIS consultados</div><div class="flex gap-2" style="flex-wrap:wrap">${hist.slice(0, 3).map(n => `<button class="gis-chip mnHist" data-n="${n}" aria-pressed="${n === state.mnSel}">${n}</button>`).join("")}</div>` : ""}
           </div>
@@ -3713,6 +3720,7 @@
               <div class="rd-dato"><small>Distrito</small><b>${escA(sel.distrito || "—")}</b></div>
               <div class="rd-dato"><small>Sector</small><b>${escA(sel.sector || "—")}</b></div>
               <div class="rd-dato"><small>CCSS</small><b>${escA(sel.ccss || "—")}</b></div>
+              ${NIS_COM[state.mnSel] ? `<div class="rd-dato"><small>N° medidor</small><b>${escA(NIS_COM[state.mnSel].med || "Sin medidor")}</b></div>` : ""}
               <div class="rd-dato"><small>Distancia</small><b>${dist == null ? (yo ? "—" : "Activa tu ubicación") : fmtKm(dist)}</b></div>
               ${sel.latNis != null ? `<div class="rd-dato" style="grid-column:1/-1"><small>Coordenadas (WGS84)</small><b style="font-variant-numeric:tabular-nums">${Number(sel.latNis).toFixed(6)}, ${Number(sel.lonNis).toFixed(6)}</b></div>` : ""}
             </div>
@@ -3756,19 +3764,40 @@
         </div>
         <div class="gis-mapa rg-mapa" id="rgMapa" role="region" aria-label="Plano GIS"></div>
       </div>`;
-    // buscar NIS
+    // buscar por NIS o por N° de medidor
     const inp = document.getElementById("mnNis");
+    document.querySelectorAll(".mnModo").forEach(b => b.onclick = () => { state.mnModo = b.dataset.m; renderPlano(); const n = document.getElementById("mnNis"); if (n) n.focus(); });
+    const buscarMedidor = async () => {
+      const m = inp.value.toUpperCase().replace(/\s+/g, ""); state.mnMedQ = m;
+      if (m.length < 6) { state.mnMedBusq = { m, error: "Escribe el número de medidor completo" }; return renderPlano(); }
+      if (!apiListo() || !enLinea()) { state.mnMedBusq = { m, error: "Necesitas internet para buscar por medidor" }; return renderPlano(); }
+      state.mnMedBusq = { m, buscando: true }; renderPlano();
+      try {
+        const r = await apiGet({ action: "medidor", m });
+        state.mnMedBusq = { m: r.medidor || m, nis: r.nis || null };
+        if (r.nis) {
+          state.mnQuery = r.nis;
+          if (!nisLocal(r.nis) && NIS_REMOTO[r.nis] === undefined) await buscarNisServidor(r.nis);
+          if (nisLocal(r.nis)) { centrarEnNis(r.nis); return; }
+        }
+      } catch (e) { state.mnMedBusq = { m, error: e && e.code === "sin_base_medidor" ? "Falta cargar la carpeta ECRF_BASE_MEDIDOR en el Drive" : msgError(e) }; }
+      if (state.vista === "PLANO_GIS") renderPlano();
+    };
     const buscar = async () => {
+      if ((state.mnModo || "nis") === "med") return buscarMedidor();
       const v = inp.value.replace(/\D/g, "").slice(0, 7); state.mnQuery = v;
       if (v.length !== 7) { renderPlano(); return; }
       if (!nisLocal(v) && NIS_REMOTO[v] === undefined) { renderPlano(); await buscarNisServidor(v); }
       if (nisLocal(v)) { centrarEnNis(v); return; }
       if (state.vista === "PLANO_GIS") renderPlano();
     };
-    inp.oninput = () => { inp.value = inp.value.replace(/\D/g, "").slice(0, 7); precargarNis(inp.value); if (inp.value.length === 7) buscar(); };
+    inp.oninput = () => {
+      if ((state.mnModo || "nis") === "med") { state.mnMedQ = inp.value.toUpperCase(); return; }
+      inp.value = inp.value.replace(/\D/g, "").slice(0, 7); precargarNis(inp.value); if (inp.value.length === 7) buscar();
+    };
     inp.onkeydown = e => { if (e.key === "Enter") buscar(); };
     document.getElementById("mnBuscar").onclick = buscar;
-    document.querySelectorAll(".mnHist").forEach(b => b.onclick = () => { state.mnQuery = b.dataset.n; if (!nisLocal(b.dataset.n)) { inp.value = b.dataset.n; buscar(); } else centrarEnNis(b.dataset.n); });
+    document.querySelectorAll(".mnHist").forEach(b => b.onclick = () => { state.mnModo = "nis"; state.mnQuery = b.dataset.n; if (!nisLocal(b.dataset.n)) { inp.value = b.dataset.n; buscar(); } else centrarEnNis(b.dataset.n); });
     document.querySelectorAll(".mnAtajo").forEach(b => b.onclick = () => irAFormularioConNis(b.dataset.f, state.mnSel));
     document.getElementById("mnRuta").onchange = e => { state.mnVerRuta = e.target.checked; renderPlano(); };
     const bAg = document.getElementById("mnAgregar");
@@ -3810,7 +3839,7 @@
       <dl><dt>Dirección</dt><dd>${escA(d.direccion || "—")}</dd><dt>Localidad</dt><dd>${escA(d.urb || "—")}</dd>
         <dt>Distrito</dt><dd>${escA(d.distrito || "—")}</dd><dt>Sector</dt><dd>${escA(d.sector || "—")}</dd>${d.ccss ? `<dt>CCSS</dt><dd>${escA(d.ccss)}</dd>` : ""}</dl>
       ${c ? `<div class="mn-pop-com"><b>Datos comerciales</b>
-        <dl><dt>Diámetro medidor</dt><dd>${escA(conUnidad(c.dm, "mm"))}</dd><dt>Diámetro conex.</dt><dd>${escA(conUnidad(c.dc, "mm"))}</dd>
+        <dl><dt>N° medidor</dt><dd>${escA(c.med || "Sin medidor")}</dd><dt>Diámetro medidor</dt><dd>${escA(conUnidad(c.dm, "mm"))}</dd><dt>Diámetro conex.</dt><dd>${escA(conUnidad(c.dc, "mm"))}</dd>
           <dt>Frecuencia</dt><dd>${escA(c.fr || "—")}</dd><dt>Horas abastec.</dt><dd>${escA(conUnidad(c.hp, "h"))}</dd></dl></div>` : ""}
       <div class="mn-pop-at">${atajo("GPFO0381", "Toma de presiones")}${atajo("GPFO0405", "Verificación de reparación")}${atajo("GPFO0416", "Verificación por muestreo")}</div>
     </div>`;
@@ -3866,7 +3895,7 @@
       // lo encontrado queda guardado como cualquier NIS consultado (sirve sin internet y para los formularios)
       (n.items || []).forEach(x => {
         if (NIS_REMOTO[x.nis] === undefined || NIS_REMOTO[x.nis] === null) NIS_REMOTO[x.nis] = datosNis(x);
-        if (x.dm !== undefined) NIS_COM[x.nis] = { dm: x.dm, dc: x.dc, fr: x.fr, hp: x.hp };
+        if (x.dm !== undefined) NIS_COM[x.nis] = { dm: x.dm, dc: x.dc, fr: x.fr, hp: x.hp, med: x.med || "" };
       });
       guardarCacheNis();
       nd.nis = n.items || []; nd.totalNis = n.total || nd.nis.length;
@@ -4818,6 +4847,9 @@
       .mn-pop{font:14px Roboto,Arial,sans-serif;color:#0F1B2D}
       .mn-pop-tit{font-weight:800;font-size:16px;color:#03204C;margin-bottom:6px}.mn-pop-tit span{font-size:12px;font-weight:700;color:#12613B;background:#DDF3E7;border-radius:6px;padding:2px 6px;margin-left:4px}
       .mn-pop dl{display:grid;grid-template-columns:auto 1fr;gap:3px 10px;margin:0 0 8px}
+      .mn-modo{display:inline-flex;border:1.5px solid var(--line);border-radius:10px;overflow:hidden}
+      .mn-modo button{padding:6px 12px;font-size:13px;font-weight:700;color:var(--ink-soft);background:#fff}
+      .mn-modo button[aria-pressed="true"]{background:#03204C;color:#fff}
       .mn-pop-com{background:#F4F8FC;border:1px solid #CFE3F3;border-radius:10px;padding:6px 10px;margin:0 0 8px}
       .mn-pop-com>b{display:block;font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:#0B5FA5;margin-bottom:4px}
       .mn-pop-com dl{margin:0}.mn-pop dt{color:#4A5A6E;font-size:12px;font-weight:700}.mn-pop dd{margin:0;font-weight:600}
