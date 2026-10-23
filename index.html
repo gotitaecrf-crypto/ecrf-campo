@@ -56,6 +56,17 @@
     background: transparent; color: var(--brand); border: 1px solid var(--brand);
     border-radius: 12px; padding: 12px 16px; font-weight: 600;
   }
+  /* campo que no se puede modificar (datos de la base de NIS, fecha y hora automáticas) */
+  .input-ro { background: #EEF2F6 !important; color: #334155; border-color: #D5DEE8 !important; display: flex; align-items: center; gap: 6px; min-height: 48px; }
+  .input-ro::before { content: "🔒"; font-size: 12px; opacity: .65; }
+  input.input-ro::before { content: none; }
+  /* «Ver en mapa»: bloque propio debajo del último campo, sin montarse sobre «Sector» */
+  .btn-mapa { display: flex; width: 100%; align-items: center; justify-content: center; gap: 8px; margin-top: 16px; clear: both; position: relative; min-height: 48px; }
+  .ubi-sel { display: grid; gap: 8px; }
+  .ubi-tipo { display: grid; grid-template-columns: 1fr 1fr; border: 2px solid var(--brand-dark); border-radius: 12px; overflow: hidden; }
+  .ubi-tipo button { min-height: 46px; font-weight: 800; font-size: 15px; background: var(--card); color: var(--ink); border: 0; }
+  .ubi-tipo button[aria-pressed="true"] { background: var(--brand-dark); color: #fff; }
+  .ubiLista:disabled { opacity: .6; }
   .pin-dot {
     width: 16px; height: 16px; border-radius: 50%; border: 2px solid var(--brand); background: transparent;
   }
@@ -574,7 +585,7 @@
   const esSupervisor = () => false;
   function misPendientes() {
     const hoy = aplicarOrden(state.pendientes);   // orden de "Ordenar por cercanía" si se usó; si no, por fecha de carga
-    const delForm = hoy.filter(p => formDe(p) === (state.form || "GPFO0381") && esDeHoy(p));
+    const delForm = hoy.filter(p => (!p.form || formDe(p) === (state.form || "GPFO0381")) && esDeHoy(p));   // sin formulario: va en los 3
     return esSupervisor() ? delForm : delForm.filter(p => p.para === state.operario);
   }
   // La ruta es del día: un NIS agregado el lunes vale todo el lunes y el martes ya no aparece (ni en el celular ni en el servidor)
@@ -1060,7 +1071,7 @@
     state.fecha = todayISO();
     state.hora = nowHM();
     state.codigoSgio = ""; state.fechaDeteccion = ""; state.ubicacion = ""; state.caudal = "";
-    state.fechaVerif = todayISO(); state.horaVerif = nowHM(); state.situacion = "Reparada";
+    state.fechaVerif = todayISO(); state.horaVerif = nowHM(); state.situacion = "Reparada"; state.horaFijadaPara = null;
     state.m = { tecnico: "", cFecha: "", cUbi: "", cPres: "", cCaudal: "", sFecha: todayISO(), sHora: nowHM(), sUbi: "", sPres: "", sCaudal: "" };
   }
 
@@ -1326,7 +1337,7 @@
   function urlMapa(lat, lon) { return "https://www.google.com/maps/search/?api=1&query=" + lat + "," + lon; }
   function botonMapa(o, id) {
     return o && o.latNis != null && o.lonNis != null
-      ? `<a id="${id}" href="${urlMapa(o.latNis, o.lonNis)}" target="_blank" rel="noopener" class="btn-ghost w-full mt-3 inline-flex items-center justify-center gap-2" style="text-decoration:none">📍 Ver en mapa</a>`
+      ? `<a id="${id}" href="${urlMapa(o.latNis, o.lonNis)}" target="_blank" rel="noopener" class="btn-ghost btn-mapa" style="text-decoration:none">📍 Ver en mapa</a>`
       : "";
   }
 
@@ -1395,12 +1406,35 @@
 `;
   }
 
+  // «Fuga ubicada en»: primero se elige Redes o Conexiones y luego la ubicación en la lista desplegable
+  function grupoUbicacion(sel, idBase) {
+    if (UBICACIONES_REDES.includes(sel)) return "redes";
+    if (UBICACIONES_CONEX.includes(sel)) return "conex";
+    return (state.ubiGrupo || {})[idBase] || "";
+  }
   function chipsUbicacion(sel, idBase) {
-    return `<div class="grid grid-cols-2 gap-2">${UBICACIONES_FUGA.map(u => `
-      <button type="button" class="ubiChip ${idBase}" data-u="${u}" aria-pressed="${sel === u}"
-        style="min-height:46px;border-radius:12px;font-weight:${sel === u ? 800 : 600};font-size:15px;
-               border:${sel === u ? "2px solid var(--brand-dark)" : "1.5px solid var(--line)"};
-               background:${sel === u ? "var(--brand-dark)" : "var(--card)"};color:${sel === u ? "#fff" : "var(--ink)"}">${u}</button>`).join("")}</div>`;
+    const g = grupoUbicacion(sel, idBase), lista = g === "redes" ? UBICACIONES_REDES : g === "conex" ? UBICACIONES_CONEX : [];
+    const antiguo = sel && !UBICACIONES_REDES.includes(sel) && !UBICACIONES_CONEX.includes(sel);   // valor de un registro anterior
+    return `<div class="ubi-sel">
+      <div class="ubi-tipo" role="group" aria-label="Tipo de fuga">${[["redes", "Redes"], ["conex", "Conexiones"]].map(([k, t]) => `
+        <button type="button" class="ubiTipo ${idBase}" data-base="${idBase}" data-g="${k}" aria-pressed="${g === k}">${t}</button>`).join("")}</div>
+      <select class="input ubiLista" id="${idBase}Sel" data-base="${idBase}" ${g ? "" : "disabled"} aria-label="Ubicación de la fuga">
+        <option value="">${g ? "Elige la ubicación…" : "Primero elige Redes o Conexiones"}</option>
+        ${antiguo ? `<option value="${escA(sel)}" selected>${escA(sel)} (registro anterior)</option>` : ""}
+        ${lista.map(u => `<option ${u === sel ? "selected" : ""}>${escA(u)}</option>`).join("")}
+      </select></div>`;
+  }
+  // conecta los botones y la lista: al cambiar el tipo se borra la ubicación elegida si no pertenece a ese tipo
+  function activarUbicacion(idBase, leer, poner, repintar) {
+    document.querySelectorAll(`.ubiTipo.${idBase}`).forEach(b => b.onclick = () => {
+      state.ubiGrupo = state.ubiGrupo || {}; state.ubiGrupo[idBase] = b.dataset.g;
+      const lista = b.dataset.g === "redes" ? UBICACIONES_REDES : UBICACIONES_CONEX;
+      if (!lista.includes(leer())) poner("");
+      repintar();
+      const s = document.getElementById(idBase + "Sel"); if (s) s.focus();
+    });
+    const s = document.getElementById(idBase + "Sel");
+    if (s) s.onchange = () => { poner(s.value); repintar(); };
   }
   function toggleSituacion(sel, idBase) {
     return `<div class="grid grid-cols-2" style="border:2px solid var(--brand-dark);border-radius:12px;overflow:hidden">
@@ -1437,8 +1471,8 @@
       <div class="card p-4 mb-4" style="border-left:6px solid var(--brand)">
         <div class="font-bold mb-3">SEDAPAL</div>
         <div class="grid grid-cols-2 gap-3 mb-3">
-          <div>${lbl("Fecha *")}<input id="f6sFecha" type="date" class="input" value="${escA(m.sFecha)}"></div>
-          <div>${lbl("Hora *")}<input id="f6sHora" type="time" class="input" value="${escA(m.sHora)}"></div>
+          <div>${lbl("Fecha")}<div id="f6sFecha" class="input input-ro" aria-readonly="true">${escA(dmy(m.sFecha))}</div></div>
+          <div>${lbl("Hora")}<div id="f6sHora" class="input input-ro" aria-readonly="true">${escA(m.sHora)}</div></div>
         </div>
         ${lbl("Fuga ubicada en *")}
         ${chipsUbicacion(m.sUbi, "f6sUbi")}
@@ -1471,13 +1505,12 @@
     });
     document.getElementById("f6Tecnico").onchange = e => { m.tecnico = e.target.value; ok(); };
     document.getElementById("f6cFecha").onchange = e => { m.cFecha = e.target.value; ok(); };
-    document.getElementById("f6sFecha").onchange = e => { m.sFecha = e.target.value; ok(); refrescarMarcas(); };
-    document.getElementById("f6sHora").onchange = e => { m.sHora = e.target.value; ok(); refrescarMarcas(); };
-    document.querySelectorAll(".f6cUbi").forEach(b => b.onclick = () => {
-      m.cUbi = b.dataset.u; if (!m.sUbi) m.sUbi = m.cUbi;    // SEDAPAL parte de lo que indicó la contratista
-      const y = window.scrollY; renderNuevo(); window.scrollTo(0, y);
-    });
-    document.querySelectorAll(".f6sUbi").forEach(b => b.onclick = () => { m.sUbi = b.dataset.u; const y = window.scrollY; renderNuevo(); window.scrollTo(0, y); });
+    const re6 = () => { const y = window.scrollY; renderNuevo(); window.scrollTo(0, y); };
+    activarUbicacion("f6cUbi", () => m.cUbi, v => {
+      m.cUbi = v;
+      if (v && !m.sUbi) { m.sUbi = v; state.ubiGrupo = state.ubiGrupo || {}; state.ubiGrupo.f6sUbi = grupoUbicacion(v, "f6cUbi"); }   // SEDAPAL parte de lo que indicó la contratista
+    }, re6);
+    activarUbicacion("f6sUbi", () => m.sUbi, v => { m.sUbi = v; }, re6);
   }
 
   function campos0405() {
@@ -1497,8 +1530,8 @@
       <div class="card p-4 mb-4">
         <div class="font-bold mb-3">Verificación</div>
         <div class="grid grid-cols-2 gap-3 mb-3">
-          <div>${lbl("Fecha de verificación *")}<input id="f5FechaVer" type="date" class="input" value="${escA(state.fechaVerif)}"></div>
-          <div>${lbl("Hora *")}<input id="f5HoraVer" type="time" class="input" value="${escA(state.horaVerif)}"></div>
+          <div>${lbl("Fecha de verificación")}<div id="f5FechaVer" class="input input-ro" aria-readonly="true">${escA(dmy(state.fechaVerif))}</div></div>
+          <div>${lbl("Hora")}<div id="f5HoraVer" class="input input-ro" aria-readonly="true">${escA(state.horaVerif)}</div></div>
         </div>
         ${lbl("Situación *")}
         ${toggleSituacion(state.situacion, "f5Sit")}
@@ -1509,14 +1542,19 @@
     const num = (id, campo, max) => { const el = document.getElementById(id); el.oninput = () => { el.value = el.value.replace(/\D/g, "").slice(0, max); state[campo] = el.value; ok(); }; };
     num("f5Codigo", "codigoSgio", 7); num("f5Caudal", "caudal", 6);
     document.getElementById("f5FechaDet").onchange = e => { state.fechaDeteccion = e.target.value; ok(); };
-    document.getElementById("f5FechaVer").onchange = e => { state.fechaVerif = e.target.value; ok(); refrescarMarcas(); };
-    document.getElementById("f5HoraVer").onchange = e => { state.horaVerif = e.target.value; ok(); refrescarMarcas(); };
     const re = () => { const y = window.scrollY; renderNuevo(); window.scrollTo(0, y); };
-    document.querySelectorAll(".f5Ubi").forEach(b => b.onclick = () => { state.ubicacion = b.dataset.u; re(); });
+    activarUbicacion("f5Ubi", () => state.ubicacion, v => { state.ubicacion = v; }, re);
     document.querySelectorAll(".f5Sit").forEach(b => b.onclick = () => { state.situacion = b.dataset.s; re(); });
   }
 
   function renderNuevo() {
+    if (state.nisSel && state.horaFijadaPara !== state.nisSel.nis) {
+      state.horaFijadaPara = state.nisSel.nis;
+      // campos que la base trae vacíos: son los únicos que el operario puede completar
+      state.nisVacios = ["direccion", "urb", "distrito", "sector"].filter(k => !String(state.nisSel[k] || "").trim());
+      if (state.form === "GPFO0405") { state.fechaVerif = todayISO(); state.horaVerif = nowHM(); }
+      if (state.form === "GPFO0416" && state.m) { state.m.sFecha = todayISO(); state.m.sHora = nowHM(); }
+    }
     const c = document.getElementById("tabContent");
     const matches = state.nisSel ? [] : matchNis(state.nisQuery);
     c.innerHTML = `
@@ -1530,17 +1568,19 @@
           <div class="flex items-center justify-between p-3 rounded-xl mb-3" style="background:var(--bg)">
             <div>
               <div class="font-bold text-lg">${escA(state.nisSel.nis)}</div>
-              <div class="text-xs" style="color:var(--ink-soft)">${state.nisSel.manual ? "No está en la base de datos: completa los datos a mano" : "Datos de la base de datos: revisa y corrige si hace falta"}</div>
+              <div class="text-xs" style="color:var(--ink-soft)">${state.nisSel.manual ? "No está en la base de datos: completa los datos a mano" : "Datos de la base de datos: no se pueden modificar"}</div>
             </div>
             <button id="btnLimpiarNis" class="text-sm font-semibold" style="color:var(--brand)">Cambiar</button>
           </div>
           ${state.nisSel.ccss ? `<div class="text-xs mb-1" style="color:var(--ink-soft)">Centro de servicio: <b>${escA(state.nisSel.ccss)}</b></div>` : ""}
-          ${[["direccion","Dirección","text"],["urb","Habilitación urbana / Urbanización","text"],["distrito","Distrito","text"],["sector","Sector","numeric"]].map(([k, lbl, t]) => `
+          ${[["direccion","Dirección","text"],["urb","Habilitación urbana / Urbanización","text"],["distrito","Distrito","text"],["sector","Sector","numeric"]].map(([k, lbl, t]) => {
+            const fijo = !state.nisSel.manual && !(state.nisVacios || []).includes(k);   // dato de la base: no se modifica
+            return `
             <label class="text-xs font-semibold block mb-1 mt-2" for="nis_${k}" style="color:var(--ink-soft)">${lbl}${k === "direccion" || k === "distrito" ? " *" : ""}</label>
-            <input id="nis_${k}" data-campo="${k}" class="input campoNis" type="text" ${t === "numeric" ? 'inputmode="numeric" pattern="[0-9]*" maxlength="4"' : ""}
+            ${fijo ? `<div id="nis_${k}" class="input input-ro" aria-readonly="true">${escA(state.nisSel[k])}</div>`
+              : `<input id="nis_${k}" data-campo="${k}" class="input campoNis" type="text" ${t === "numeric" ? 'inputmode="numeric" pattern="[0-9]*" maxlength="4"' : ""}
               value="${escA(state.nisSel[k])}" placeholder="${state.nisSel[k] ? "" : "Sin dato: escríbelo aquí"}" autocomplete="off"
-              style="${state.nisSel[k] ? "" : "border-color:var(--accent);border-width:2px"}">
-          `).join("")}
+              style="${state.nisSel[k] ? "" : "border-color:var(--accent);border-width:2px"}">`}`; }).join("")}
           ${botonMapa(state.nisSel, "btnMapaNis")}
         ` : `
           <input id="inpNis" class="input" type="text" inputmode="numeric" pattern="[0-9]*" maxlength="9" placeholder="Escribe el NIS (solo números)" value="${state.nisQuery}" autocomplete="off">
@@ -1666,6 +1706,11 @@
 
   function renderRuta() {
     const c = document.getElementById("tabContent");
+    if (state.rutaSel && state.rutaFijadoPara !== state.rutaSel.nis) {        // campos que la base trae vacíos: los únicos que se completan
+      state.rutaFijadoPara = state.rutaSel.nis;
+      state.rutaVacios = ["direccion", "urb", "distrito", "sector"].filter(k => !String(state.rutaSel[k] || "").trim());
+    }
+    if (!state.rutaSel) state.rutaFijadoPara = null;
     const q = state.rutaQuery;
     const matches = state.rutaSel ? [] : matchNis(q);
     const lista = misPendientes();
@@ -1683,9 +1728,10 @@
           </div>
           ${[["direccion","Dirección *"],["urb","Habilitación urbana / Urbanización"],["distrito","Distrito *"],["sector","Sector"]].map(([k, lbl]) => `
             <label class="text-xs font-semibold block mb-1 mt-2" for="ruta_${k}" style="color:var(--ink-soft)">${lbl}</label>
-            <input id="ruta_${k}" data-campo="${k}" class="input campoRuta" type="text" ${k === "sector" ? 'inputmode="numeric" pattern="[0-9]*" maxlength="4"' : ""}
+            ${!state.rutaSel.manual && !(state.rutaVacios || []).includes(k) ? `<div id="ruta_${k}" class="input input-ro" aria-readonly="true">${escA(state.rutaSel[k])}</div>`
+              : `<input id="ruta_${k}" data-campo="${k}" class="input campoRuta" type="text" ${k === "sector" ? 'inputmode="numeric" pattern="[0-9]*" maxlength="4"' : ""}
               value="${escA(state.rutaSel[k])}" placeholder="${state.rutaSel[k] ? "" : "Sin dato: escríbelo aquí"}" autocomplete="off"
-              style="${state.rutaSel[k] ? "" : "border-color:var(--accent);border-width:2px"}">
+              style="${state.rutaSel[k] ? "" : "border-color:var(--accent);border-width:2px"}">`}
           `).join("")}
           ${esSupervisor() ? `
             <label class="text-xs font-semibold block mb-1 mt-3" for="rutaPara" style="color:var(--ink-soft)">Asignar a</label>
@@ -1772,7 +1818,7 @@
         const r = state.rutaSel;
         if (!String(r.direccion).trim() || !String(r.distrito).trim()) { toast("Completa la dirección y el distrito", true); return; }
         const destino = esSupervisor() ? (document.getElementById("rutaPara") || {}).value || para : state.operario;
-        if (state.pendientes.some(p => p.nis === r.nis && p.para === destino && formDe(p) === state.form)) { toast("Ese NIS ya está en la ruta", true); return; }
+        if (state.pendientes.some(p => p.nis === r.nis && p.para === destino && (!p.form || p.form === state.form))) { toast("Ese NIS ya está en la ruta", true); return; }
         try {
           await agregarPendiente({ form: state.form, nis: r.nis, ccss: r.ccss || "", latNis: r.latNis ?? null, lonNis: r.lonNis ?? null, direccion: r.direccion.trim(), urb: String(r.urb).trim(), distrito: r.distrito.trim(),
                                    sector: String(r.sector).trim(), manual: !!r.manual, para: destino, preparadoPor: state.operario, creadoEn: Date.now() });
@@ -1874,6 +1920,7 @@
         state.edFotos = (r.fotos || []).map(id => ({ tipo: "asset", id, url: fotoUrl(id) }));
       }
       state.edUbi = r.ubicacion || ""; state.edSit = r.situacion || "Reparada";
+      state.edCUbi = r.ubicacionContratista || ""; state.edSUbi = r.ubicacionSedapal || ""; state.ubiGrupo = {};
       state.editId = r.id; renderLista();
     });
     const fe = document.getElementById("formEdicion");
@@ -1884,12 +1931,14 @@
       document.getElementById("edCancelar").onclick = () => { state.editId = null; renderLista(); };
       const releer = () => {   // conserva lo escrito al cambiar ubicación o situación
         const ids = ["ed_direccion","ed_urb","ed_distrito","ed_sector","ed_codigo","ed_fdet","ed_caudal","ed_fver",
-                     "ed_tec","ed_cfecha","ed_cubi","ed_cpres","ed_ccau","ed_sfecha","ed_subi","ed_spres","ed_scau","ed_hora"];
+                     "ed_tec","ed_cfecha","ed_cpres","ed_ccau","ed_sfecha","ed_spres","ed_scau","ed_hora"];
         const vals = Object.fromEntries(ids.map(i => [i, (document.getElementById(i) || {}).value]));
         renderLista();
         ids.forEach(i => { const el = document.getElementById(i); if (el && vals[i] !== undefined) el.value = vals[i]; });
       };
-      document.querySelectorAll(".edUbi").forEach(b => b.onclick = () => { state.edUbi = b.dataset.u; releer(); });
+      activarUbicacion("edUbi", () => state.edUbi, v => { state.edUbi = v; }, releer);
+      activarUbicacion("edCUbi", () => state.edCUbi, v => { state.edCUbi = v; }, releer);
+      activarUbicacion("edSUbi", () => state.edSUbi, v => { state.edSUbi = v; }, releer);
       document.querySelectorAll(".edSit").forEach(b => b.onclick = () => { state.edSit = b.dataset.s; releer(); });
       document.getElementById("edGuardar").onclick = async () => {
         const r = state.registros.find(x => x.id === state.editId); if (!r) return;
@@ -1899,8 +1948,8 @@
         const nuevo = es416 ? {
           direccion: v("ed_direccion"), urb: v("ed_urb"), distrito: v("ed_distrito"), sector: v("ed_sector"),
           codigoSgio: v("ed_codigo"), tecnico: v("ed_tec"),
-          fechaContratista: v("ed_cfecha"), ubicacionContratista: v("ed_cubi"), presionContratista: nn("ed_cpres"), caudalContratista: nn("ed_ccau"),
-          fechaSedapal: v("ed_sfecha"), ubicacionSedapal: v("ed_subi"), presionSedapal: nn("ed_spres"), caudalSedapal: nn("ed_scau"),
+          fechaContratista: v("ed_cfecha"), ubicacionContratista: state.edCUbi, presionContratista: nn("ed_cpres"), caudalContratista: nn("ed_ccau"),
+          fechaSedapal: v("ed_sfecha"), ubicacionSedapal: state.edSUbi, presionSedapal: nn("ed_spres"), caudalSedapal: nn("ed_scau"),
           hora: v("ed_hora")
         } : es405 ? {
           direccion: v("ed_direccion"), urb: v("ed_urb"), distrito: v("ed_distrito"), sector: v("ed_sector"),
@@ -1911,7 +1960,7 @@
           presion: v("ed_presion") === "" ? "" : Number(v("ed_presion")), fecha: v("ed_fecha"), hora: v("ed_hora") };
         if (!nuevo.direccion || !nuevo.distrito) { toast("La dirección y el distrito son obligatorios", true); return; }
         if (es416) {
-          if (!nuevo.codigoSgio || !nuevo.tecnico || !nuevo.fechaContratista || !nuevo.fechaSedapal ||
+          if (!nuevo.codigoSgio || !nuevo.tecnico || !nuevo.fechaContratista || !nuevo.fechaSedapal || !nuevo.ubicacionContratista || !nuevo.ubicacionSedapal ||
               [nuevo.presionContratista, nuevo.caudalContratista, nuevo.presionSedapal, nuevo.caudalSedapal].some(x => x === "")) {
             toast("Completa los campos obligatorios", true); return;
           }
@@ -1997,17 +2046,20 @@
   function formEdicion(r) {
     const campo = (id, lbl, val, extra = "") => `
       <label class="text-xs font-semibold block mb-1 mt-2" for="${id}" style="color:var(--ink-soft)">${lbl}</label>
-      <input id="${id}" class="input" value="${escA(val)}" autocomplete="off" ${extra}>`;
+      <input id="${id}" class="input${/readonly/.test(extra) ? " input-ro" : ""}" value="${escA(val)}" autocomplete="off" ${extra}>`;
+    // datos del NIS que vienen de la base y fecha/hora automáticas: no se modifican
+    const fijoNis = v => !r.datosManual && String(v || "").trim() ? "readonly" : "";
+    const RO = 'readonly tabindex="-1"';
     return `
       <div class="card p-4 mb-3" id="formEdicion" style="border:2px solid var(--brand)">
         <div class="font-bold">Editar NIS ${escA(r.nis)}</div>
         <div class="text-xs mb-1" style="color:var(--ink-soft)">El cambio queda anotado (qué se cambió, quién y cuándo).</div>
-        ${campo("ed_direccion", "Dirección *", r.direccion)}
-        ${campo("ed_urb", "Habilitación urbana / Urbanización", r.urb)}
-        ${campo("ed_distrito", "Distrito *", r.distrito)}
+        ${campo("ed_direccion", "Dirección *", r.direccion, fijoNis(r.direccion))}
+        ${campo("ed_urb", "Habilitación urbana / Urbanización", r.urb, fijoNis(r.urb))}
+        ${campo("ed_distrito", "Distrito *", r.distrito, fijoNis(r.distrito))}
         ${formDe(r) === "GPFO0416" ? `
         <div class="grid grid-cols-2 gap-3">
-          <div>${campo("ed_sector", "Sector", r.sector, 'inputmode="numeric" data-num="4"')}</div>
+          <div>${campo("ed_sector", "Sector", r.sector, 'inputmode="numeric" data-num="4" ' + fijoNis(r.sector))}</div>
           <div>${campo("ed_codigo", "Código SGIO *", r.codigoSgio, 'inputmode="numeric" data-num="7"')}</div>
         </div>
         <label class="text-xs font-semibold block mb-1 mt-2" for="ed_tec" style="color:var(--ink-soft)">Técnico a cargo *</label>
@@ -2015,36 +2067,34 @@
         <div class="font-bold text-sm mt-3">Contratista</div>
         <div class="grid grid-cols-2 gap-3">
           <div>${campo("ed_cfecha", "Fecha *", r.fechaContratista, 'type="date"')}</div>
-          <div><label class="text-xs font-semibold block mb-1 mt-2" for="ed_cubi" style="color:var(--ink-soft)">Fuga ubicada en *</label>
-            <select id="ed_cubi" class="input">${UBICACIONES_FUGA.map(u => `<option ${u === r.ubicacionContratista ? "selected" : ""}>${u}</option>`).join("")}</select></div>
+          <div style="grid-column:1/-1"><div class="text-xs font-semibold mb-1 mt-2" style="color:var(--ink-soft)">Fuga ubicada en *</div>${chipsUbicacion(state.edCUbi, "edCUbi")}</div>
           <div>${campo("ed_cpres", "Presión (mca) *", r.presionContratista, 'inputmode="numeric" data-num="3"')}</div>
           <div>${campo("ed_ccau", "Caudal (L/día) *", r.caudalContratista, 'inputmode="numeric" data-num="6"')}</div>
         </div>
         <div class="font-bold text-sm mt-3">SEDAPAL</div>
         <div class="grid grid-cols-2 gap-3">
-          <div>${campo("ed_sfecha", "Fecha *", r.fechaSedapal, 'type="date"')}</div>
-          <div>${campo("ed_hora", "Hora *", r.hora, 'type="time"')}</div>
-          <div><label class="text-xs font-semibold block mb-1 mt-2" for="ed_subi" style="color:var(--ink-soft)">Fuga ubicada en *</label>
-            <select id="ed_subi" class="input">${UBICACIONES_FUGA.map(u => `<option ${u === r.ubicacionSedapal ? "selected" : ""}>${u}</option>`).join("")}</select></div>
+          <div>${campo("ed_sfecha", "Fecha", r.fechaSedapal, 'type="date" ' + RO)}</div>
+          <div>${campo("ed_hora", "Hora", r.hora, 'type="time" ' + RO)}</div>
+          <div style="grid-column:1/-1"><div class="text-xs font-semibold mb-1 mt-2" style="color:var(--ink-soft)">Fuga ubicada en *</div>${chipsUbicacion(state.edSUbi, "edSUbi")}</div>
           <div>${campo("ed_spres", "Presión (mca) *", r.presionSedapal, 'inputmode="numeric" data-num="3"')}</div>
           <div>${campo("ed_scau", "Caudal (L/día) *", r.caudalSedapal, 'inputmode="numeric" data-num="6"')}</div>
         </div>
         <div class="text-xs mt-2" style="color:var(--ink-soft)">La variación y el error se recalculan solos al guardar.</div>` :
         formDe(r) === "GPFO0405" ? `
         <div class="grid grid-cols-2 gap-3">
-          <div>${campo("ed_sector", "Sector", r.sector, 'inputmode="numeric" data-num="4"')}</div>
+          <div>${campo("ed_sector", "Sector", r.sector, 'inputmode="numeric" data-num="4" ' + fijoNis(r.sector))}</div>
           <div>${campo("ed_codigo", "Código SGIO *", r.codigoSgio, 'inputmode="numeric" data-num="7"')}</div>
           <div>${campo("ed_fdet", "Fecha de detección *", r.fechaDeteccion, 'type="date"')}</div>
           <div>${campo("ed_caudal", "Caudal (L/día) *", r.caudal, 'inputmode="numeric" data-num="6"')}</div>
-          <div>${campo("ed_fver", "Fecha de verificación *", r.fechaVerificacion, 'type="date"')}</div>
-          <div>${campo("ed_hora", "Hora *", r.hora, 'type="time"')}</div>
+          <div>${campo("ed_fver", "Fecha de verificación", r.fechaVerificacion, 'type="date" ' + RO)}</div>
+          <div>${campo("ed_hora", "Hora", r.hora, 'type="time" ' + RO)}</div>
         </div>
         <div class="text-xs font-semibold mt-3 mb-1" style="color:var(--ink-soft)">Ubicación de la fuga *</div>
         ${chipsUbicacion(state.edUbi, "edUbi")}
         <div class="text-xs font-semibold mt-3 mb-1" style="color:var(--ink-soft)">Situación *</div>
         ${toggleSituacion(state.edSit, "edSit")}` : `
         <div class="grid grid-cols-2 gap-3">
-          <div>${campo("ed_sector", "Sector", r.sector, 'inputmode="numeric" data-num="4"')}</div>
+          <div>${campo("ed_sector", "Sector", r.sector, 'inputmode="numeric" data-num="4" ' + fijoNis(r.sector))}</div>
           <div>${campo("ed_presion", "Presión (mca) *", r.presion, 'inputmode="numeric" data-num="3"')}</div>
           <div>${campo("ed_fecha", "Fecha *", r.fecha, 'type="date"')}</div>
           <div>${campo("ed_hora", "Hora *", r.hora, 'type="time"')}</div>
@@ -2159,7 +2209,8 @@
   const ICO_0405 = `<svg width="44" height="44" viewBox="0 0 48 48" aria-hidden="true"><rect x="4" y="26" width="40" height="12" rx="6" fill="#0B5FA5" stroke="#03204C" stroke-width="2.5"/><rect x="18" y="23" width="12" height="18" rx="3" fill="#33B1E4" stroke="#03204C" stroke-width="2.5"/><path d="M30 6a8 8 0 0 0-7 11l-9 9 4 4 9-9a8 8 0 0 0 11-7l-5 3-4-1-1-4z" fill="#F2A900" stroke="#03204C" stroke-width="2.2" stroke-linejoin="round"/><path d="M36 30l3 3 6-7" fill="none" stroke="#17804E" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
   const ICO_0416 = `<svg width="44" height="44" viewBox="0 0 48 48" aria-hidden="true"><circle cx="20" cy="20" r="13" fill="#E1F3FB" stroke="#03204C" stroke-width="3"/><path d="M30 30l11 11" stroke="#03204C" stroke-width="5" stroke-linecap="round"/><path d="M20 11s-6 7-6 11a6 6 0 0 0 12 0c0-4-6-11-6-11z" fill="#33B1E4" stroke="#0B5FA5" stroke-width="2"/></svg>`;
 
-  const UBICACIONES_FUGA = ["Corp", "Linea A/CAJA", "Linea D/CAJA", "Caja A/MEDIDOR", "Caja D/MEDIDOR", "Otra"];
+  const UBICACIONES_REDES = ["Tubería", "Válvula de red", "Válvula de hidrante", "Hidrante"];
+  const UBICACIONES_CONEX = ["Corporation", "Línea A/Caja", "Línea D/Caja", "Caja A/Med", "Caja D/Med", "Medidor"];
   const FORM_INFO = {
     GPFO0381: { titulo: "Toma de Presiones", icono: px => mano(px, false), falta: "solo falta la presión y la foto" },
     GPFO0405: { titulo: "Verificación de Reparación", icono: px => `<span style="display:grid;place-items:center;width:${px}px;height:${px}px;background:#fff;border-radius:12px">${ICO_0405}</span>`,
@@ -3454,7 +3505,7 @@
           ▶ Abrir en Google Maps${tramos.length > 1 ? ` · tramo ${i + 1} (paradas ${i * PARADAS_TRAMO + 1}–${i * PARADAS_TRAMO + t.length})` : ""}
         </a>`).join("")}
       <div class="text-xs mt-2 mb-1 font-semibold" style="color:var(--ink-soft)">Orden de visita</div>
-      ${conCoord.map((p, i) => `<div class="text-sm py-1" style="border-bottom:1px solid #EEF2F6"><b>${i + 1}.</b> NIS ${escA(p.nis)} · ${escA(p.direccion || "")} <span style="color:var(--ink-soft)">· ${escA(FORM_CORTO[formDe(p)] || "")}${esSupervisor() ? " · " + escA(p.para) : ""}</span></div>`).join("")}
+      ${conCoord.map((p, i) => `<div class="text-sm py-1" style="border-bottom:1px solid #EEF2F6"><b>${i + 1}.</b> NIS ${escA(p.nis)} · ${escA(p.direccion || "")} <span style="color:var(--ink-soft)">· ${escA(p.form ? FORM_CORTO[p.form] || "" : "")}${esSupervisor() ? " · " + escA(p.para) : ""}</span></div>`).join("")}
       ${sinCoord.length ? `<div class="text-xs mt-3 p-2 rounded-lg" style="background:#FFF1C7;color:#6B4A00"><b>Sin ubicación en la base (no salen en el mapa):</b><br>${sinCoord.map(p => "NIS " + escA(p.nis) + " · " + escA(p.direccion || "")).join("<br>")}</div>` : ""}`;
     const bOrd = document.getElementById("mapaOrdenar");
     if (bOrd) bOrd.onclick = () => {
@@ -3477,7 +3528,7 @@
       const icono = L.divIcon({ className: "", iconSize: [30, 30], iconAnchor: [15, 15],
         html: `<div style="width:30px;height:30px;border-radius:50%;background:#03204C;color:#fff;border:2px solid #fff;box-shadow:0 2px 6px rgba(0,0,0,.4);display:flex;align-items:center;justify-content:center;font:700 13px Roboto,Arial,sans-serif">${i + 1}</div>` });
       L.marker([p.lat, p.lon], { icon: icono }).addTo(mapaL)
-        .bindPopup(`<b>${i + 1}. NIS ${escA(p.nis)}</b><br>${escA(p.direccion || "")}<br><small>${escA(p.urb || "")} ${escA(p.distrito || "")} · ${escA(FORM_CORTO[formDe(p)] || "")}</small><br><a href="https://www.google.com/maps/dir/?api=1&destination=${p.lat},${p.lon}" target="_blank" rel="noopener">Ir solo a este punto</a>`);
+        .bindPopup(`<b>${i + 1}. NIS ${escA(p.nis)}</b><br>${escA(p.direccion || "")}<br><small>${escA(p.urb || "")} ${escA(p.distrito || "")} · ${escA(p.form ? FORM_CORTO[p.form] || "" : "")}</small><br><a href="https://www.google.com/maps/dir/?api=1&destination=${p.lat},${p.lon}" target="_blank" rel="noopener">Ir solo a este punto</a>`);
       limites.push([p.lat, p.lon]);
     });
     if (conCoord.length > 1) L.polyline(conCoord.map(p => [p.lat, p.lon]), { color: "#33B1E4", weight: 3, dashArray: "6 6" }).addTo(mapaL);
@@ -3803,7 +3854,7 @@
     const bAg = document.getElementById("mnAgregar");
     if (bAg) bAg.onclick = async () => {
       const form = document.getElementById("mnForm").value, para = esSupervisor() ? document.getElementById("mnPara").value : state.operario;
-      if (state.pendientes.some(p => p.nis === state.mnSel && p.para === para && formDe(p) === form)) { toast("Ese NIS ya está en la ruta", true); return; }
+      if (state.pendientes.some(p => p.nis === state.mnSel && p.para === para && (!p.form || p.form === form))) { toast("Ese NIS ya está en la ruta", true); return; }
       await agregarPendiente({ form, nis: state.mnSel, ccss: sel.ccss || "", latNis: sel.latNis ?? null, lonNis: sel.lonNis ?? null, direccion: sel.direccion || "", urb: sel.urb || "", distrito: sel.distrito || "",
                                sector: String(sel.sector || ""), manual: false, para, preparadoPor: state.operario, creadoEn: Date.now() });
       toast("NIS " + state.mnSel + " agregado a la ruta" + (para !== state.operario ? " de " + para : ""));
@@ -3957,7 +4008,7 @@
     if (u) L.marker([u.lat, u.lon], { icon: ICONO_AQUI(), interactive: false, keyboard: false, zIndexOffset: 1000 }).addTo(replicaL);
     // mi ruta (opcional)
     if (state.mnVerRuta) aplicarOrden(paradasRuta()).filter(p => p.lat != null).forEach((p, i) => {
-      L.marker([p.lat, p.lon], { icon: pinNum(i + 1, "#5B6B7F") }).addTo(replicaL).bindPopup(`<b>${i + 1}. NIS ${escA(p.nis)}</b><br>${escA(p.direccion || "")}<br><small>${escA(FORM_CORTO[formDe(p)] || "")}</small>`);
+      L.marker([p.lat, p.lon], { icon: pinNum(i + 1, "#5B6B7F") }).addTo(replicaL).bindPopup(`<b>${i + 1}. NIS ${escA(p.nis)}</b><br>${escA(p.direccion || "")}<br><small>${escA(p.form ? FORM_CORTO[p.form] || "" : "")}</small>`);
     });
     // NIS elegido: alfiler con su ventana
     let pinSel = null;
@@ -4216,6 +4267,10 @@
      La ruta es del día: cada operario la planifica en la mañana y al día siguiente empieza vacía (ver rutaDeHoy).
      Orden de la pantalla: 1) NIS de mi ruta  2) calcular la ruta óptima (1, 2, 3… y Google Maps)  3) el mapa. */
   const claveCalculo = () => "ecrf_ruta_calc_" + (state.operario || "") + "_" + todayISO();
+  const claveRutaInfo = () => "ecrf_ruta_info_" + (state.operario || "") + "_" + todayISO();
+  const fmtMin = m => m == null ? "—" : m < 60 ? Math.round(m) + " min" : Math.floor(m / 60) + " h " + String(Math.round(m % 60)).padStart(2, "0") + " min";
+  // Waze solo acepta un destino por enlace (no varias paradas): se abre la parada indicada
+  const urlWaze = p => p ? "https://waze.com/ul?ll=" + Number(p.lat).toFixed(6) + "%2C" + Number(p.lon).toFixed(6) + "&navigate=yes" : "#";
   function renderPlanificador() {
     const todas = aplicarOrden(paradasRuta());
     const con = todas.filter(p => p.lat != null && p.lon != null), sin = todas.filter(p => p.lat == null || p.lon == null);
@@ -4223,6 +4278,10 @@
     // ¿ya se calculó la ruta con los NIS que hay ahora? (si se agregó uno después, hay que volver a calcular)
     const calc = leerLS(claveCalculo(), []);
     const calculada = con.length > 0 && con.every(p => calc.includes(p.id));
+    // datos de la ruta por calles (distancia y tiempo de cada tramo); valen mientras el orden sea el calculado
+    const info = leerLS(claveRutaInfo(), null);
+    const porCalles = calculada && info && info.orden && info.orden.join() === con.map(p => p.id).join();
+    const tramoDe = id => porCalles && info.tramos ? info.tramos.find(t => t.id === id) : null;
     let total = 0; con.forEach((p, i) => { total += i ? distKm(con[i - 1], p) : yo ? distKm(yo, p) : 0; });
     const tramos = []; for (let i = 0; i < con.length; i += PARADAS_TRAMO) tramos.push(con.slice(i, i + PARADAS_TRAMO));
     const q = state.plQuery || "", r = q.length === 7 ? (NIS_REMOTO[q] || nisLocal(q)) : null, est = q.length === 7 ? estadoBusqueda(q) : "";
@@ -4234,10 +4293,7 @@
         <div class="card p-4">
           <div class="pl-paso"><span>1</span><b>NIS de mi ruta de hoy</b></div>
           <div class="text-xs mb-3" style="color:var(--ink-soft)">Ruta del <b>${escA(hoyTxt)}</b>. Planifica solo lo de hoy: mañana la ruta empieza vacía.</div>
-          <div class="flex gap-2">
-            <input id="plNis" class="input" inputmode="numeric" maxlength="7" placeholder="NIS de 7 dígitos" value="${escA(q)}" autocomplete="off">
-            <select id="plForm" class="input" style="width:auto"><option value="GPFO0381">0381</option><option value="GPFO0405">0405</option><option value="GPFO0416">0416</option></select>
-          </div>
+          <input id="plNis" class="input" inputmode="numeric" maxlength="7" placeholder="NIS de 7 dígitos" value="${escA(q)}" autocomplete="off">
           <div class="text-sm mt-2" style="color:var(--ink-soft)">${
             r ? `<b style="color:var(--ink)">${escA(r.direccion || "")}</b> · ${escA(r.distrito || "")} · Sector ${escA(r.sector || "")}${r.latNis == null ? " · <span style='color:#6B4A00'>sin coordenadas</span>" : ""}`
             : est === "buscando" ? "Buscando en la base…" : est === "noexiste" ? `<span style="color:var(--danger);font-weight:600">No está en la base de NIS.</span>` : est === "sinred" ? "Sin internet." : "Se completa con la base de NIS."}</div>
@@ -4245,14 +4301,13 @@
           <div class="gis-lbl mt-4">NIS seleccionados (${todas.length})</div>
           ${todas.length ? `<div class="pl-nis-grid">${todas.map(p => `
             <div class="pl-nis">
-              <div class="min-w-0 flex-1"><b>NIS ${escA(p.nis)}</b> <span class="pl-form">${escA(FORM_CORTO[formDe(p)] || "")}</span>
+              <div class="min-w-0 flex-1"><b>NIS ${escA(p.nis)}</b>${p.form ? ` <span class="pl-form">${escA(FORM_CORTO[p.form] || "")}</span>` : ""}
                 <div class="text-sm" style="color:var(--ink-soft)">${escA(p.direccion || "")}</div>
                 <div class="text-xs" style="color:var(--ink-soft)">${escA(p.distrito || "")}${p.lat == null ? " · <span style='color:#6B4A00'>sin coordenadas</span>" : ""}</div>
                 ${state.plQuitar === p.id ? `<div class="flex gap-2 mt-2" style="flex-wrap:wrap"><span class="text-sm" style="font-weight:600">¿Quitar?</span><button class="gis-chip plSi" data-id="${p.id}" style="border-color:var(--danger);color:var(--danger)">Sí, quitar</button><button class="gis-chip plNo">No</button></div>` : ""}
               </div>
               <div class="pl-acc">
-                <button class="pl-btn plReg" data-id="${p.id}" aria-label="Registrar formulario" title="Registrar">✎</button>
-                <button class="pl-btn plQuitar" data-id="${p.id}" aria-label="Quitar" style="color:var(--danger)">✕</button>
+                <button class="pl-btn plQuitar" data-id="${p.id}" aria-label="Quitar" title="Quitar de la ruta" style="color:var(--danger)">✕</button>
               </div>
             </div>`).join("")}</div>`
           : `<div class="text-sm" style="color:var(--ink-soft)">Aún no hay NIS en tu ruta de hoy.</div>`}
@@ -4263,21 +4318,24 @@
         <div class="card p-4 mt-3" id="plCalcCard">
           <div class="pl-paso"><span>2</span><b>Ruta óptima</b></div>
           <button id="plOrdenar" class="btn-primary w-full" ${con.length ? "" : "disabled"}>${calculada ? "↻ Volver a calcular la ruta óptima" : "Calcular ruta óptima"}</button>
-          <div class="text-xs mt-2" style="color:var(--ink-soft)">${!con.length ? "Agrega NIS con coordenadas para calcular la ruta." : calculada ? "Orden de visita desde tu ubicación. Puedes ajustarlo con ↑ ↓." : calc.length ? `<span style="color:#6B4A00;font-weight:600">Agregaste NIS después del cálculo: vuelve a calcular la ruta.</span>` : "Ordena tus NIS desde tu ubicación GPS para recorrer la menor distancia."}</div>
+          <div class="text-xs mt-2" style="color:var(--ink-soft)">${!con.length ? "Agrega NIS con coordenadas para calcular la ruta." : calculada ? (porCalles ? (info.fuente === "google" ? `Calculada <b>por calles con Google Maps</b>${info.conTrafico ? " y el <b>tráfico del momento</b>" : ""}, desde tu ubicación.` : info.fuente === "osrm" ? "Calculada <b>por calles</b> (servicio OSRM, sin tráfico), desde tu ubicación." : "Sin conexión al servicio de rutas: ordenada por distancia en línea recta.") : "Orden ajustado a mano: las distancias son en línea recta.") + " Puedes ajustarlo con ↑ ↓." : calc.length ? `<span style="color:#6B4A00;font-weight:600">Agregaste NIS después del cálculo: vuelve a calcular la ruta.</span>` : "Ordena tus NIS por las calles, desde tu ubicación GPS y con el tráfico del momento."}</div>
           ${calculada ? `
           <div class="gis-kpis mt-3">
             <div class="rd-dato"><small>Paradas</small><b>${con.length}</b></div>
-            <div class="rd-dato"><small>Recorrido aprox.</small><b>${fmtKm(total)}</b></div>
-            <div class="rd-dato"><small>Inicio</small><b>${yo ? "Tu GPS" : "1.ª parada"}</b></div>
+            <div class="rd-dato"><small>${porCalles && info.fuente !== "linea" ? "Recorrido por calles" : "Recorrido aprox."}</small><b>${porCalles && info.fuente !== "linea" ? fmtKm(info.km) : fmtKm(total)}</b></div>
+            <div class="rd-dato"><small>${porCalles && info.conTrafico ? "Tiempo con tráfico" : "Tiempo estimado"}</small><b>${porCalles && info.min ? fmtMin(info.min) : "—"}</b></div>
           </div>
           ${tramos.map((t, i) => `<a href="${urlTramo(t)}" target="_blank" rel="noopener" class="btn-primary w-full mt-2 plGmaps" style="display:flex;justify-content:center;text-decoration:none;background:#1E9E4A">▶ Abrir en Google Maps${tramos.length > 1 ? ` · tramo ${i + 1} (paradas ${i * PARADAS_TRAMO + 1}–${i * PARADAS_TRAMO + t.length})` : ""}</a>`).join("")}
+          <a href="${urlWaze(con[0])}" target="_blank" rel="noopener" class="btn-primary w-full mt-2 plWaze" style="display:flex;justify-content:center;text-decoration:none;background:#33CCFF;color:#04294A">▶ Abrir en Waze · parada 1 (NIS ${escA(con[0].nis)})</a>
+          <div class="text-xs mt-1" style="color:var(--ink-soft)">Waze solo acepta un destino a la vez: al llegar, abre la siguiente parada con su botón <b>Waze</b> de la lista.</div>
           <ol class="pl-lista mt-3">${con.map((p, i) => {
-            const d = i > 0 ? distKm(con[i - 1], p) : yo ? distKm(yo, p) : null;
+            const d = i > 0 ? distKm(con[i - 1], p) : yo ? distKm(yo, p) : null, t = tramoDe(p.id);
             return `<li class="pl-item">
               <span class="pl-num" style="background:#03204C">${i + 1}</span>
-              <div class="min-w-0 flex-1"><b>NIS ${escA(p.nis)}</b> <span class="pl-form">${escA(FORM_CORTO[formDe(p)] || "")}</span>
+              <div class="min-w-0 flex-1"><b>NIS ${escA(p.nis)}</b>${p.form ? ` <span class="pl-form">${escA(FORM_CORTO[p.form] || "")}</span>` : ""}
                 <div class="text-sm" style="color:var(--ink-soft)">${escA(p.direccion || "")}${p.distrito ? " · " + escA(p.distrito) : ""}</div>
-                <div class="text-xs" style="color:var(--ink-soft)">${d != null ? (i === 0 ? "Desde tu ubicación: " : "Desde la anterior: ") + fmtKm(d) : ""}</div>
+                <div class="text-xs" style="color:var(--ink-soft)">${t && info.fuente !== "linea" ? (i === 0 ? "Desde tu ubicación: " : "Desde la anterior: ") + fmtKm(t.km) + " · " + fmtMin(t.min) : d != null ? (i === 0 ? "Desde tu ubicación: " : "Desde la anterior: ") + fmtKm(d) + " en línea recta" : ""}</div>
+                <a href="${urlWaze(p)}" target="_blank" rel="noopener" class="pl-waze">Waze ▸</a>
               </div>
               <div class="pl-acc">
                 <button class="pl-btn plSube" data-id="${p.id}" aria-label="Subir" ${i === 0 ? "disabled" : ""}>↑</button>
@@ -4299,24 +4357,35 @@
     };
     document.getElementById("plAgregar").onclick = async () => {
       if (!r) return;
-      const form = document.getElementById("plForm").value, para = state.operario;
-      if (paradasRuta().some(p => p.nis === q && formDe(p) === form)) { toast("Ese NIS ya está en tu ruta de hoy", true); return; }
-      await agregarPendiente({ form, nis: q, ccss: r.ccss || "", latNis: r.latNis ?? null, lonNis: r.lonNis ?? null, direccion: r.direccion || "", urb: r.urb || "", distrito: r.distrito || "",
+      const para = state.operario;
+      if (paradasRuta().some(p => p.nis === q)) { toast("Ese NIS ya está en tu ruta de hoy", true); return; }
+      await agregarPendiente({ form: "", nis: q, ccss: r.ccss || "", latNis: r.latNis ?? null, lonNis: r.lonNis ?? null, direccion: r.direccion || "", urb: r.urb || "", distrito: r.distrito || "",
                                sector: String(r.sector || ""), manual: false, para, preparadoPor: state.operario, creadoEn: Date.now() });
       state.plQuery = ""; toast("NIS " + q + " agregado a tu ruta de hoy"); renderPlanificador();
     };
     const guardarOrden = lista => { const resto = leerLS(claveOrden(), []).filter(id => !lista.includes(id)); guardarLS(claveOrden(), lista.concat(resto)); };
-    // calcular: ordena por cercanía desde el GPS (primero la última posición conocida; si hay una lectura nueva, se usa esa)
+    // calcular: el servidor ordena las paradas por las calles reales (Google, con el tráfico del momento; si no, OSRM).
+    // Sin conexión, se ordena por cercanía en línea recta.
     document.getElementById("plOrdenar").onclick = async () => {
-      const b = document.getElementById("plOrdenar"); b.disabled = true; b.textContent = "Calculando…";
+      const b = document.getElementById("plOrdenar"); b.disabled = true; b.textContent = "Calculando la ruta por calles…";
       let ini = state.gpsUltimo || null;
       const nueva = await Promise.race([ubicacionAhora(), new Promise(ok => setTimeout(() => ok(null), 4000))]);
       if (nueva) ini = nueva;
       const lista = aplicarOrden(paradasRuta()).filter(p => p.lat != null && p.lon != null);
-      const orden = ordenarCercania(lista, ini ? { lat: ini.lat, lon: ini.lon } : null);
+      let orden = null, inf = null;
+      if (ini && apiListo() && enLinea()) {
+        try {
+          const rr = await rdApi("gis_ruta", { origen: { lat: ini.lat, lon: ini.lon }, puntos: lista.map(p => ({ id: p.id, lat: p.lat, lon: p.lon })) });
+          const porId = Object.fromEntries(lista.map(p => [p.id, p]));
+          orden = rr.orden.map(id => porId[id]).filter(Boolean).concat(lista.filter(p => !rr.orden.includes(p.id)));
+          inf = { fuente: rr.fuente, conTrafico: !!rr.conTrafico, km: rr.km, min: rr.min, tramos: rr.tramos, orden: orden.map(p => p.id) };
+        } catch (e) { toast("No se pudo calcular por calles: " + msgError(e) + ". Se ordenó en línea recta.", true); }
+      }
+      if (!orden) { orden = ordenarCercania(lista, ini ? { lat: ini.lat, lon: ini.lon } : null); inf = { fuente: "linea", orden: orden.map(p => p.id) }; }
       guardarOrden(orden.map(p => p.id).concat(paradasRuta().filter(p => p.lat == null || p.lon == null).map(p => p.id)));
       guardarLS(claveCalculo(), orden.map(p => p.id));
-      toast("Ruta óptima calculada" + (ini ? " desde tu ubicación" : ""));
+      guardarLS(claveRutaInfo(), inf);
+      toast(inf.fuente === "linea" ? "Ruta ordenada en línea recta" : "Ruta óptima calculada por calles" + (inf.conTrafico ? " con el tráfico del momento" : ""));
       if (state.vista === "PLANIFICADOR_RUTAS") { renderPlanificador(); const c = document.getElementById("plCalcCard"); if (c) c.scrollIntoView({ behavior: "smooth", block: "start" }); }
     };
     const mover = (id, delta) => { const ids = con.map(p => p.id), i = ids.indexOf(id), j = i + delta; if (j < 0 || j >= ids.length) return;
@@ -4326,12 +4395,6 @@
     document.querySelectorAll(".plQuitar").forEach(b => b.onclick = () => { state.plQuitar = b.dataset.id; renderPlanificador(); });
     document.querySelectorAll(".plNo").forEach(b => b.onclick = () => { state.plQuitar = null; renderPlanificador(); });
     document.querySelectorAll(".plSi").forEach(b => b.onclick = async () => { const p = state.pendientes.find(x => x.id === b.dataset.id); state.plQuitar = null; await borrarPendiente(b.dataset.id); toast("NIS " + (p ? p.nis : "") + " quitado de la ruta"); renderPlanificador(); });
-    document.querySelectorAll(".plReg").forEach(b => b.onclick = () => {     // abre el formulario con el NIS listo (igual que «Completar» en la Ruta)
-      const p = state.pendientes.find(x => x.id === b.dataset.id); if (!p) return;
-      abrirModulo(formDe(p));
-      state.nisSel = { nis: p.nis, direccion: p.direccion || "", urb: p.urb || "", distrito: p.distrito || "", sector: p.sector || "", ccss: p.ccss || "", latNis: p.latNis ?? null, lonNis: p.lonNis ?? null, manual: !!p.manual };
-      state.pendienteId = p.id; state.fecha = todayISO(); state.hora = nowHM(); ensureLocation(); render();
-    });
     pintarPlan(con, yo, calculada);
   }
   async function pintarPlan(con, yo, calculada) {
@@ -4344,7 +4407,7 @@
     const lim = [];
     // con la ruta calculada, cada punto lleva su número de visita (1, 2, 3…); antes, un punto sin número
     con.forEach((p, i) => { L.marker([p.lat, p.lon], { icon: calculada ? pinNum(i + 1) : pinNum("•", "#5B6B7F") }).addTo(planL)
-      .bindPopup(`<b>${calculada ? (i + 1) + ". " : ""}NIS ${escA(p.nis)}</b><br>${escA(p.direccion || "")}<br><small>${escA(FORM_CORTO[formDe(p)] || "")}</small><br><a href="https://www.google.com/maps/dir/?api=1&destination=${p.lat},${p.lon}" target="_blank" rel="noopener">Ir a este punto</a>`);
+      .bindPopup(`<b>${calculada ? (i + 1) + ". " : ""}NIS ${escA(p.nis)}</b><br>${escA(p.direccion || "")}<br><small>${escA(p.form ? FORM_CORTO[p.form] || "" : "")}</small><br><a href="https://www.google.com/maps/dir/?api=1&destination=${p.lat},${p.lon}" target="_blank" rel="noopener">Ir a este punto</a>`);
       lim.push([p.lat, p.lon]); });
     if (calculada) {
       const linea = (yo ? [[yo.lat, yo.lon]] : []).concat(con.map(p => [p.lat, p.lon]));
@@ -4870,6 +4933,7 @@
       .pl-paso b{font-size:17px;color:var(--brand-dark)}
       .pl-nis-grid{display:grid;gap:8px;grid-template-columns:repeat(auto-fill,minmax(250px,1fr))}
       .pl-nis{display:flex;gap:8px;align-items:flex-start;background:#F7FAFC;border:1px solid var(--line);border-radius:14px;padding:10px}
+      .pl-waze{display:inline-block;margin-top:4px;font-size:12px;font-weight:800;color:#04294A;background:#E3F7FF;border:1px solid #9FE3FF;border-radius:8px;padding:2px 8px;text-decoration:none}
       .pl-mapa{height:60vh;min-height:340px;border-radius:14px;overflow:hidden;border:1px solid var(--line);background:#dfe7ee}
       .pl-item{display:flex;gap:10px;align-items:flex-start;background:#fff;border:1px solid var(--line);border-radius:14px;padding:10px}
       .pl-num{width:30px;height:30px;border-radius:50%;color:#fff;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:13px;flex:0 0 30px}
