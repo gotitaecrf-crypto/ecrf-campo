@@ -2593,8 +2593,8 @@
      tras confirmar la ficha (no del nombre que envía el navegador).
      ===================================================================================== */
   const ICO_RD = `<svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="5" y="3" width="14" height="18" rx="2"/><path d="M9 3h6v3H9z"/><path d="M8.5 12l2 2 4.5-4.5"/><path d="M8.5 17h7"/></svg>`;
-  const RD_EST_TXT = { "": "Pendiente de registro", PENDIENTE_REGISTRO: "Pendiente de registro", PENDIENTE_CIERRE: "Pendiente de cierre", CERRADO: "Cerrado" };
-  const RD_EST_COLOR = { "": "#FFF1C7;color:#6B4A00", PENDIENTE_REGISTRO: "#FFF1C7;color:#6B4A00", PENDIENTE_CIERRE: "#E1F3FB;color:#0B4A6B", CERRADO: "#DDF3E7;color:#12613B" };
+  const RD_EST_TXT = { "": "Pendiente de registro", PENDIENTE_REGISTRO: "Pendiente de registro", PENDIENTE_CIERRE: "Pendiente de cierre", PENDIENTE_RETORNO: "Pendiente de retorno", CERRADO: "Cerrado" };
+  const RD_EST_COLOR = { "": "#FFF1C7;color:#6B4A00", PENDIENTE_REGISTRO: "#FFF1C7;color:#6B4A00", PENDIENTE_CIERRE: "#E1F3FB;color:#0B4A6B", PENDIENTE_RETORNO: "#EDE7FB;color:#4B2A8E", CERRADO: "#DDF3E7;color:#12613B" };
   const RD_EJEC_TXT = { EJECUTADA: "Ejecutada", PARCIAL: "Parcialmente ejecutada", NO_EJECUTADA: "No ejecutada" };
   const RD_VIDEO_TXT = { "": "Sin iniciar", EN_CURSO: "En reproducción", INCOMPLETO: "Incompleto", COMPLETADO: "Completado", ERROR: "Error de reproducción", SIN_CHARLA_CONFIGURADA: "Sin charla configurada" };
   const horaDe = s => (/\d{2}:\d{2}:\d{2}/.exec(String(s || "")) || [""])[0];
@@ -2672,6 +2672,13 @@
         .rd-chip[aria-pressed="true"].e3{background:#C0392B;border-color:#C0392B;color:#fff}
         .rd-err{color:var(--danger);font-size:13px;font-weight:600;margin-top:6px}
         .rd-bloq{position:relative}
+        .rd-fotos{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+        .rd-foto{position:relative;aspect-ratio:1;border-radius:12px;overflow:hidden;background:#E8EEF3;border:1px solid var(--line)}
+        .rd-foto img{width:100%;height:100%;object-fit:cover}
+        .rd-foto button{position:absolute;top:4px;right:4px;width:28px;height:28px;border-radius:50%;background:rgba(0,0,0,.65);color:#fff;font-weight:800;border:0}
+        .rd-foto-add{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;border:2px dashed #9FB3C8;background:#F7FAFC;font-size:26px;cursor:pointer;color:var(--brand)}
+        .rd-foto-add span{font-size:12px;font-weight:700}
+        .rd-btn-gps{min-height:56px;font-size:17px}
         .rd-bloq.off>*:not(.rd-candado){opacity:.4;pointer-events:none}
         .rd-candado{display:none}
         .rd-bloq.off .rd-candado{display:flex;align-items:center;gap:8px;background:#FFF1C7;color:#6B4A00;border-radius:10px;padding:10px 12px;font-size:14px;font-weight:600;margin-bottom:10px}
@@ -2737,6 +2744,8 @@
           <div class="rd-dato"><small>Fecha de la jornada</small><b>${fechaTxt(rep ? rep.fecha : d.fecha)}</b></div>
           <div class="rd-dato"><small>Hora de inicio</small><b>${rep && rep.inicioEn ? horaDe(rep.inicioEn) : "—"}</b></div>
           ${rep && rep.mananaEn ? `<div class="rd-dato"><small>Registro de la mañana</small><b>${horaDe(rep.mananaEn)}</b></div>` : ""}
+          ${rep && rep.salida ? `<div class="rd-dato"><small>Salida a campo</small><b>${horaDe(rep.salida.en)}</b></div>` : ""}
+          ${rep && rep.retorno ? `<div class="rd-dato"><small>Retorno a la oficina</small><b>${horaDe(rep.retorno.en)}</b></div>` : ""}
           ${rep && rep.cerradoEn ? `<div class="rd-dato"><small>Cierre</small><b>${horaDe(rep.cerradoEn)}</b></div>` : ""}
         </div>
       </div>
@@ -2748,6 +2757,7 @@
     const vh = document.getElementById("rdVolverHoy"); if (vh) vh.onclick = () => { state.rdCierreId = null; state.rdCierreRep = null; renderRdHoy(); };
     if (!rep || estado === "PENDIENTE_REGISTRO") renderRdManana(rep);
     else if (estado === "PENDIENTE_CIERRE") renderRdCierre(rep);
+    else if (estado === "PENDIENTE_RETORNO") renderRdRetorno(rep);
     else renderRdCerrado(rep);
   }
 
@@ -2793,6 +2803,55 @@
     return ["CONTRATISTA", "ECRF"].map(g => { const l = (acts || []).filter(a => grupoRd(a) === g);
       return l.length ? `<div class="rd-grupo">${RD_GRUPO_TXT[g].titulo}</div>` + l.map((a, k) => pintar(a, k + 1)).join("") : ""; }).join("");
   }
+  // Ubicación GPS para la salida a campo y el retorno a la oficina (la hora la pone el servidor)
+  // GPS para salida y retorno: lectura nueva; si el celular tarda (p. ej. porque ya sigue el GPS en segundo plano),
+  // se usa la última posición del seguimiento si tiene menos de 1 minuto, o una lectura reciente del sistema
+  function obtenerGps() {
+    const pedir = (maxAge, tmo) => new Promise((ok, mal) => navigator.geolocation.getCurrentPosition(
+      p => ok({ lat: p.coords.latitude, lon: p.coords.longitude, precision: Math.round(p.coords.accuracy || 0) }), mal,
+      { enableHighAccuracy: true, timeout: tmo, maximumAge: maxAge }));
+    const error = e => new Error(e && e.code === 1 ? "Permite el acceso a tu ubicación (GPS) para registrar la hora" : "No se pudo obtener tu ubicación GPS. Activa la ubicación del celular y vuelve a intentar");
+    if (!navigator.geolocation) return Promise.reject(new Error("Este celular no permite obtener la ubicación GPS"));
+    return pedir(0, 12000).catch(e => {
+      if (e && e.code === 1) throw error(e);
+      const u = state.gpsUltimo, c = state.coords;
+      if (u && Date.now() - u.en < 60000) return { lat: u.lat, lon: u.lon, precision: c && c.prec != null ? Math.round(c.prec) : null };
+      return pedir(60000, 15000).catch(e2 => { throw error(e2); });
+    });
+  }
+  const mapaPunto = g => g && isFinite(g.lat) ? `<a href="https://www.google.com/maps/search/?api=1&query=${g.lat},${g.lon}" target="_blank" rel="noopener" style="color:var(--brand);font-weight:700">📍 Ver ubicación</a>${g.precision != null && g.precision !== "" && !isNaN(g.precision) ? ` <span style="color:var(--ink-soft)">(±${g.precision} m)</span>` : ""}` : "";
+  const EPP_MAX_FOTOS = 3;
+  // En prueba: el ítem 4 (EPP y EPC), la salida a campo y el retorno a la oficina solo los ven supervisores y administradores
+  const rdPiloto = () => ["SUPERVISOR", "ADMINISTRADOR"].includes(rolDe(state.operario));
+  // Ítem 4: verificación de EPP y EPC completos, con registro fotográfico
+  function bloqueEppRd(borr, completada) {
+    const e = borr.epp || {}, fotos = e.fotos || [];
+    return `
+        <div class="card p-4 rd-bloq ${completada ? "" : "off"}" id="rdBloqueEpp">
+          <div class="rd-candado">🔒 Completa la charla de seguridad para registrar tus actividades</div>
+          <div class="rd-step"><span>4</span>Verificación de EPP y EPC completos</div>
+          <div class="text-sm mb-3" style="color:var(--ink-soft)">Confirma que cuentas con tu equipo de protección personal (EPP) y el equipo de protección colectiva (EPC) completos, y toma una foto como evidencia.</div>
+          <div class="grid grid-cols-2 gap-2 mb-3">
+            <button class="rd-chip e1 rdEpp" data-k="epp" aria-pressed="${!!e.epp}">${e.epp ? "✅ " : ""}EPP completos</button>
+            <button class="rd-chip e1 rdEpp" data-k="epc" aria-pressed="${!!e.epc}">${e.epc ? "✅ " : ""}EPC completos</button>
+          </div>
+          <div class="text-xs font-semibold mb-1" style="color:var(--ink-soft)">Registro fotográfico * (${fotos.length} de ${EPP_MAX_FOTOS})</div>
+          <div class="rd-fotos">
+            ${fotos.map((f, i) => `<div class="rd-foto"><img src="${f}" alt="Foto ${i + 1} de EPP y EPC"><button class="rdEppQuitar" data-i="${i}" aria-label="Quitar foto ${i + 1}">✕</button></div>`).join("")}
+            ${fotos.length < EPP_MAX_FOTOS ? `<label class="rd-foto rd-foto-add" for="rdEppFoto">📷<span>Tomar foto</span></label>` : ""}
+          </div>
+          <input id="rdEppFoto" type="file" accept="image/*" capture="environment" style="display:none">
+          <div id="rdEppErr" class="rd-err"></div>
+        </div>`;
+  }
+  const faltaManana = (borr, completada) => {
+    const e = borr.epp || {}, f = [];
+    if (!completada) f.push("la charla de seguridad");
+    if (!borr.acts.length) f.push("al menos una actividad");
+    if (rdPiloto() && (!e.epp || !e.epc)) f.push("confirmar EPP y EPC completos");
+    if (rdPiloto() && !(e.fotos || []).length) f.push("la foto de EPP y EPC");
+    return f;
+  };
   function renderRdManana(rep) {
     const d = state.rdDatos, ch = d.charla;
     const completada = !ch || (rep && rep.charla && rep.charla.estado === "COMPLETADO" && rep.charla.id === ch.id);
@@ -2823,9 +2882,12 @@
         </div>
         ${bloqueActsRd("CONTRATISTA", 2, d.catalogo || [], borr, ed, completada)}
         ${bloqueActsRd("ECRF", 3, d.catalogoEcrf || [], borr, ed, completada)}
+        ${rdPiloto() ? bloqueEppRd(borr, completada) : ""}
         <div class="card p-4 rd-bloq ${completada ? "" : "off"} rd-guardar">
           <div class="text-sm mb-2" style="color:var(--ink-soft)">Actividades registradas: <b>${actsGrupo(borr, "CONTRATISTA").length}</b> de la contratista · <b>${actsGrupo(borr, "ECRF").length}</b> de ECRF</div>
-          <button id="rdGuardarM" class="btn-primary w-full" ${borr.acts.length && completada ? "" : "disabled"}>Guardar reporte de la mañana</button>
+          ${faltaManana(borr, completada).length ? `<div class="text-xs mb-2" style="color:#6B4A00">Falta: ${faltaManana(borr, completada).join(" · ")}</div>` : ""}
+          <button id="rdGuardarM" class="btn-primary w-full" ${faltaManana(borr, completada).length ? "disabled" : ""}>Guardar reporte de la mañana</button>
+          ${rdPiloto() ? `<div class="text-xs mt-2" style="color:var(--ink-soft)">Después de guardar aparece el botón de <b>hora de salida a campo</b>.</div>` : ""}
           <div id="rdGuardarErr" class="rd-err"></div>
         </div>
       </div>`;
@@ -2851,6 +2913,23 @@
       document.getElementById("rdSel" + RD_GRUPO_TXT[grupoRd(a)].sufijo).scrollIntoView({ block: "center" });
     });
     document.querySelectorAll(".rdQuitar").forEach(b => b.onclick = () => { borr.acts.splice(+b.dataset.i, 1); guardarBorr(claveBorrador(), borr); state.rdEditando = null; renderRdManana(rep); });
+    // ítem 4: confirmaciones y fotos (se guardan en el celular hasta enviar el reporte)
+    const reEpp = () => { const y = window.scrollY; renderRdManana(rep); window.scrollTo(0, y); };
+    document.querySelectorAll(".rdEpp").forEach(x => x.onclick = () => {
+      const b = leerBorr(claveBorrador()) || borr; b.epp = b.epp || {}; b.epp[x.dataset.k] = !b.epp[x.dataset.k]; guardarBorr(claveBorrador(), b); reEpp();
+    });
+    document.querySelectorAll(".rdEppQuitar").forEach(x => x.onclick = () => {
+      const b = leerBorr(claveBorrador()) || borr; (b.epp.fotos || []).splice(+x.dataset.i, 1); guardarBorr(claveBorrador(), b); reEpp();
+    });
+    const fe = document.getElementById("rdEppFoto");
+    if (fe) fe.onchange = async () => {
+      const f = fe.files && fe.files[0]; if (!f) return;
+      try {
+        const url = await fotoReducida(f, 1024);
+        const b = leerBorr(claveBorrador()) || borr; b.epp = b.epp || {}; b.epp.fotos = [...(b.epp.fotos || []), url].slice(0, EPP_MAX_FOTOS);
+        guardarBorr(claveBorrador(), b); reEpp();
+      } catch (e) { const er = document.getElementById("rdEppErr"); if (er) er.textContent = "No se pudo leer la foto. Vuelve a tomarla."; }
+    };
     document.getElementById("rdGuardarM").onclick = guardarRdManana;
     if (ch && !completada) montarVideo(ch, cv);
   }
@@ -2859,9 +2938,11 @@
     const btn = document.getElementById("rdGuardarM"), err = document.getElementById("rdGuardarErr");
     const borr = leerBorr(claveBorrador());
     if (!borr || !borr.acts.length) { err.textContent = "Registra al menos una actividad"; return; }
+    const e = borr.epp || {};
+    if (rdPiloto() && (!e.epp || !e.epc || !(e.fotos || []).length)) { err.textContent = "Completa el ítem 4: EPP y EPC completos y su foto"; return; }
     btn.disabled = true; btn.textContent = "Guardando…"; err.textContent = "";
     try {
-      const r = await rdApi("rd_manana", { clave: borr.clave, actividades: borr.acts });
+      const r = await rdApi("rd_manana", { clave: borr.clave, actividades: borr.acts, ...(rdPiloto() ? { epp: { epp: true, epc: true, fotos: e.fotos } } : {}) });
       borrarBorr(claveBorrador());
       state.rdDatos.reporte = r.reporte;
       toast("Reporte de la mañana guardado ✅");
@@ -3017,10 +3098,22 @@
       return { ej: v.filter(x => x === "EJECUTADA").length, pa: v.filter(x => x === "PARCIAL").length, no: v.filter(x => x === "NO_EJECUTADA").length, tot: rep.actividades.length };
     };
     const k = cuenta(), pct = k.tot ? Math.round(k.ej / k.tot * 10000) / 100 : 0;
+    // flujo con salida y retorno: jornada de hoy que registró el ítem 4 (los reportes antiguos se cierran como antes)
+    const conGps = !!(rep.epp && rep.epp.en) && rep.fecha === (state.rdDatos && state.rdDatos.fecha);
+    const sinSalida = conGps && !rep.salida;
     document.getElementById("rdEtapa").innerHTML = `
-      <div class="rd-grid dos">
+      ${conGps ? `
+      <div class="card p-4 mb-4" id="rdSalidaCard">
+        <div class="rd-step"><span>5</span>Salida a campo</div>
+        ${rep.salida ? `<div class="p-3 rounded-lg text-sm" style="background:#DDF3E7;color:#12613B"><b>🚐 Salida registrada: ${fechaTxt(rep.fecha)} · ${horaDe(rep.salida.en)}</b><br>${mapaPunto(rep.salida)}</div>`
+          : `<div class="text-sm mb-3" style="color:var(--ink-soft)">Cuando salgas a campo, presiona el botón: se registran la fecha, la hora y tu ubicación GPS.</div>
+             <button id="rdSalida" class="btn-primary w-full rd-btn-gps">🚐 Hora de salida a campo</button>
+             <div id="rdSalidaErr" class="rd-err"></div>`}
+      </div>` : ""}
+      <div class="rd-grid dos rd-bloq ${sinSalida ? "off" : ""}">
+        <div class="rd-candado" style="grid-column:1/-1">🔒 Registra tu hora de salida a campo para luego cerrar la jornada</div>
         <div>
-          <div class="rd-step"><span>4</span>Cierre de jornada</div>
+          <div class="rd-step"><span>${conGps ? 6 : 4}</span>Cierre de jornada</div>
           ${actsPorGrupo(rep.actividades, (a, num) => {
             const r = b.res[a.id] || {};
             const exige = r.estado === "PARCIAL" || r.estado === "NO_EJECUTADA";
@@ -3058,10 +3151,20 @@
           <div class="text-xs mb-3" style="color:var(--ink-soft)">Charla: ${escA(RD_VIDEO_TXT[rep.charla.estado] || rep.charla.estado || "—")}${rep.charla.tema ? " · " + escA(rep.charla.tema) : ""}</div>
           <button id="rdCerrar" class="btn-primary w-full">Cerrar reporte</button>
           <div id="rdCerrarErr" class="rd-err"></div>
-          <div class="text-xs mt-2" style="color:var(--ink-soft)">Al cerrar, el reporte ya no se puede modificar.</div>
+          <div class="text-xs mt-2" style="color:var(--ink-soft)">Al cerrar, la ejecución ya no se puede modificar.${conGps ? " Luego aparece el botón de <b>hora de retorno a la oficina</b>, que cierra el registro del día." : ""}</div>
         </div>
       </div>`;
     const guardarLocal = () => guardarBorr(kc, b);
+    const bs = document.getElementById("rdSalida");
+    if (bs) bs.onclick = async () => {
+      const er = document.getElementById("rdSalidaErr"); bs.disabled = true; er.textContent = ""; bs.textContent = "Obteniendo tu ubicación GPS…";
+      try {
+        const gps = await obtenerGps(); bs.textContent = "Registrando…";
+        const r = await rdApi("rd_salida", { gps });
+        state.rdDatos.reporte = r.reporte; toast("Salida a campo registrada ✅ " + horaDe(r.reporte.salida.en));
+        renderRdHoy();
+      } catch (e) { er.textContent = (e && e.message && !e.code ? e.message : msgError(e)); bs.disabled = false; bs.textContent = "🚐 Hora de salida a campo"; }
+    };
     document.querySelectorAll(".rdEst").forEach(x => x.onclick = () => {
       const id = x.dataset.id; b.res[id] = { ...(b.res[id] || {}), estado: x.dataset.e }; guardarLocal();
       if (state.rdErrores) delete state.rdErrores[id];
@@ -3084,18 +3187,24 @@
         return;
       }
       const btn = document.getElementById("rdCerrar"), err = document.getElementById("rdCerrarErr");
+      const txtBtn = "Cerrar reporte";
       btn.disabled = true; btn.textContent = "Cerrando…"; err.textContent = "";
       try {
         const r = await rdApi("rd_cerrar", { id: rep.id, clave: b.clave, observaciones: b.obs || "",
           resultados: rep.actividades.map(a => ({ id: a.id, estado: b.res[a.id].estado, sustento: String(b.res[a.id].sustento || "").trim() })) });
         borrarBorr(kc); state.rdErrores = null;
+        if (r.reporte.estado === "PENDIENTE_RETORNO") {
+          toast("Ejecución cerrada ✅ Cumplimiento " + fmtPct(r.reporte.cumplimiento) + ". Falta tu hora de retorno a la oficina");
+          if (state.rdCierreId) state.rdCierreRep = r.reporte; else state.rdDatos.reporte = r.reporte;
+          renderRdHoy(); window.scrollTo(0, 0); return;
+        }
         toast("Reporte cerrado ✅ Cumplimiento " + fmtPct(r.reporte.cumplimiento));
         if (state.rdCierreId) { state.rdCierreId = null; state.rdCierreRep = null; state.rdDatos = null; cargarRdHoy(); }
         else { state.rdDatos.reporte = r.reporte; renderRdHoy(); }
         window.scrollTo(0, 0);
       } catch (e) {
         err.textContent = msgError(e) + ". Lo que escribiste sigue guardado en el celular; puedes reintentar.";
-        btn.disabled = false; btn.textContent = "Cerrar reporte";
+        btn.disabled = false; btn.textContent = txtBtn;
         if (e && e.code === "cerrado") { borrarBorr(kc); state.rdDatos = null; cargarRdHoy(); }
       }
     };
@@ -3111,6 +3220,13 @@
         <div class="rd-dato"><small>Cierre</small><b>${horaDe(rep.cerradoEn) || "—"}</b></div>
         <div class="rd-dato"><small>Planif. · Ejec. · Parc. · No</small><b>${rep.nActividades} · ${rep.nEjecutadas} · ${rep.nParciales} · ${rep.nNoEjecutadas}</b></div>
       </div>
+      ${rep.epp && rep.epp.en ? `<div class="rd-dato mb-3 text-sm"><small>Verificación de EPP y EPC</small>
+        ${rep.epp.epp ? "✅ EPP completos" : "EPP: —"} · ${rep.epp.epc ? "✅ EPC completos" : "EPC: —"} · ${horaDe(rep.epp.en)}
+        ${rep.epp.fotos.length ? `<div class="flex gap-2 mt-2" style="flex-wrap:wrap">${rep.epp.fotos.map((u, i) => `<a href="${escA(u)}" target="_blank" rel="noopener" class="gis-chip">📷 Foto ${i + 1}</a>`).join("")}</div>` : ""}</div>` : ""}
+      ${rep.salida || rep.retorno ? `<div class="grid grid-cols-2 gap-2 text-sm mb-3">
+        <div class="rd-dato"><small>Salida a campo</small><b>${rep.salida ? horaDe(rep.salida.en) : "—"}</b>${rep.salida ? `<div class="text-xs">${mapaPunto(rep.salida)}</div>` : ""}</div>
+        <div class="rd-dato"><small>Retorno a la oficina</small><b>${rep.retorno ? horaDe(rep.retorno.en) : "—"}</b>${rep.retorno ? `<div class="text-xs">${mapaPunto(rep.retorno)}</div>` : ""}</div>
+      </div>` : ""}
       <div class="rd-dato mb-3 text-sm"><small>Charla de seguridad</small>
         ${rep.charla.tema ? `<b>${escA(rep.charla.tema)}</b> · ${escA(rep.charla.titulo)}<br>` : ""}
         Estado: <b>${escA(RD_VIDEO_TXT[rep.charla.estado] || rep.charla.estado || "—")}</b>
@@ -3125,6 +3241,36 @@
           ${a.sustento ? `<div class="text-xs mt-1"><b>${a.estado === "EJECUTADA" ? "Observación" : "Sustento"}:</b> ${escA(a.sustento)}</div>` : ""}
         </div>`)}
       ${rep.observaciones ? `<div class="rd-dato text-sm mt-2"><small>Observaciones generales</small>${escA(rep.observaciones)}</div>` : ""}`;
+  }
+  // Último paso del flujo nuevo: hora de retorno a la oficina (fecha, hora y GPS) — con esto se cierra el registro del día
+  function renderRdRetorno(rep) {
+    document.getElementById("rdEtapa").innerHTML = `
+      <div class="rd-grid dos">
+        <div class="card p-4" id="rdRetornoCard">
+          <div class="rd-step"><span>7</span>Retorno a la oficina</div>
+          <div class="p-3 rounded-lg text-sm mb-3" style="background:#DDF3E7;color:#12613B"><b>✅ Ejecución de actividades cerrada · Cumplimiento ${fmtPct(rep.cumplimiento)}</b></div>
+          <div class="text-sm mb-3" style="color:var(--ink-soft)">Cuando llegues a la oficina, presiona el botón: se registran la fecha, la hora y tu ubicación GPS, y se cierra el registro del día.</div>
+          <button id="rdRetorno" class="btn-primary w-full rd-btn-gps">🏢 Hora de retorno a la oficina</button>
+          <div id="rdRetornoErr" class="rd-err"></div>
+        </div>
+        <div class="card p-4">${detalleRdHTML(rep)}</div>
+      </div>`;
+    const bt = document.getElementById("rdRetorno");
+    bt.onclick = async () => {
+      const er = document.getElementById("rdRetornoErr"), txt = "🏢 Hora de retorno a la oficina";
+      bt.disabled = true; er.textContent = ""; bt.textContent = "Obteniendo tu ubicación GPS…";
+      try {
+        const gps = await obtenerGps(); bt.textContent = "Registrando…";
+        const r = await rdApi("rd_retorno", { id: rep.id, gps });
+        toast("Retorno registrado ✅ " + horaDe(r.reporte.retorno.en) + ". Registro del día cerrado");
+        if (state.rdCierreId) { state.rdCierreId = null; state.rdCierreRep = null; state.rdDatos = null; cargarRdHoy(); }
+        else { state.rdDatos.reporte = r.reporte; renderRdHoy(); }
+        window.scrollTo(0, 0);
+      } catch (e) {
+        er.textContent = (e && e.message && !e.code ? e.message : msgError(e)); bt.disabled = false; bt.textContent = txt;
+        if (e && e.code === "cerrado") { state.rdDatos = null; cargarRdHoy(); }
+      }
+    };
   }
   function renderRdCerrado(rep) {
     document.getElementById("rdEtapa").innerHTML = `<div class="card p-4">
@@ -3143,7 +3289,7 @@
           <div><label class="text-xs font-semibold block mb-1" style="color:var(--ink-soft)">Desde</label><input id="rfDesde" type="date" class="input" value="${escA(f.desde)}"></div>
           <div><label class="text-xs font-semibold block mb-1" style="color:var(--ink-soft)">Hasta</label><input id="rfHasta" type="date" class="input" value="${escA(f.hasta)}"></div>
           <div ${sup ? "" : 'style="grid-column:span 2"'}><label class="text-xs font-semibold block mb-1" style="color:var(--ink-soft)">Estado</label>
-            <select id="rfEstado" class="input"><option value="">Todos</option>${["PENDIENTE_REGISTRO", "PENDIENTE_CIERRE", "CERRADO"].map(e => `<option value="${e}" ${f.estado === e ? "selected" : ""}>${RD_EST_TXT[e]}</option>`).join("")}</select></div>
+            <select id="rfEstado" class="input"><option value="">Todos</option>${["PENDIENTE_REGISTRO", "PENDIENTE_CIERRE", "PENDIENTE_RETORNO", "CERRADO"].map(e => `<option value="${e}" ${f.estado === e ? "selected" : ""}>${RD_EST_TXT[e]}</option>`).join("")}</select></div>
           ${sup ? `<div><label class="text-xs font-semibold block mb-1" style="color:var(--ink-soft)">Trabajador</label>
             <select id="rfTrab" class="input"><option value="">Todos</option>${OPERARIOS.map(o => `<option ${o.name === f.trabajador ? "selected" : ""}>${escA(o.name)}</option>`).join("")}</select></div>` : ""}
         </div>
