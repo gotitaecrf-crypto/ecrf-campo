@@ -62,6 +62,12 @@
   input.input-ro::before { content: none; }
   /* «Ver en mapa»: bloque propio debajo del último campo, sin montarse sobre «Sector» */
   .btn-mapa { display: flex; width: 100%; align-items: center; justify-content: center; gap: 8px; margin-top: 16px; clear: both; position: relative; min-height: 48px; }
+  .btn-app { display: flex; justify-content: center; align-items: center; gap: 10px; text-decoration: none; }
+  .ico-app { display: inline-flex; flex: none; }
+  .ico-app img { width: 26px; height: 26px; border-radius: 7px; background: #fff; object-fit: contain; }
+  .pl-waze .ico-app img { width: 18px; height: 18px; border-radius: 5px; }
+  .ico-gen { align-items: center; }
+  .pl-waze { display: inline-flex; align-items: center; gap: 5px; }
   .ubi-sel { display: grid; gap: 8px; }
   .ubi-tipo { display: grid; grid-template-columns: 1fr 1fr; border: 2px solid var(--brand-dark); border-radius: 12px; overflow: hidden; }
   .ubi-tipo button { min-height: 46px; font-weight: 800; font-size: 15px; background: var(--card); color: var(--ink); border: 0; }
@@ -412,6 +418,7 @@
     try {
       const c = await apiGet({ action: "config" });
       if (c.usuarios && c.usuarios.length) localStorage.setItem("ecrf_usuarios", JSON.stringify(c.usuarios.map(u => ({ name: u.nombre, hash: u.hash, rol: u.rol }))));
+      guardarTecnicos(c.tecnicos);
       if (Array.isArray(c.modulos) && c.modulos.length) {
         const antes = localStorage.getItem("ecrf_modulos"), ahora = JSON.stringify(c.modulos);
         localStorage.setItem("ecrf_modulos", ahora);
@@ -1395,11 +1402,11 @@
       <div class="grid grid-cols-2 gap-3 mb-4">
         <div class="card p-4">
           <label class="text-sm font-semibold block mb-2" style="color:var(--ink-soft)">Fecha</label>
-          <input id="inpFecha" type="date" class="input" value="${state.fecha}">
+          <div id="inpFecha" class="input input-ro" aria-readonly="true">${escA(dmy(state.fecha))}</div>
         </div>
         <div class="card p-4">
           <label class="text-sm font-semibold block mb-2" style="color:var(--ink-soft)">Hora</label>
-          <input id="inpHora" type="time" class="input" value="${state.hora}">
+          <div id="inpHora" class="input input-ro" aria-readonly="true">${escA(state.hora)}</div>
         </div>
       </div>
 
@@ -1457,7 +1464,7 @@
         ${lbl("Técnico a cargo *")}
         <select id="f6Tecnico" class="input mb-3">
           <option value="">Elegir técnico…</option>
-          ${TECNICOS_CONTRATISTA.map(t => `<option ${t === m.tecnico ? "selected" : ""}>${escA(t)}</option>`).join("")}
+          ${[...new Set([m.tecnico, ...tecnicosContratista()].filter(Boolean))].map(t => `<option ${t === m.tecnico ? "selected" : ""}>${escA(t)}</option>`).join("")}
         </select>
         ${lbl("Fecha *")}
         <input id="f6cFecha" type="date" class="input mb-3" value="${escA(m.cFecha)}">
@@ -1506,11 +1513,12 @@
     document.getElementById("f6Tecnico").onchange = e => { m.tecnico = e.target.value; ok(); };
     document.getElementById("f6cFecha").onchange = e => { m.cFecha = e.target.value; ok(); };
     const re6 = () => { const y = window.scrollY; renderNuevo(); window.scrollTo(0, y); };
+    // SEDAPAL copia lo que indica la contratista (tipo y ubicación) mientras el operario no lo cambie; luego queda independiente
     activarUbicacion("f6cUbi", () => m.cUbi, v => {
       m.cUbi = v;
-      if (v && !m.sUbi) { m.sUbi = v; state.ubiGrupo = state.ubiGrupo || {}; state.ubiGrupo.f6sUbi = grupoUbicacion(v, "f6cUbi"); }   // SEDAPAL parte de lo que indicó la contratista
+      if (!m.sUbiPropia) { m.sUbi = v; state.ubiGrupo = state.ubiGrupo || {}; state.ubiGrupo.f6sUbi = state.ubiGrupo.f6cUbi || grupoUbicacion(v, "f6cUbi"); }
     }, re6);
-    activarUbicacion("f6sUbi", () => m.sUbi, v => { m.sUbi = v; }, re6);
+    activarUbicacion("f6sUbi", () => m.sUbi, v => { m.sUbi = v; m.sUbiPropia = true; }, re6);
   }
 
   function campos0405() {
@@ -1553,6 +1561,7 @@
       // campos que la base trae vacíos: son los únicos que el operario puede completar
       state.nisVacios = ["direccion", "urb", "distrito", "sector"].filter(k => !String(state.nisSel[k] || "").trim());
       if (state.form === "GPFO0405") { state.fechaVerif = todayISO(); state.horaVerif = nowHM(); }
+      if (state.form === "GPFO0381") { state.fecha = todayISO(); state.hora = nowHM(); }      // fecha y hora del registro: no se modifican
       if (state.form === "GPFO0416" && state.m) { state.m.sFecha = todayISO(); state.m.sHora = nowHM(); }
     }
     const c = document.getElementById("tabContent");
@@ -1690,8 +1699,7 @@
         e.target.value = limpio; state.presion = limpio;
         document.getElementById("btnGuardar").disabled = !validRecord();
       };
-      document.getElementById("inpFecha").onchange = (e) => { state.fecha = e.target.value; refrescarMarcas(); };
-      document.getElementById("inpHora").onchange = (e) => { state.hora = e.target.value; refrescarMarcas(); };
+
     }
     document.querySelectorAll("[data-rm]").forEach(b => b.onclick = (e) => { e.stopPropagation(); removeFoto(Number(b.dataset.rm)); });
     document.querySelectorAll("[data-view]").forEach(el => el.onclick = () => { state.previewIdx = Number(el.dataset.view); render(); });
@@ -2063,7 +2071,7 @@
           <div>${campo("ed_codigo", "Código SGIO *", r.codigoSgio, 'inputmode="numeric" data-num="7"')}</div>
         </div>
         <label class="text-xs font-semibold block mb-1 mt-2" for="ed_tec" style="color:var(--ink-soft)">Técnico a cargo *</label>
-        <select id="ed_tec" class="input">${[...new Set([r.tecnico, ...TECNICOS_CONTRATISTA].filter(Boolean))].map(t => `<option ${t === r.tecnico ? "selected" : ""}>${escA(t)}</option>`).join("")}</select>
+        <select id="ed_tec" class="input">${[...new Set([r.tecnico, ...tecnicosContratista()].filter(Boolean))].map(t => `<option ${t === r.tecnico ? "selected" : ""}>${escA(t)}</option>`).join("")}</select>
         <div class="font-bold text-sm mt-3">Contratista</div>
         <div class="grid grid-cols-2 gap-3">
           <div>${campo("ed_cfecha", "Fecha *", r.fechaContratista, 'type="date"')}</div>
@@ -2096,8 +2104,8 @@
         <div class="grid grid-cols-2 gap-3">
           <div>${campo("ed_sector", "Sector", r.sector, 'inputmode="numeric" data-num="4" ' + fijoNis(r.sector))}</div>
           <div>${campo("ed_presion", "Presión (mca) *", r.presion, 'inputmode="numeric" data-num="3"')}</div>
-          <div>${campo("ed_fecha", "Fecha *", r.fecha, 'type="date"')}</div>
-          <div>${campo("ed_hora", "Hora *", r.hora, 'type="time"')}</div>
+          <div>${campo("ed_fecha", "Fecha", r.fecha, 'type="date" ' + RO)}</div>
+          <div>${campo("ed_hora", "Hora", r.hora, 'type="time" ' + RO)}</div>
         </div>`}
         <div class="text-xs font-semibold mt-4 mb-1" style="color:var(--ink-soft)">Fotos</div>
         ${r.fotoPendiente ? `<div class="text-xs p-2 rounded-lg" style="background:#FFF1C7;color:#6B4A00">Hay cambios de fotos esperando subirse. Podrás editar las fotos cuando haya internet y se suban.</div>`
@@ -2219,7 +2227,13 @@
                 falta: "solo faltan las mediciones y la foto" }
   };
   // Técnicos de la contratista (unidad móvil)
-  const TECNICOS_CONTRATISTA = ["Rafael Soplopuco", "Eymerson Navarro", "Fernando Apolaya", "Fernando Rondon", "Eduardo Luna", "German Fernández", "Fausto Vega"];
+  // Técnicos de la contratista (GPFO0416): lista editable en Panel de administración → Dominios; se guarda en el celular para usarla sin señal
+  const TECNICOS_DEFECTO = ["Rafael Soplopuco", "Eymerson Navarro", "Fernando Apolaya", "Fernando Rondon", "Eduardo Luna", "German Fernández", "Fausto Vega"];
+  function tecnicosContratista() {
+    try { const t = JSON.parse(localStorage.getItem("ecrf_tecnicos") || "null"); if (Array.isArray(t) && t.length) return t; } catch (e) {}
+    return TECNICOS_DEFECTO;
+  }
+  function guardarTecnicos(lista) { if (Array.isArray(lista) && lista.length) try { localStorage.setItem("ecrf_tecnicos", JSON.stringify(lista)); } catch (e) {} }
   function calcVariacion(c, s) {
     if (c === "" || s === "" || c == null || s == null || isNaN(c) || isNaN(s)) return { variacion: "", error: "" };
     const v = Math.abs(Number(c) - Number(s));
@@ -2636,6 +2650,8 @@
         .rd-wrap{max-width:860px;margin:0 auto;width:100%}
         .rd-top{background:var(--brand-dark);color:#fff}
         .rd-grid{display:grid;gap:14px}
+        .rd-guardar{grid-column:1/-1}
+        .rd-grupo{font-size:12px;font-weight:800;letter-spacing:.04em;text-transform:uppercase;color:#0B5FA5;margin:14px 0 8px}
         @media (min-width: 900px){ .rd-grid.dos{grid-template-columns:minmax(0,1.1fr) minmax(0,1fr);align-items:start} }
         .rd-step{display:flex;align-items:center;gap:10px;font-weight:800;color:var(--brand-dark);margin-bottom:10px}
         .rd-step span{width:28px;height:28px;border-radius:50%;background:var(--brand-dark);color:#fff;display:inline-flex;align-items:center;justify-content:center;font-size:14px}
@@ -2736,6 +2752,47 @@
   }
 
   // ---------- ETAPA 1: mañana ----------
+  // Actividades del reporte: ítem 2 «Contratista» e ítem 3 «ECRF» (los borradores antiguos sin grupo son de la contratista)
+  const RD_GRUPO_TXT = { CONTRATISTA: { titulo: "Actividades planificadas (Contratista)", sufijo: "", corto: "Contratista" },
+                         ECRF: { titulo: "Actividades planificadas (ECRF)", sufijo: "E", corto: "ECRF" } };
+  const grupoRd = a => (a && a.grupo === "ECRF") ? "ECRF" : "CONTRATISTA";
+  const actsGrupo = (borr, g) => borr.acts.map((a, i) => ({ a, i })).filter(x => grupoRd(x.a) === g);
+  function bloqueActsRd(g, num, cat, borr, ed, completada) {
+    const t = RD_GRUPO_TXT[g], sf = t.sufijo, e = ed && ed.grupo === g ? ed : null, mias = actsGrupo(borr, g);
+    return `
+        <div class="card p-4 rd-bloq ${completada ? "" : "off"}" id="rdBloque${g}">
+          <div class="rd-candado">🔒 Completa la charla de seguridad para registrar tus actividades</div>
+          <div class="rd-step"><span>${num}</span>${t.titulo}</div>
+          <label class="text-xs font-semibold block mb-1" for="rdSel${sf}" style="color:var(--ink-soft)">Actividad *</label>
+          <select id="rdSel${sf}" class="input mb-2">
+            <option value="">Elige una actividad…</option>
+            ${cat.map(a => `<option value="${escA(a.id)}" ${e && e.catalogoId === a.id ? "selected" : ""}>${escA(a.descripcion)}</option>`).join("")}
+            <option value="__otra" ${e && !e.catalogoId ? "selected" : ""}>Otra actividad (escribirla)</option>
+          </select>
+          <input id="rdOtra${sf}" class="input mb-2" maxlength="300" placeholder="Escribe la actividad" value="${e && !e.catalogoId ? escA(e.descripcion) : ""}" style="${e && !e.catalogoId ? "" : "display:none"}">
+          <label class="text-xs font-semibold block mb-1" for="rdCom${sf}" style="color:var(--ink-soft)">Comentarios o detalles (opcional)</label>
+          <textarea id="rdCom${sf}" class="input mb-2" rows="2" maxlength="1000" placeholder="Ej.: sector, lugar, con quién">${e ? escA(e.comentario) : ""}</textarea>
+          <div id="rdActErr${sf}" class="rd-err"></div>
+          <div class="flex gap-2 mb-3">
+            ${e ? `<button id="rdCancelEd${sf}" class="btn-ghost flex-1">Cancelar</button>` : ""}
+            <button id="rdAgregar${sf}" class="btn-primary flex-1">${e ? "Guardar cambios" : "+ Agregar actividad"}</button>
+          </div>
+          <div class="text-sm font-bold mb-2">Mis actividades · ${t.corto} (${mias.length})</div>
+          ${mias.length ? mias.map(({ a, i }, k) => `
+            <div class="rd-dato mb-2" style="display:flex;gap:10px;align-items:flex-start">
+              <b style="min-width:22px">${k + 1}.</b>
+              <div class="flex-1 min-w-0"><div class="font-semibold">${escA(a.descripcion)}</div>
+                ${a.comentario ? `<div class="text-xs" style="color:var(--ink-soft)">${escA(a.comentario)}</div>` : ""}</div>
+              <button class="text-sm font-semibold rdEd" data-i="${i}" style="color:var(--brand)">Editar</button>
+              <button class="text-sm font-semibold rdQuitar" data-i="${i}" style="color:var(--danger)">Quitar</button>
+            </div>`).join("") : `<div class="text-sm py-3 text-center" style="color:var(--ink-soft)">Aún no agregas actividades</div>`}
+        </div>`;
+  }
+  // títulos de grupo para el cierre y el detalle
+  function actsPorGrupo(acts, pintar) {
+    return ["CONTRATISTA", "ECRF"].map(g => { const l = (acts || []).filter(a => grupoRd(a) === g);
+      return l.length ? `<div class="rd-grupo">${RD_GRUPO_TXT[g].titulo}</div>` + l.map((a, k) => pintar(a, k + 1)).join("") : ""; }).join("");
+  }
   function renderRdManana(rep) {
     const d = state.rdDatos, ch = d.charla;
     const completada = !ch || (rep && rep.charla && rep.charla.estado === "COMPLETADO" && rep.charla.id === ch.id);
@@ -2764,51 +2821,35 @@
           </div>
           <div id="rdVMsg" class="rd-err"></div>`}
         </div>
-        <div class="card p-4 rd-bloq ${completada ? "" : "off"}">
-          <div class="rd-candado">🔒 Completa la charla de seguridad para registrar tus actividades</div>
-          <div class="rd-step"><span>2</span>Actividades planificadas</div>
-          <label class="text-xs font-semibold block mb-1" for="rdSel" style="color:var(--ink-soft)">Actividad *</label>
-          <select id="rdSel" class="input mb-2">
-            <option value="">Elige una actividad…</option>
-            ${d.catalogo.map(a => `<option value="${escA(a.id)}" ${ed && ed.catalogoId === a.id ? "selected" : ""}>${escA(a.descripcion)}</option>`).join("")}
-            <option value="__otra" ${ed && !ed.catalogoId ? "selected" : ""}>Otra actividad (escribirla)</option>
-          </select>
-          <input id="rdOtra" class="input mb-2" maxlength="300" placeholder="Escribe la actividad" value="${ed && !ed.catalogoId ? escA(ed.descripcion) : ""}" style="${ed && !ed.catalogoId ? "" : "display:none"}">
-          <label class="text-xs font-semibold block mb-1" for="rdCom" style="color:var(--ink-soft)">Comentarios o detalles (opcional)</label>
-          <textarea id="rdCom" class="input mb-2" rows="2" maxlength="1000" placeholder="Ej.: sector, lugar, con quién">${ed ? escA(ed.comentario) : ""}</textarea>
-          <div id="rdActErr" class="rd-err"></div>
-          <div class="flex gap-2 mb-3">
-            ${ed ? `<button id="rdCancelEd" class="btn-ghost flex-1">Cancelar</button>` : ""}
-            <button id="rdAgregar" class="btn-primary flex-1">${ed ? "Guardar cambios" : "+ Agregar actividad"}</button>
-          </div>
-          <div class="text-sm font-bold mb-2">Mis actividades (${borr.acts.length})</div>
-          ${borr.acts.length ? borr.acts.map((a, i) => `
-            <div class="rd-dato mb-2" style="display:flex;gap:10px;align-items:flex-start">
-              <b style="min-width:22px">${i + 1}.</b>
-              <div class="flex-1 min-w-0"><div class="font-semibold">${escA(a.descripcion)}</div>
-                ${a.comentario ? `<div class="text-xs" style="color:var(--ink-soft)">${escA(a.comentario)}</div>` : ""}</div>
-              <button class="text-sm font-semibold rdEd" data-i="${i}" style="color:var(--brand)">Editar</button>
-              <button class="text-sm font-semibold rdQuitar" data-i="${i}" style="color:var(--danger)">Quitar</button>
-            </div>`).join("") : `<div class="text-sm py-3 text-center" style="color:var(--ink-soft)">Aún no agregas actividades</div>`}
-          <button id="rdGuardarM" class="btn-primary w-full mt-3" ${borr.acts.length && completada ? "" : "disabled"}>Guardar reporte de la mañana</button>
+        ${bloqueActsRd("CONTRATISTA", 2, d.catalogo || [], borr, ed, completada)}
+        ${bloqueActsRd("ECRF", 3, d.catalogoEcrf || [], borr, ed, completada)}
+        <div class="card p-4 rd-bloq ${completada ? "" : "off"} rd-guardar">
+          <div class="text-sm mb-2" style="color:var(--ink-soft)">Actividades registradas: <b>${actsGrupo(borr, "CONTRATISTA").length}</b> de la contratista · <b>${actsGrupo(borr, "ECRF").length}</b> de ECRF</div>
+          <button id="rdGuardarM" class="btn-primary w-full" ${borr.acts.length && completada ? "" : "disabled"}>Guardar reporte de la mañana</button>
           <div id="rdGuardarErr" class="rd-err"></div>
         </div>
       </div>`;
-    const sel = document.getElementById("rdSel"), otra = document.getElementById("rdOtra");
-    sel.onchange = () => { otra.style.display = sel.value === "__otra" ? "" : "none"; if (sel.value === "__otra") otra.focus(); };
-    document.getElementById("rdAgregar").onclick = () => {
-      const err = document.getElementById("rdActErr");
-      let a;
-      if (sel.value === "__otra") { const t = otra.value.trim(); if (!t) { err.textContent = "Escribe la actividad"; return; } a = { catalogoId: "", descripcion: t }; }
-      else if (sel.value) { const cat = d.catalogo.find(x => x.id === sel.value); a = { catalogoId: cat.id, descripcion: cat.descripcion }; }
-      else { err.textContent = "Elige una actividad del catálogo o escribe otra"; return; }
-      a.comentario = document.getElementById("rdCom").value.trim();
-      const b = leerBorr(claveBorrador()) || borr;
-      if (ed) b.acts[ed.i] = a; else b.acts.push(a);
-      guardarBorr(claveBorrador(), b); state.rdEditando = null; renderRdManana(rep);
-    };
-    const ce = document.getElementById("rdCancelEd"); if (ce) ce.onclick = () => { state.rdEditando = null; renderRdManana(rep); };
-    document.querySelectorAll(".rdEd").forEach(b => b.onclick = () => { const i = +b.dataset.i; state.rdEditando = { ...borr.acts[i], i }; renderRdManana(rep); document.getElementById("rdSel").scrollIntoView({ block: "center" }); });
+    ["CONTRATISTA", "ECRF"].forEach(g => {
+      const sf = RD_GRUPO_TXT[g].sufijo, cat = g === "ECRF" ? (d.catalogoEcrf || []) : (d.catalogo || []);
+      const sel = document.getElementById("rdSel" + sf), otra = document.getElementById("rdOtra" + sf);
+      sel.onchange = () => { otra.style.display = sel.value === "__otra" ? "" : "none"; if (sel.value === "__otra") otra.focus(); };
+      document.getElementById("rdAgregar" + sf).onclick = () => {
+        const err = document.getElementById("rdActErr" + sf);
+        let a;
+        if (sel.value === "__otra") { const t = otra.value.trim(); if (!t) { err.textContent = "Escribe la actividad"; return; } a = { catalogoId: "", descripcion: t }; }
+        else if (sel.value) { const c = cat.find(x => x.id === sel.value); a = { catalogoId: c.id, descripcion: c.descripcion }; }
+        else { err.textContent = cat.length ? "Elige una actividad de la lista o escribe otra" : "Elige «Otra actividad» y escríbela"; return; }
+        a.comentario = document.getElementById("rdCom" + sf).value.trim(); a.grupo = g;
+        const b = leerBorr(claveBorrador()) || borr;
+        if (ed && ed.grupo === g) b.acts[ed.i] = a; else b.acts.push(a);
+        guardarBorr(claveBorrador(), b); state.rdEditando = null; renderRdManana(rep);
+      };
+      const ce = document.getElementById("rdCancelEd" + sf); if (ce) ce.onclick = () => { state.rdEditando = null; renderRdManana(rep); };
+    });
+    document.querySelectorAll(".rdEd").forEach(b => b.onclick = () => {
+      const i = +b.dataset.i, a = borr.acts[i]; state.rdEditando = { ...a, grupo: grupoRd(a), i }; renderRdManana(rep);
+      document.getElementById("rdSel" + RD_GRUPO_TXT[grupoRd(a)].sufijo).scrollIntoView({ block: "center" });
+    });
     document.querySelectorAll(".rdQuitar").forEach(b => b.onclick = () => { borr.acts.splice(+b.dataset.i, 1); guardarBorr(claveBorrador(), borr); state.rdEditando = null; renderRdManana(rep); });
     document.getElementById("rdGuardarM").onclick = guardarRdManana;
     if (ch && !completada) montarVideo(ch, cv);
@@ -2979,13 +3020,13 @@
     document.getElementById("rdEtapa").innerHTML = `
       <div class="rd-grid dos">
         <div>
-          <div class="rd-step"><span>3</span>Cierre de jornada</div>
-          ${rep.actividades.map(a => {
+          <div class="rd-step"><span>4</span>Cierre de jornada</div>
+          ${actsPorGrupo(rep.actividades, (a, num) => {
             const r = b.res[a.id] || {};
             const exige = r.estado === "PARCIAL" || r.estado === "NO_EJECUTADA";
             return `
             <div class="card p-4 mb-3" id="rdA_${escA(a.id)}">
-              <div class="font-bold">${a.n}. ${escA(a.descripcion)}</div>
+              <div class="font-bold">${num}. ${escA(a.descripcion)}</div>
               ${a.comentario ? `<div class="text-xs mt-1" style="color:var(--ink-soft)">Comentario de la mañana: ${escA(a.comentario)}</div>` : ""}
               <div class="text-xs font-semibold mt-3 mb-1" style="color:var(--ink-soft)">Estado de ejecución *</div>
               <div class="grid grid-cols-3 gap-2">
@@ -2997,7 +3038,7 @@
               <label class="text-xs font-semibold block mt-3 mb-1" style="color:var(--ink-soft)">${exige ? (r.estado === "PARCIAL" ? "Sustento: ¿por qué no se completó? *" : "Sustento: ¿por qué no se realizó? *") : "Observación (opcional)"}</label>
               <textarea class="input rdSus" data-id="${escA(a.id)}" rows="2" maxlength="1000">${escA(r.sustento || "")}</textarea>` : ""}
               ${errores[a.id] ? `<div class="rd-err">${escA(errores[a.id])}</div>` : ""}
-            </div>`; }).join("")}
+            </div>`; })}
           <div class="card p-4 mb-3">
             <label class="text-sm font-bold block mb-1" for="rdObs">Observaciones generales del cierre de jornada</label>
             <div class="text-xs mb-2" style="color:var(--ink-soft)">Opcional: incidencias, restricciones, dificultades u otra información relevante.</div>
@@ -3076,13 +3117,13 @@
         ${rep.charla.inicio ? ` · Inicio ${horaDe(rep.charla.inicio)}` : ""}${rep.charla.fin ? ` · Fin ${horaDe(rep.charla.fin)}` : ""}
         ${rep.charla.duracion ? ` · Visto ${Math.min(100, Math.round(rep.charla.visto / rep.charla.duracion * 100))} % de ${Math.round(rep.charla.duracion)} s` : ""}
       </div>
-      ${(rep.actividades || []).map(a => `
+      ${actsPorGrupo(rep.actividades, (a, num) => `
         <div class="rd-dato mb-2 text-sm">
-          <div class="flex justify-between gap-2"><b>${a.n}. ${escA(a.descripcion)}</b>
+          <div class="flex justify-between gap-2"><b>${num}. ${escA(a.descripcion)}</b>
             ${a.estado ? `<span class="badge" style="background:${a.estado === "EJECUTADA" ? "#DDF3E7;color:#12613B" : a.estado === "PARCIAL" ? "#FFF1C7;color:#6B4A00" : "#FBE0DD;color:#8E2019"}">${RD_EJEC_TXT[a.estado]}</span>` : ""}</div>
           ${a.comentario ? `<div class="text-xs mt-1" style="color:var(--ink-soft)">Mañana: ${escA(a.comentario)}</div>` : ""}
           ${a.sustento ? `<div class="text-xs mt-1"><b>${a.estado === "EJECUTADA" ? "Observación" : "Sustento"}:</b> ${escA(a.sustento)}</div>` : ""}
-        </div>`).join("")}
+        </div>`)}
       ${rep.observaciones ? `<div class="rd-dato text-sm mt-2"><small>Observaciones generales</small>${escA(rep.observaciones)}</div>` : ""}`;
   }
   function renderRdCerrado(rep) {
@@ -3289,7 +3330,9 @@
     </style>`;
   }
   const DOMINIOS_APP = [
-    { k: "actividades", n: "Actividades planificadas", d: "Campo «Actividad» del Reporte diario de actividades", ej: "Ej.: Detección acústica de fugas" },
+    { k: "actividades", n: "Actividades planificadas (Contratista)", d: "Ítem 2 del Reporte diario de actividades", ej: "Ej.: Detección acústica de fugas" },
+    { k: "actividades_ecrf", n: "Actividades planificadas (ECRF)", d: "Ítem 3 del Reporte diario de actividades", ej: "Ej.: Supervisión de contratista" },
+    { k: "tecnicos", n: "Técnicos a cargo (contratista)", d: "Campo «Técnico a cargo» de la Verificación por muestreo (GPFO0416)", ej: "Ej.: Juan Pérez" },
     { k: "motivos", n: "Motivos de salida del vehículo", d: "Campo «Motivo de salida» del Laboratorio ECRF (recorridos)", ej: "Ej.: Traslado de equipos" }
   ];
   function htmlAdminCatalogo() {
@@ -3341,7 +3384,10 @@
     const d = state.adminRd; if (!d || d.error) return;
     const llamar = async (tipo, datos, errId) => {
       let error = null;
-      try { state.adminRd = await rdApi(tipo, datos); if (state.adminRd.aviso) toast(state.adminRd.aviso); else toast("Guardado ✅"); }
+      try { state.adminRd = await rdApi(tipo, datos);
+        const tec = state.adminRd.dominios && state.adminRd.dominios.tecnicos;
+        if (tec) guardarTecnicos(tec.filter(t => t.activo).map(t => t.descripcion));
+        if (state.adminRd.aviso) toast(state.adminRd.aviso); else toast("Guardado ✅"); }
       catch (e) { error = msgError(e); }
       if (!error && errId === "chErr") state.adminCharlaEd = null;
       if (!error && errId === "caErr") state.caNueva = "";
@@ -3502,7 +3548,7 @@
       ${conCoord.length > 1 ? `<button id="mapaOrdenar" class="btn-ghost w-full mb-2">↻ Ordenar por cercanía${state.coords && state.coords.lat != null ? " (desde donde estoy)" : ""}</button>` : ""}
       ${tramos.map((t, i) => `
         <a href="${urlTramo(t)}" target="_blank" rel="noopener" class="btn-primary w-full mb-2" style="display:flex;align-items:center;justify-content:center;gap:8px;text-decoration:none">
-          ▶ Abrir en Google Maps${tramos.length > 1 ? ` · tramo ${i + 1} (paradas ${i * PARADAS_TRAMO + 1}–${i * PARADAS_TRAMO + t.length})` : ""}
+          ${icoApp("maps")}Abrir en Google Maps${tramos.length > 1 ? ` · tramo ${i + 1} (paradas ${i * PARADAS_TRAMO + 1}–${i * PARADAS_TRAMO + t.length})` : ""}
         </a>`).join("")}
       <div class="text-xs mt-2 mb-1 font-semibold" style="color:var(--ink-soft)">Orden de visita</div>
       ${conCoord.map((p, i) => `<div class="text-sm py-1" style="border-bottom:1px solid #EEF2F6"><b>${i + 1}.</b> NIS ${escA(p.nis)} · ${escA(p.direccion || "")} <span style="color:var(--ink-soft)">· ${escA(p.form ? FORM_CORTO[p.form] || "" : "")}${esSupervisor() ? " · " + escA(p.para) : ""}</span></div>`).join("")}
@@ -3746,8 +3792,8 @@
             <div id="mnEstado" class="text-sm mt-2" style="color:var(--ink-soft)">${modo === "med" ? (
               mb && mb.buscando ? "Buscando el medidor…" : mb && mb.error ? `<span style="color:var(--danger);font-weight:600">${escA(mb.error)}</span>`
               : mb && mb.nis === null ? `<span style="color:var(--danger);font-weight:600">El medidor ${escA(mb.m)} no está en la base.</span>`
-              : mb && mb.nis ? `Medidor <b>${escA(mb.m)}</b> → NIS <b>${escA(mb.nis)}</b>${est === "noexiste" ? ` <span style="color:var(--danger)">(el NIS no está en la base)</span>` : ""}`
-              : "Escribe el número de medidor completo (letras y números).")
+              : mb && mb.nis ? `Medidor <b>${escA(mb.m)}</b> → NIS <b>${escA(mb.nis)}</b>${est === "noexiste" ? ` <span style="color:var(--danger)">(el NIS no está en la base)</span>` : mb.sinCoord ? ` <span style="color:#6B4A00">(el NIS no tiene coordenadas en la base: no se puede ubicar en el plano)</span>` : ""}`
+              : "Busca en toda la base de SEDAPAL, no solo en el radio del plano. Escribe el número completo (letras y números).")
               : est === "buscando" ? "Buscando en la base de NIS…" : est === "noexiste" ? `<span style="color:var(--danger);font-weight:600">El NIS ${escA(q)} no está en la base.</span>`
               : est === "sinred" ? "Sin internet: solo se encuentran los NIS consultados antes en este equipo." : q.length && q.length < 7 ? "El NIS tiene 7 dígitos." : "El plano se carga alrededor del NIS que busques."}</div>
             ${hist.length ? `<div class="gis-lbl mt-3">Últimos NIS consultados</div><div class="flex gap-2" style="flex-wrap:wrap">${hist.slice(0, 3).map(n => `<button class="gis-chip mnHist" data-n="${n}" aria-pressed="${n === state.mnSel}">${n}</button>`).join("")}</div>` : ""}
@@ -3775,7 +3821,7 @@
               <div class="rd-dato"><small>Distancia</small><b>${dist == null ? (yo ? "—" : "Activa tu ubicación") : fmtKm(dist)}</b></div>
               ${sel.latNis != null ? `<div class="rd-dato" style="grid-column:1/-1"><small>Coordenadas (WGS84)</small><b style="font-variant-numeric:tabular-nums">${Number(sel.latNis).toFixed(6)}, ${Number(sel.lonNis).toFixed(6)}</b></div>` : ""}
             </div>
-            ${sel.latNis != null ? `<a class="btn-primary w-full mt-3" style="display:flex;justify-content:center;text-decoration:none" target="_blank" rel="noopener" href="https://www.google.com/maps/dir/?api=1&destination=${sel.latNis},${sel.lonNis}">▶ Cómo llegar (Google Maps)</a>` : ""}
+            ${sel.latNis != null ? `<a class="btn-primary w-full mt-3" style="display:flex;justify-content:center;text-decoration:none" target="_blank" rel="noopener" href="https://www.google.com/maps/dir/?api=1&destination=${sel.latNis},${sel.lonNis}">${icoApp("maps")}Cómo llegar (Google Maps)</a>` : ""}
             <div class="gis-lbl mt-4">Registrar con este NIS</div>
             <div class="mn-atajos">
               <button class="mnAtajo" data-f="GPFO0381"><span>${ICO_LAT.GPFO0381}</span>Toma de presiones</button>
@@ -3828,8 +3874,12 @@
         state.mnMedBusq = { m: r.medidor || m, nis: r.nis || null };
         if (r.nis) {
           state.mnQuery = r.nis;
+          // el servidor busca el medidor en toda la base y ya trae los datos del NIS: el plano se lleva a ese punto, esté donde esté
+          if (r.dato && !nisLocal(r.nis)) { NIS_REMOTO[r.nis] = desdeServidor(r.nis, r.dato); guardarCacheNis(); }
           if (!nisLocal(r.nis) && NIS_REMOTO[r.nis] === undefined) await buscarNisServidor(r.nis);
-          if (nisLocal(r.nis)) { centrarEnNis(r.nis); return; }
+          const d = nisLocal(r.nis);
+          if (d && d.latNis != null && d.latNis !== "") { centrarEnNis(r.nis); return; }
+          state.mnMedBusq.sinCoord = !!d;
         }
       } catch (e) { state.mnMedBusq = { m, error: e && e.code === "sin_base_medidor" ? "Falta cargar la carpeta ECRF_BASE_MEDIDOR en el Drive" : msgError(e) }; }
       if (state.vista === "PLANO_GIS") renderPlano();
@@ -3843,7 +3893,7 @@
       if (state.vista === "PLANO_GIS") renderPlano();
     };
     inp.oninput = () => {
-      if ((state.mnModo || "nis") === "med") { state.mnMedQ = inp.value.toUpperCase(); return; }
+      if ((state.mnModo || "nis") === "med") { state.mnMedQ = inp.value.toUpperCase().replace(/\s+/g, ""); if (state.mnMedQ.length === 10) buscar(); return; }   // la mayoría de medidores tiene 10 caracteres
       inp.value = inp.value.replace(/\D/g, "").slice(0, 7); precargarNis(inp.value); if (inp.value.length === 7) buscar();
     };
     inp.onkeydown = e => { if (e.key === "Enter") buscar(); };
@@ -4270,6 +4320,13 @@
   const claveRutaInfo = () => "ecrf_ruta_info_" + (state.operario || "") + "_" + todayISO();
   const fmtMin = m => m == null ? "—" : m < 60 ? Math.round(m) + " min" : Math.floor(m / 60) + " h " + String(Math.round(m % 60)).padStart(2, "0") + " min";
   // Waze solo acepta un destino por enlace (no varias paradas): se abre la parada indicada
+  // Ícono de la app en los botones: usa el archivo oficial que se suba al repositorio (iconos/google-maps.png, iconos/waze.png);
+  // si no está o no hay señal, queda un ícono genérico (pin / flecha de navegación)
+  const ICO_GEN = {
+    maps: `<svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path fill="currentColor" d="M12 2a7 7 0 0 0-7 7c0 5.2 7 13 7 13s7-7.8 7-13a7 7 0 0 0-7-7zm0 9.5A2.5 2.5 0 1 1 12 6.5a2.5 2.5 0 0 1 0 5z"/></svg>`,
+    waze: `<svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path fill="currentColor" d="M21 3 3 10.5l7.2 2.3L12.5 20z"/></svg>`
+  };
+  const icoApp = k => `<span class="ico-app"><img src="iconos/${k === "maps" ? "google-maps" : "waze"}.png" alt="" onerror="this.nextElementSibling.style.display='inline-flex';this.remove()"><span class="ico-gen" style="display:none">${ICO_GEN[k]}</span></span>`;
   const urlWaze = p => p ? "https://waze.com/ul?ll=" + Number(p.lat).toFixed(6) + "%2C" + Number(p.lon).toFixed(6) + "&navigate=yes" : "#";
   function renderPlanificador() {
     const todas = aplicarOrden(paradasRuta());
@@ -4325,8 +4382,8 @@
             <div class="rd-dato"><small>${porCalles && info.fuente !== "linea" ? "Recorrido por calles" : "Recorrido aprox."}</small><b>${porCalles && info.fuente !== "linea" ? fmtKm(info.km) : fmtKm(total)}</b></div>
             <div class="rd-dato"><small>${porCalles && info.conTrafico ? "Tiempo con tráfico" : "Tiempo estimado"}</small><b>${porCalles && info.min ? fmtMin(info.min) : "—"}</b></div>
           </div>
-          ${tramos.map((t, i) => `<a href="${urlTramo(t)}" target="_blank" rel="noopener" class="btn-primary w-full mt-2 plGmaps" style="display:flex;justify-content:center;text-decoration:none;background:#1E9E4A">▶ Abrir en Google Maps${tramos.length > 1 ? ` · tramo ${i + 1} (paradas ${i * PARADAS_TRAMO + 1}–${i * PARADAS_TRAMO + t.length})` : ""}</a>`).join("")}
-          <a href="${urlWaze(con[0])}" target="_blank" rel="noopener" class="btn-primary w-full mt-2 plWaze" style="display:flex;justify-content:center;text-decoration:none;background:#33CCFF;color:#04294A">▶ Abrir en Waze · parada 1 (NIS ${escA(con[0].nis)})</a>
+          ${tramos.map((t, i) => `<a href="${urlTramo(t)}" target="_blank" rel="noopener" class="btn-primary w-full mt-2 plGmaps btn-app" style="background:#1E9E4A">${icoApp("maps")}Abrir en Google Maps${tramos.length > 1 ? ` · tramo ${i + 1} (paradas ${i * PARADAS_TRAMO + 1}–${i * PARADAS_TRAMO + t.length})` : ""}</a>`).join("")}
+          <a href="${urlWaze(con[0])}" target="_blank" rel="noopener" class="btn-primary w-full mt-2 plWaze btn-app" style="background:#33CCFF;color:#04294A">${icoApp("waze")}Abrir en Waze · parada 1 (NIS ${escA(con[0].nis)})</a>
           <div class="text-xs mt-1" style="color:var(--ink-soft)">Waze solo acepta un destino a la vez: al llegar, abre la siguiente parada con su botón <b>Waze</b> de la lista.</div>
           <ol class="pl-lista mt-3">${con.map((p, i) => {
             const d = i > 0 ? distKm(con[i - 1], p) : yo ? distKm(yo, p) : null, t = tramoDe(p.id);
@@ -4335,7 +4392,7 @@
               <div class="min-w-0 flex-1"><b>NIS ${escA(p.nis)}</b>${p.form ? ` <span class="pl-form">${escA(FORM_CORTO[p.form] || "")}</span>` : ""}
                 <div class="text-sm" style="color:var(--ink-soft)">${escA(p.direccion || "")}${p.distrito ? " · " + escA(p.distrito) : ""}</div>
                 <div class="text-xs" style="color:var(--ink-soft)">${t && info.fuente !== "linea" ? (i === 0 ? "Desde tu ubicación: " : "Desde la anterior: ") + fmtKm(t.km) + " · " + fmtMin(t.min) : d != null ? (i === 0 ? "Desde tu ubicación: " : "Desde la anterior: ") + fmtKm(d) + " en línea recta" : ""}</div>
-                <a href="${urlWaze(p)}" target="_blank" rel="noopener" class="pl-waze">Waze ▸</a>
+                <a href="${urlWaze(p)}" target="_blank" rel="noopener" class="pl-waze">${icoApp("waze")}Waze</a>
               </div>
               <div class="pl-acc">
                 <button class="pl-btn plSube" data-id="${p.id}" aria-label="Subir" ${i === 0 ? "disabled" : ""}>↑</button>
