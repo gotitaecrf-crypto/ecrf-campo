@@ -2368,7 +2368,10 @@
     PLANIFICADOR_RUTAS: { tipo: "vista", soloAdmin: true, ico: () => ICO_RUTA, abrir: () => abrirModulo("PLANIFICADOR_RUTAS"), estilo: "background:#E6F6EF;border-color:#9BD3B0",
            defecto: { titulo: "Planificador de rutas", descripcion: "Ordena tus NIS por cercanía" } },
     LABORATORIO_ECRF: { tipo: "vista", soloAdmin: true, ico: () => ICO_LAB, abrir: () => abrirModulo("LABORATORIO_ECRF"), estilo: "background:#E6F6EF;border-color:#9BD3B0",
-           defecto: { titulo: "Laboratorio ECRF", descripcion: "Ficha del vehículo y recorridos" } }
+           defecto: { titulo: "Laboratorio ECRF", descripcion: "Ficha del vehículo y recorridos" } },
+    // Incidencias del SGIO por día de solicitud (29 campos); lo ven todos los roles
+    SGIO: { tipo: "vista", ico: () => ICO_SGIO, abrir: () => abrirModulo("SGIO"), estilo: "background:#FFF4DB;border-color:#F2C46D",
+           defecto: { titulo: "Incidencias SGIO", descripcion: "Fugas registradas en el SGIO por día" } }
   };
   const MOD_RETIRADOS = ["MAPA_NIS", "REPLICA_GIS"];   // se unieron en PLANO_GIS
   function modulosConfig() {
@@ -3745,8 +3748,9 @@
     GPFO0381: ICS(`<path d="m12 14 4-4"/><path d="M3.34 19a10 10 0 1 1 17.32 0"/>`),
     GPFO0405: ICS(`<path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/>`),
     GPFO0416: ICS(`<circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/><path d="m8 11 2 2 4-4"/>`),
-    PLANIFICADOR_RUTAS: ICO_RUTA, LABORATORIO_ECRF: ICO_LAB
+    PLANIFICADOR_RUTAS: ICO_RUTA, LABORATORIO_ECRF: ICO_LAB, SGIO: ICS(`<path d="M12 3s-5 5.6-5 9a5 5 0 0 0 10 0c0-3.4-5-9-5-9z"/><path d="M4 21h16"/>`)
   };
+  const ICO_SGIO = ICO_LAT.SGIO;
   const GRUPOS_NAV = [
     { id: "OPER", nombre: "Operaciones diarias", color: "#EAF6EE" },
     { id: "FORM", nombre: "Formularios ECRF", color: "#E1F3FB" },
@@ -3754,7 +3758,7 @@
     { id: "GESTION", nombre: "Gestión & Reportes", color: "#FFF4DB" }
   ];
   const GRUPO_DE = { REPORTE_DIARIO: "OPER", GPFO0381: "FORM", GPFO0405: "FORM", GPFO0416: "FORM", PDF: "FORM",
-                     PLANO_GIS: "GIS", PLANIFICADOR_RUTAS: "GIS", LABORATORIO_ECRF: "GIS" };
+                     PLANO_GIS: "GIS", PLANIFICADOR_RUTAS: "GIS", LABORATORIO_ECRF: "GIS", SGIO: "GESTION" };
   // Los elementos que se ven en el menú, agrupados (respeta lo que configuró el administrador)
   function navAgrupado() {
     const mods = modulosMenu();
@@ -3777,7 +3781,7 @@
     else if (MODULOS_APP[id] && MODULOS_APP[id].tipo === "form") {
       state.form = id; sessionStorage.setItem("ecrf_form", id); state.tab = "nuevo";
       resetForm(); state.rutaSel = null; state.rutaQuery = "";
-    } else if (["PLANO_GIS", "PLANIFICADOR_RUTAS", "LABORATORIO_ECRF"].includes(id)) {
+    } else if (["PLANO_GIS", "PLANIFICADOR_RUTAS", "LABORATORIO_ECRF", "SGIO"].includes(id)) {
       state.vista = id; state.labTab = "vehiculo";
       if (id === "PLANO_GIS") { state.rgRadio = state.rgRadio || RG_RADIO_DEF; state.rgDatos = null; state.rgAuto = true; }   // al entrar: el plano alrededor de donde estás
     }
@@ -3819,12 +3823,12 @@
   }
 
   // Encabezado común de las vistas GIS (mismo estilo que el Reporte diario)
-  function cabeceraGis(titulo, sub, ico) {
+  function cabeceraGis(titulo, sub, ico, grupo) {
     return `<div class="rd-top" style="background:var(--brand-dark);color:#fff"><div class="gis-wrap px-4 pt-3 pb-3 flex items-center gap-3">
         <button id="gisVolver" class="text-white font-bold text-xl leading-none px-1" aria-label="Volver al inicio">‹</button>
         <span class="form-ico" style="display:flex;align-items:center;justify-content:center;background:rgba(255,255,255,.12);color:#fff;width:46px;height:46px">${ico}</span>
         <div class="flex-1 min-w-0"><div class="font-extrabold leading-tight">${titulo}</div>
-          <div class="text-xs" style="color:#C9D8EA">GIS & Logística · ${escA(sub)}</div></div>
+          <div class="text-xs" style="color:#C9D8EA">${escA(grupo || "GIS & Logística")} · ${escA(sub)}</div></div>
         <span class="logo-chip"><img src="${LOGO_SEDAPAL}" alt="SEDAPAL"></span>
       </div></div>`;
   }
@@ -3842,6 +3846,7 @@
     app.classList.remove("max-w-md");
     if (state.vista === "PLANO_GIS") renderPlano();
     else if (state.vista === "PLANIFICADOR_RUTAS") renderPlanificador();
+    else if (state.vista === "SGIO") renderSgio();
     else renderLaboratorio();
     const v = document.getElementById("gisVolver"); if (v) v.onclick = () => salirVistaGis();
   }
@@ -4649,6 +4654,186 @@
     try { state.labDatos = await rdApi("lab_datos"); } catch (e) { state.labDatos = { error: msgError(e) }; }
     if (state.vista === "LABORATORIO_ECRF") renderLaboratorio();
     if (state.admin && state.adminTab === "vehiculo") renderAdmin();
+  }
+  /* ---------------- INCIDENCIAS SGIO (módulo SGIO) ----------------
+     Incidencias de fugas del SGIO por día de solicitud (f_inicio), con los 29 campos. Por defecto, las de hoy. */
+  const SGIO_ETQ = { tipo_fuga: "Tipo de fuga", tipologia: "Tipología (ubicación)", municipio: "Distrito", localidad: "Localidad", direccion: "Dirección",
+    cliente: "Cliente", cod_sector: "Sector", labmovil: "Laboratorio móvil", gerencia: "Gerencia", centro: "Centro de servicios",
+    ncod_fugas: "Código SGIO", f_aviso: "Fecha de aviso", nis_rad: "NIS", vobservaciones_fugas: "Observación de la fuga", nconexiones: "Conexiones revisadas",
+    ndiametro_red: "Diámetro", npresion: "Presión (mca)", f_revision: "Fecha de detección (revisión)", ncaudal: "Caudal (L/día)", nkm: "Km de red revisados",
+    vmaterial: "Material", est_fuga: "Estado de la fuga", equipo: "Equipo de reparación", estado_fuga: "Estado de atención", vobservaciones_aviso: "Observación del aviso",
+    f_inicio: "Fecha de solicitud", vnextel: "Nextel", vpersona_responsable: "Responsable", vpersona_solicita: "Solicitante" };
+  const sgCache = {};
+  const sgVal = v => v === "" || v == null ? "—" : String(v);
+  async function cargarSgio(fecha, forzar) {
+    const c = sgCache[fecha];
+    if (c && !forzar && (fecha !== todayISO() || Date.now() - c.__t < 5 * 60000)) { state.sgDatos = c; return renderSgio(); }   // lo de hoy se vuelve a pedir cada 5 min
+    state.sgDatos = { fecha, cargando: true }; renderSgio();
+    try { const r = await rdApi("sgio_dia", { fecha }); r.__t = Date.now(); sgCache[fecha] = r; if (state.sgFecha === fecha) state.sgDatos = r; }
+    catch (e) { if (state.sgFecha === fecha) state.sgDatos = { fecha, error: msgError(e) }; }
+    if (state.vista === "SGIO") renderSgio();
+  }
+  function sgFiltradas(d) {
+    const ix = c => d.campos.indexOf(c), q = (state.sgQ || "").trim().toUpperCase(), tf = state.sgTipo || "";
+    return d.filas.filter(f => (!tf || String(f[ix("tipo_fuga")]).toUpperCase() === tf) && (!q || f.some(v => String(v).toUpperCase().includes(q))));
+  }
+  function sgCambiarDia(delta) {
+    const t = new Date(state.sgFecha + "T12:00:00"); t.setDate(t.getDate() + delta);
+    state.sgFecha = t.toISOString().slice(0, 10); state.sgAbiertos = {}; cargarSgio(state.sgFecha);
+  }
+  function renderSgio() {
+    if (!state.sgFecha) state.sgFecha = todayISO();
+    const hoy = todayISO(), vista = state.sgVista || "tarjetas";
+    const d = state.sgDatos && state.sgDatos.fecha === state.sgFecha ? state.sgDatos : null;
+    const listo = d && d.fecha === state.sgFecha && !d.cargando && !d.error;
+    const ix = c => listo ? d.campos.indexOf(c) : -1;
+    const filas = listo ? sgFiltradas(d) : [];
+    const cuenta = (c, v) => listo ? d.filas.filter(f => String(f[ix(c)]).toUpperCase() === v).length : 0;
+    const tipos = listo ? [...new Set(d.filas.map(f => String(f[ix("tipo_fuga")]).toUpperCase()).filter(Boolean))].sort() : [];
+    const badge = (t, bg) => `<span class="sg-badge" style="background:${bg}">${escA(t)}</span>`;
+    const colEst = v => /NO/.test(v) ? "#FBE0DD;color:#8E2019" : /REPAR/.test(v) ? "#DDF3E7;color:#12613B" : "#EEF2F6;color:#334155";
+    const tarjeta = (f, i) => {
+      const abierto = (state.sgAbiertos || {})[i];
+      return `<div class="card p-4 sg-card">
+        <div class="flex items-start gap-2" style="flex-wrap:wrap">
+          <b class="sg-cod">SGIO ${escA(sgVal(f[ix("ncod_fugas")]))}</b>
+          ${f[ix("tipo_fuga")] ? badge(f[ix("tipo_fuga")], /EMERG/i.test(f[ix("tipo_fuga")]) ? "#FFE6D5;color:#8A3A00" : "#E1F3FB;color:#0B4A6B") : ""}
+          ${f[ix("est_fuga")] ? badge(f[ix("est_fuga")], colEst(String(f[ix("est_fuga")]).toUpperCase())) : ""}
+          ${f[ix("estado_fuga")] ? badge(f[ix("estado_fuga")], "#EEF2F6;color:#334155") : ""}
+        </div>
+        <div class="font-semibold mt-2">${escA(sgVal(f[ix("direccion")]))}</div>
+        <div class="text-sm" style="color:var(--ink-soft)">${escA([f[ix("localidad")], f[ix("municipio")], f[ix("cod_sector")] !== "" ? "Sector " + f[ix("cod_sector")] : ""].filter(Boolean).join(" · "))}</div>
+        <div class="sg-kpis">
+          <div><small>NIS</small><b>${escA(sgVal(f[ix("nis_rad")]))}</b></div>
+          <div><small>Caudal</small><b>${f[ix("ncaudal")] === "" ? "—" : escA(f[ix("ncaudal")]) + " L/día"}</b></div>
+          <div><small>Solicitud</small><b>${escA(sgVal(f[ix("f_inicio")]))}</b></div>
+          <div><small>Tipología</small><b>${escA(sgVal(f[ix("tipologia")]))}</b></div>
+        </div>
+        <button class="sgVer gis-chip mt-3" data-i="${i}" aria-expanded="${!!abierto}">${abierto ? "▾ Ocultar detalle" : "▸ Ver los 29 campos"}</button>
+        ${abierto ? `<dl class="sg-det">${d.campos.map((c, k) => `<div class="${/^vobserv/.test(c) ? "sg-ancho" : ""}"><dt>${escA(SGIO_ETQ[c] || c)}</dt><dd>${escA(sgVal(f[k]))}</dd></div>`).join("")}</dl>` : ""}
+      </div>`;
+    };
+    document.getElementById("app").innerHTML = `${estilosGis()}
+      ${cabeceraGis("Incidencias SGIO", "fugas por día de solicitud", ICO_SGIO, "Gestión & Reportes")}
+      <div class="gis-wrap px-4 py-4 pb-24">
+        <div class="card p-4 mb-3">
+          <label class="text-sm font-semibold block mb-2" for="sgFecha" style="color:var(--ink-soft)">Día de solicitud (f_inicio)</label>
+          <div class="sg-dia">
+            <button id="sgAnt" class="btn-ghost" aria-label="Día anterior">‹</button>
+            <input id="sgFecha" type="date" class="input" value="${state.sgFecha}" max="${hoy}">
+            <button id="sgSig" class="btn-ghost" aria-label="Día siguiente" ${state.sgFecha >= hoy ? "disabled" : ""}>›</button>
+          </div>
+          ${state.sgFecha !== hoy ? `<button id="sgHoy" class="gis-chip mt-2">Volver a hoy</button>` : `<div class="text-xs mt-2" style="color:var(--ink-soft)">Mostrando las incidencias de <b>hoy</b>.</div>`}
+        </div>
+        ${!d || d.cargando ? `<div class="text-sm py-6" style="color:var(--ink-soft)">Cargando incidencias del ${fechaTxt(state.sgFecha)}…</div>`
+        : d.error ? `<div class="card p-4"><div class="text-sm" style="color:var(--danger);font-weight:600">${escA(d.error)}</div><button id="sgReint" class="btn-primary w-full mt-3">Reintentar</button></div>`
+        : `
+        ${d.aviso ? `<div class="p-3 mb-3 rounded-xl text-sm font-semibold" style="background:#FFF1C7;color:#6B4A00">⚠ ${escA(d.aviso)}</div>` : ""}
+        <div class="sg-res">
+          <div><small>Incidencias</small><b>${d.filas.length}</b></div>
+          ${tipos.map(t => `<div><small>${escA(t.charAt(0) + t.slice(1).toLowerCase())}</small><b>${cuenta("tipo_fuga", t)}</b></div>`).join("")}
+          <div><small>Reparadas</small><b>${cuenta("est_fuga", "REPARADO")}</b></div>
+          <div><small>No reparadas</small><b>${cuenta("est_fuga", "NO REPARADO")}</b></div>
+        </div>
+        ${d.filas.length ? `
+        <div class="sg-barra">
+          <input id="sgQ" class="input" placeholder="Buscar: código, NIS, dirección, distrito…" value="${escA(state.sgQ || "")}" autocomplete="off">
+          <div class="flex gap-2" style="flex-wrap:wrap">
+            ${["", ...tipos].map(t => `<button class="gis-chip sgTipo" data-t="${escA(t)}" aria-pressed="${(state.sgTipo || "") === t}">${t ? escA(t.charAt(0) + t.slice(1).toLowerCase()) : "Todas"}</button>`).join("")}
+            <span style="flex:1"></span>
+            <button class="gis-chip sgVista" data-v="tarjetas" aria-pressed="${vista === "tarjetas"}">Tarjetas</button>
+            <button class="gis-chip sgVista" data-v="tabla" aria-pressed="${vista === "tabla"}">Tabla</button>
+            <button id="sgCsv" class="gis-chip">⬇ Excel (CSV)</button>
+          </div>
+        </div>
+        <div class="text-xs mb-2" style="color:var(--ink-soft)">${filas.length} de ${d.filas.length} incidencia(s)${d.actualizado ? " · Última carga: " + escA(d.actualizado) : ""}</div>
+        ${!filas.length ? `<div class="text-sm py-6 text-center" style="color:var(--ink-soft)">Ninguna coincide con la búsqueda.</div>`
+          : vista === "tabla" ? `<div class="sg-tabla-w"><table class="sg-tabla"><thead><tr>${d.campos.map(c => `<th>${escA(SGIO_ETQ[c] || c)}</th>`).join("")}</tr></thead>
+              <tbody>${filas.map(f => `<tr>${f.map((v, k) => `<td class="${/^vobserv/.test(d.campos[k]) ? "sg-largo" : ""}">${escA(sgVal(v))}</td>`).join("")}</tr>`).join("")}</tbody></table></div>`
+          : `<div class="sg-lista">${filas.map(f => tarjeta(f, d.filas.indexOf(f))).join("")}</div>`}`
+        : `<div class="card p-6 text-center text-sm" style="color:var(--ink-soft)">No hay incidencias con fecha de solicitud ${fechaTxt(state.sgFecha)}${d.hayMes === false ? " (aún no hay datos cargados para ese mes)" : ""}.</div>`}`}
+        ${esAdmin() ? htmlSgioAdmin() : ""}
+      </div>
+      <style>
+        .sg-dia{display:grid;grid-template-columns:52px 1fr 52px;gap:8px}.sg-dia .btn-ghost{padding:0;font-size:24px;font-weight:800}
+        .sg-res{display:grid;grid-template-columns:repeat(auto-fit,minmax(110px,1fr));gap:8px;margin-bottom:12px}
+        .sg-res>div,.sg-kpis>div{background:var(--bg);border-radius:12px;padding:8px 10px}.sg-res small,.sg-kpis small{display:block;font-size:11px;font-weight:700;color:var(--ink-soft);text-transform:uppercase}
+        .sg-res b{font-size:22px}.sg-kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:8px;margin-top:10px}.sg-kpis b{font-size:14px;word-break:break-word}
+        .sg-barra{display:grid;gap:8px;margin-bottom:8px}.sg-lista{display:grid;gap:10px;grid-template-columns:repeat(auto-fill,minmax(320px,1fr))}
+        .sg-badge{font-size:11px;font-weight:800;border-radius:999px;padding:3px 9px}.sg-cod{color:var(--brand-dark);font-size:17px}
+        .sg-det{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px 12px;margin-top:12px;border-top:1px solid var(--line);padding-top:12px}
+        .sg-det dt{font-size:11px;font-weight:700;color:var(--ink-soft);text-transform:uppercase}.sg-det dd{margin:0;font-size:14px;word-break:break-word;white-space:pre-line}.sg-ancho{grid-column:1/-1}
+        .sg-tabla-w{overflow:auto;max-height:70vh;border:1px solid var(--line);border-radius:12px;background:#fff}
+        .sg-tabla{border-collapse:collapse;font-size:12.5px;min-width:100%}.sg-tabla th{position:sticky;top:0;background:#03204C;color:#fff;text-align:left;padding:8px;white-space:nowrap;font-weight:700}
+        .sg-tabla td{padding:7px 8px;border-top:1px solid var(--line);white-space:nowrap;vertical-align:top}.sg-tabla td.sg-largo{white-space:normal;min-width:280px}
+        .sg-tabla tr:nth-child(even) td{background:#F7FAFC}
+        @media (max-width:420px){.sg-lista{grid-template-columns:1fr}}
+      </style>`;
+    document.getElementById("gisVolver").onclick = () => salirVistaGis();
+    if (!d) { cargarSgio(state.sgFecha); return; }
+    const inp = document.getElementById("sgFecha");
+    inp.onchange = () => { if (!inp.value) return; state.sgFecha = inp.value > hoy ? hoy : inp.value; state.sgAbiertos = {}; cargarSgio(state.sgFecha); };
+    document.getElementById("sgAnt").onclick = () => sgCambiarDia(-1);
+    document.getElementById("sgSig").onclick = () => { if (state.sgFecha < hoy) sgCambiarDia(1); };
+    const bh = document.getElementById("sgHoy"); if (bh) bh.onclick = () => { state.sgFecha = hoy; state.sgAbiertos = {}; cargarSgio(hoy); };
+    const re = document.getElementById("sgReint"); if (re) re.onclick = () => cargarSgio(state.sgFecha, true);
+    const q = document.getElementById("sgQ");
+    if (q) q.oninput = () => { state.sgQ = q.value; const pos = q.selectionStart; renderSgio(); const n = document.getElementById("sgQ"); n.focus(); n.setSelectionRange(pos, pos); };
+    document.querySelectorAll(".sgTipo").forEach(b => b.onclick = () => { state.sgTipo = b.dataset.t; renderSgio(); });
+    document.querySelectorAll(".sgVista").forEach(b => b.onclick = () => { state.sgVista = b.dataset.v; renderSgio(); });
+    document.querySelectorAll(".sgVer").forEach(b => b.onclick = () => { state.sgAbiertos = state.sgAbiertos || {}; state.sgAbiertos[b.dataset.i] = !state.sgAbiertos[b.dataset.i]; const y = window.scrollY; renderSgio(); window.scrollTo(0, y); });
+    const csv = document.getElementById("sgCsv");
+    if (csv) csv.onclick = () => {
+      const c = v => { const t = String(v == null ? "" : v); return /[";\n]/.test(t) ? '"' + t.replace(/"/g, '""') + '"' : t; };
+      const txt = "﻿" + [d.campos.map(k => SGIO_ETQ[k] || k), ...sgFiltradas(d)].map(r => r.map(c).join(";")).join("\r\n");
+      const a = document.createElement("a"); a.href = URL.createObjectURL(new Blob([txt], { type: "text/csv;charset=utf-8" }));
+      a.download = "SGIO_" + state.sgFecha + ".csv"; document.body.appendChild(a); a.click(); a.remove(); toast("Descarga lista");
+    };
+    if (esAdmin()) activarSgioAdmin();
+  }
+  // Administradores: preparar los Excel de la carpeta ECRF_SGIO (los grandes, uno por uno)
+  function htmlSgioAdmin() {
+    const a = state.sgAdmin;
+    return `<details class="card p-4 mt-4" id="sgAdm" ${state.sgAdmAbierto ? "open" : ""}>
+      <summary class="font-bold" style="cursor:pointer;color:var(--brand-dark)">⚙ Historial del SGIO (administrador)</summary>
+      <div class="text-xs mt-2 mb-3" style="color:var(--ink-soft)">Los Excel de la carpeta <b>ECRF_SGIO</b> del Drive se preparan una vez para la app. El del mes en curso se prepara solo al consultar; los grandes (un año) hay que prepararlos aquí, uno por uno (cada uno puede tardar unos minutos).</div>
+      ${!a ? `<button id="sgAdmCargar" class="btn-ghost w-full">Ver archivos</button>`
+      : a.error ? `<div class="rd-err">${escA(a.error)}</div><button id="sgAdmCargar" class="btn-ghost w-full mt-2">Reintentar</button>`
+      : `<div class="grid gap-2">${a.archivos.map(x => `
+          <div class="sg-arch">
+            <div class="min-w-0"><b>${escA(x.nombre)}</b><div class="text-xs" style="color:var(--ink-soft)">${x.mb} MB${x.desde ? " · " + fechaTxt(x.desde) + " al " + fechaTxt(x.hasta) : ""}</div>
+              <div class="text-xs" style="font-weight:700;color:${x.preparado ? "#12613B" : "#6B4A00"}">${a.trabajando === x.id ? "⏳ Preparando… (puede tardar varios minutos)" : x.preparado ? "✅ Preparado · " + x.n + " incidencias · " + escA(x.en) : x.desactualizado ? "⚠ El archivo cambió: vuelve a prepararlo" : "Pendiente"}</div></div>
+            <button class="btn-ghost sgPrep" data-id="${escA(x.id)}" ${a.trabajando ? "disabled" : ""} style="width:auto;padding:8px 12px">${x.preparado ? "Volver a preparar" : "Preparar"}</button>
+          </div>`).join("") || `<div class="text-sm" style="color:var(--ink-soft)">No hay archivos en la carpeta ECRF_SGIO.</div>`}</div>
+        ${a.archivos.some(x => !x.preparado) ? `<button id="sgPrepTodos" class="btn-primary w-full mt-3" ${a.trabajando ? "disabled" : ""}>Preparar todos los pendientes</button>` : ""}
+        ${a.msg ? `<div class="text-sm mt-2" style="font-weight:600;color:${a.msgErr ? "var(--danger)" : "#12613B"}">${escA(a.msg)}</div>` : ""}`}
+      <style>.sg-arch{display:grid;grid-template-columns:1fr auto;gap:10px;align-items:center;background:var(--bg);border-radius:12px;padding:10px 12px}</style>
+    </details>`;
+  }
+  function activarSgioAdmin() {
+    const det = document.getElementById("sgAdm"); if (det) det.ontoggle = () => { state.sgAdmAbierto = det.open; };
+    const cargar = async () => {
+      try { const r = await rdApi("sgio_estado"); state.sgAdmin = { archivos: r.archivos }; }
+      catch (e) { state.sgAdmin = { error: msgError(e) }; }
+      if (state.vista === "SGIO") { const y = window.scrollY; renderSgio(); window.scrollTo(0, y); }
+    };
+    const bc = document.getElementById("sgAdmCargar"); if (bc) bc.onclick = () => { state.sgAdmAbierto = true; cargar(); };
+    const preparar = async ids => {
+      const a = state.sgAdmin; let hechos = 0;
+      for (const id of ids) {
+        a.trabajando = id; a.msg = ""; if (state.vista === "SGIO") { const y = window.scrollY; renderSgio(); window.scrollTo(0, y); }
+        try {
+          const r = await rdApi("sgio_preparar", { id });
+          a.archivos = a.archivos.map(x => x.id === id ? r.archivo : x); hechos++;
+          a.msg = "Listo: " + r.archivo.nombre + " · " + r.n + " incidencias"; a.msgErr = false;
+        } catch (e) { a.msg = msgError(e); a.msgErr = true; break; }
+      }
+      a.trabajando = null;
+      if (hechos) { Object.keys(sgCache).forEach(k => delete sgCache[k]); state.sgDatos = null; }
+      if (state.vista === "SGIO") { const y = window.scrollY; renderSgio(); window.scrollTo(0, y); }
+    };
+    document.querySelectorAll(".sgPrep").forEach(b => b.onclick = () => preparar([b.dataset.id]));
+    const bt = document.getElementById("sgPrepTodos"); if (bt) bt.onclick = () => preparar(state.sgAdmin.archivos.filter(x => !x.preparado).map(x => x.id));
   }
   function renderLaboratorio() {
     const d = state.labDatos, tab = state.labTab || "vehiculo";
