@@ -2369,9 +2369,9 @@
            defecto: { titulo: "Planificador de rutas", descripcion: "Ordena tus NIS por cercanía" } },
     LABORATORIO_ECRF: { tipo: "vista", soloAdmin: true, ico: () => ICO_LAB, abrir: () => abrirModulo("LABORATORIO_ECRF"), estilo: "background:#E6F6EF;border-color:#9BD3B0",
            defecto: { titulo: "Laboratorio ECRF", descripcion: "Ficha del vehículo y recorridos" } },
-    // Incidencias del SGIO por día de solicitud (29 campos); lo ven todos los roles
+    // Incidencias del SGIO: listado por rango de fechas y detalle por día de solicitud; lo ven todos los roles
     SGIO: { tipo: "vista", ico: () => ICO_SGIO, abrir: () => abrirModulo("SGIO"), estilo: "background:#FFF4DB;border-color:#F2C46D",
-           defecto: { titulo: "Incidencias SGIO", descripcion: "Fugas registradas en el SGIO por día" } }
+           defecto: { titulo: "Incidencias SGIO", descripcion: "Fugas del SGIO por rango de fechas o por día" } }
   };
   const MOD_RETIRADOS = ["MAPA_NIS", "REPLICA_GIS"];   // se unieron en PLANO_GIS
   function modulosConfig() {
@@ -4656,13 +4656,15 @@
     if (state.admin && state.adminTab === "vehiculo") renderAdmin();
   }
   /* ---------------- INCIDENCIAS SGIO (módulo SGIO) ----------------
-     Incidencias de fugas del SGIO por día de solicitud (f_inicio), con los 29 campos. Por defecto, las de hoy. */
+     Listado de fugas por rango de fechas (de revisión o de registro), como «Inspecciones de Fugas» del SGIO, y
+     detalle por día de solicitud (f_inicio) con todos los campos. */
   const SGIO_ETQ = { tipo_fuga: "Tipo de fuga", tipologia: "Tipología (ubicación)", municipio: "Distrito", localidad: "Localidad", direccion: "Dirección",
     cliente: "Cliente", cod_sector: "Sector", labmovil: "Laboratorio móvil", gerencia: "Gerencia", centro: "Centro de servicios",
     ncod_fugas: "Código SGIO", f_aviso: "Fecha de aviso", nis_rad: "NIS", vobservaciones_fugas: "Observación de la fuga", nconexiones: "Conexiones revisadas",
     ndiametro_red: "Diámetro", npresion: "Presión (mca)", f_revision: "Fecha de detección (revisión)", ncaudal: "Caudal (L/día)", nkm: "Km de red revisados",
     vmaterial: "Material", est_fuga: "Estado de la fuga", equipo: "Equipo de reparación", estado_fuga: "Estado de atención", vobservaciones_aviso: "Observación del aviso",
-    f_inicio: "Fecha de solicitud", vnextel: "Nextel", vpersona_responsable: "Responsable", vpersona_solicita: "Solicitante" };
+    f_inicio: "Fecha de solicitud", vnextel: "Nextel", vpersona_responsable: "Responsable", vpersona_solicita: "Solicitante",
+    f_alta: "Fecha de registro", secsaten: "Tiempo de atención (días)" };
   const sgCache = {};
   const sgVal = v => v === "" || v == null ? "—" : String(v);
   async function cargarSgio(fecha, forzar) {
@@ -4681,7 +4683,124 @@
     const t = new Date(state.sgFecha + "T12:00:00"); t.setDate(t.getDate() + delta);
     state.sgFecha = t.toISOString().slice(0, 10); state.sgAbiertos = {}; cargarSgio(state.sgFecha);
   }
-  function renderSgio() {
+  /* ---- Listado por rango de fechas (como «Inspecciones de Fugas» del SGIO) ---- */
+  const SG_COLS = [["ncod_fugas", "Código"], ["nis_rad", "NIS"], ["estado_fuga", "Estado de fuga"], ["f_alta", "Fecha de registro"], ["f_revision", "Fecha de revisión"],
+    ["secsaten", "Tiempo de atención (días)"], ["municipio", "Distrito"], ["localidad", "Localidad"], ["direccion", "Dirección"]];
+  const sgColEstado = v => /GENERAR OT/.test(v) ? "#FDE4E1;color:#A3180B" : /PENDIENTE/.test(v) ? "#FFF1C7;color:#7A4B00" : /SIN FUGA/.test(v) ? "#EEF2F6;color:#3B4757"
+    : /CON FUGA/.test(v) ? "#E1ECFE;color:#1A47A6" : /ATENDIDO|FINALIZ/.test(v) ? "#DDF3E7;color:#12613B" : "#EEF2F6;color:#334155";
+  const sgEstTxt = e => (e.charAt(0) + e.slice(1).toLowerCase()).replace(/\bot\b/g, "OT");
+  let sgPedido = 0;
+  async function buscarSgioRango() {
+    const desde = state.sgDesde, hasta = state.sgHasta, por = state.sgPor || "revision", n = ++sgPedido;
+    if (!desde || !hasta) { state.sgR = { error: "Elige la fecha de inicio y la de término" }; return renderSgio(); }
+    if (desde > hasta) { state.sgR = { error: "La fecha de inicio es posterior a la de término" }; return renderSgio(); }
+    state.sgR = { cargando: true }; state.sgREst = ""; renderSgio();
+    try { const r = await rdApi("sgio_rango", { desde, hasta, por }); if (n === sgPedido) state.sgR = r; }
+    catch (e) { if (n === sgPedido) state.sgR = { error: msgError(e) }; }
+    if (n === sgPedido && state.vista === "SGIO") renderSgio();
+  }
+  function sgRangoFiltradas(r) {
+    const ix = c => r.campos.indexOf(c), q = (state.sgRQ || "").trim().toUpperCase(), est = state.sgREst || "";
+    return r.filas.filter(f => (!est || String(f[ix("estado_fuga")]).toUpperCase() === est) && (!q || f.some(v => String(v).toUpperCase().includes(q))));
+  }
+  // valor de cada columna del listado (la fecha de registro de los datos antiguos, sin f_alta, se toma de f_aviso)
+  const sgCelda = (r, f, c) => { const ix = k => r.campos.indexOf(k); const v = f[ix(c)];
+    return c === "f_alta" && (v === "" || v == null) ? f[ix("f_aviso")] : v; };
+  function sgTabs(modo) {
+    return `<div style="background:var(--card);border-bottom:1px solid var(--line)"><div class="gis-wrap flex px-4">
+      <div class="tab-btn sgModo ${modo === "rango" ? "active" : ""}" data-m="rango" role="button" tabindex="0">Listado por fechas</div>
+      <div class="tab-btn sgModo ${modo === "dia" ? "active" : ""}" data-m="dia" role="button" tabindex="0">Detalle por día</div>
+    </div></div>`;
+  }
+  function activarSgTabs() {
+    document.querySelectorAll(".sgModo").forEach(b => b.onclick = b.onkeydown = ev => {
+      if (ev.type === "keydown" && ev.key !== "Enter" && ev.key !== " ") return;
+      state.sgModo = b.dataset.m; window.scrollTo(0, 0); renderSgio(); });
+  }
+  function renderSgio() { return (state.sgModo || "rango") === "rango" ? renderSgioRango() : renderSgioDia(); }
+  function renderSgioRango() {
+    const hoy = todayISO();
+    if (!state.sgDesde) state.sgDesde = hoy.slice(0, 8) + "01";
+    if (!state.sgHasta) state.sgHasta = hoy;
+    const por = state.sgPor || "revision", r = state.sgR;
+    const listo = r && !r.cargando && !r.error && r.filas;
+    const filas = listo ? sgRangoFiltradas(r) : [];
+    const ixE = listo ? r.campos.indexOf("estado_fuga") : -1;
+    const estados = listo ? Object.entries(r.filas.reduce((o, f) => { const e = String(f[ixE] || "SIN ESTADO").toUpperCase(); o[e] = (o[e] || 0) + 1; return o; }, {})).sort((a, b) => b[1] - a[1]) : [];
+    const celda = (f, c) => {
+      const v = sgCelda(r, f, c);
+      if (c === "estado_fuga") return v ? `<span class="sg-badge" style="background:${sgColEstado(String(v).toUpperCase())}">${escA(v)}</span>` : "—";
+      if (c === "ncod_fugas") return `<b>${escA(sgVal(v))}</b>`;
+      return escA(sgVal(v));
+    };
+    document.getElementById("app").innerHTML = `${estilosGis()}
+      ${cabeceraGis("Incidencias SGIO", "listado de fugas por fechas", ICO_SGIO, "Gestión & Reportes")}
+      ${sgTabs("rango")}
+      <div class="gis-wrap px-4 py-4 pb-24">
+        <form id="sgRForm" class="card p-4 mb-3" autocomplete="off">
+          <div class="sgr-filtros">
+            <label><span>Fecha inicio</span><input id="sgDesde" type="date" class="input" value="${state.sgDesde}" required></label>
+            <label><span>Fecha término</span><input id="sgHasta" type="date" class="input" value="${state.sgHasta}" required></label>
+            <label><span>Buscar por</span><select id="sgPor" class="input">
+              <option value="revision" ${por === "revision" ? "selected" : ""}>Fecha de revisión</option>
+              <option value="registro" ${por === "registro" ? "selected" : ""}>Fecha de registro</option></select></label>
+            <button id="sgBuscar" type="submit" class="btn-primary" ${r && r.cargando ? "disabled" : ""}>${r && r.cargando ? "Buscando…" : "Buscar"}</button>
+          </div>
+          <div class="text-xs mt-2" style="color:var(--ink-soft)">Rango máximo: 3 meses.</div>
+        </form>
+        ${!r ? `<div class="card text-center text-sm" style="padding:20px;color:var(--ink-soft)">Elige la fecha de inicio y la de término y pulsa <b>Buscar</b> para ver el listado de fugas.</div>`
+        : r.cargando ? `<div class="text-sm py-6" style="color:var(--ink-soft)">Buscando fugas del ${fechaTxt(state.sgDesde)} al ${fechaTxt(state.sgHasta)}…</div>`
+        : r.error ? `<div class="card p-4"><div class="text-sm" style="color:var(--danger);font-weight:600">${escA(r.error)}</div></div>`
+        : !r.filas.length ? `<div class="card text-center text-sm" style="padding:20px;color:var(--ink-soft)">No hay fugas con fecha de ${r.por === "registro" ? "registro" : "revisión"} del ${fechaTxt(r.desde)} al ${fechaTxt(r.hasta)}.</div>`
+        : `
+        <div class="sg-res">
+          <div><small>Fugas</small><b>${r.filas.length}</b></div>
+          ${estados.slice(0, 5).map(([e, n]) => `<div><small>${escA(sgEstTxt(e))}</small><b>${n}</b></div>`).join("")}
+        </div>
+        <div class="sg-barra">
+          <input id="sgRQ" class="input" placeholder="Buscar: código, NIS, dirección, distrito…" value="${escA(state.sgRQ || "")}" autocomplete="off">
+          <div class="flex gap-2" style="flex-wrap:wrap">
+            ${[["", "Todos"], ...estados.map(([e]) => [e, sgEstTxt(e)])].map(([e, t]) => `<button class="gis-chip sgREst" data-e="${escA(e)}" aria-pressed="${(state.sgREst || "") === e}">${escA(t)}</button>`).join("")}
+            <span style="flex:1"></span>
+            <button id="sgRCsv" class="gis-chip">⬇ Excel (CSV)</button>
+          </div>
+        </div>
+        <div class="text-xs mb-2" style="color:var(--ink-soft)">${filas.length} de ${r.filas.length} fuga(s) · fecha de ${r.por === "registro" ? "registro" : "revisión"} del ${fechaTxt(r.desde)} al ${fechaTxt(r.hasta)}${r.actualizado ? " · Última carga: " + escA(r.actualizado) : ""}</div>
+        ${!filas.length ? `<div class="text-sm py-6 text-center" style="color:var(--ink-soft)">Ninguna coincide con la búsqueda.</div>`
+        : `<div class="sg-tabla-w"><table class="sg-tabla sgr-tabla"><thead><tr>${SG_COLS.map(([c, t]) => `<th class="sgr-${c}">${escA(t)}</th>`).join("")}</tr></thead>
+            <tbody>${filas.map(f => `<tr>${SG_COLS.map(([c]) => `<td class="sgr-${c}">${celda(f, c)}</td>`).join("")}</tr>`).join("")}</tbody></table></div>`}`}
+      </div>
+      <style>
+        .sgr-filtros{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:10px;align-items:end}.sgr-filtros label{min-width:0}.sgr-filtros .input{width:100%;min-width:0;box-sizing:border-box}.sgr-filtros label span{display:block;font-size:12px;font-weight:700;color:var(--ink-soft);margin-bottom:4px}
+        .sgr-filtros .btn-primary,.sgr-filtros label:nth-child(3){grid-column:1/-1}
+        @media (min-width:760px){.sgr-filtros{grid-template-columns:repeat(3,minmax(150px,220px)) 140px}.sgr-filtros .btn-primary,.sgr-filtros label:nth-child(3){grid-column:auto}}
+        .sg-res{display:grid;grid-template-columns:repeat(auto-fit,minmax(110px,1fr));gap:8px;margin-bottom:12px}
+        .sg-res>div{background:var(--bg);border-radius:12px;padding:8px 10px}.sg-res small{display:block;font-size:11px;font-weight:700;color:var(--ink-soft);text-transform:uppercase}.sg-res b{font-size:22px}
+        .sg-barra{display:grid;gap:8px;margin-bottom:8px}.sg-badge{font-size:11px;font-weight:800;border-radius:999px;padding:3px 9px;white-space:nowrap}
+        .sg-tabla-w{overflow:auto;max-height:70vh;border:1px solid var(--line);border-radius:12px;background:#fff}
+        .sg-tabla{border-collapse:collapse;font-size:12.5px;min-width:100%}.sg-tabla th{position:sticky;top:0;background:#03204C;color:#fff;text-align:left;padding:8px;white-space:nowrap;font-weight:700;z-index:2}
+        .sg-tabla td{padding:7px 8px;border-top:1px solid var(--line);white-space:nowrap;vertical-align:top}.sg-tabla tr:nth-child(even) td{background:#F7FAFC}
+        .sgr-tabla th.sgr-ncod_fugas,.sgr-tabla td.sgr-ncod_fugas{position:sticky;left:0;z-index:1;background:#fff;box-shadow:1px 0 0 var(--line)}
+        .sgr-tabla th.sgr-ncod_fugas{z-index:3;background:#03204C}.sgr-tabla tr:nth-child(even) td.sgr-ncod_fugas{background:#F7FAFC}
+        .sgr-tabla td.sgr-secsaten{text-align:center}.sgr-tabla td.sgr-direccion{min-width:240px}
+      </style>`;
+    document.getElementById("gisVolver").onclick = () => salirVistaGis();
+    activarSgTabs();
+    const fd = document.getElementById("sgDesde"), fh = document.getElementById("sgHasta"), fp = document.getElementById("sgPor");
+    fd.onchange = () => { state.sgDesde = fd.value; }; fh.onchange = () => { state.sgHasta = fh.value; }; fp.onchange = () => { state.sgPor = fp.value; };
+    document.getElementById("sgRForm").onsubmit = ev => { ev.preventDefault(); state.sgDesde = fd.value; state.sgHasta = fh.value; state.sgPor = fp.value; buscarSgioRango(); };
+    const q = document.getElementById("sgRQ");
+    if (q) q.oninput = () => { state.sgRQ = q.value; const pos = q.selectionStart; renderSgio(); const n = document.getElementById("sgRQ"); n.focus(); n.setSelectionRange(pos, pos); };
+    document.querySelectorAll(".sgREst").forEach(b => b.onclick = () => { state.sgREst = b.dataset.e; renderSgio(); });
+    const csv = document.getElementById("sgRCsv");
+    if (csv) csv.onclick = () => {
+      const c = v => { const t = String(v == null ? "" : v); return /[";\n]/.test(t) ? '"' + t.replace(/"/g, '""') + '"' : t; };
+      const txt = "﻿" + [SG_COLS.map(x => x[1]), ...sgRangoFiltradas(r).map(f => SG_COLS.map(([k]) => sgCelda(r, f, k)))].map(x => x.map(c).join(";")).join("\r\n");
+      const a = document.createElement("a"); a.href = URL.createObjectURL(new Blob([txt], { type: "text/csv;charset=utf-8" }));
+      a.download = "SGIO_" + r.desde + "_al_" + r.hasta + ".csv"; document.body.appendChild(a); a.click(); a.remove(); toast("Descarga lista");
+    };
+  }
+  function renderSgioDia() {
     if (!state.sgFecha) state.sgFecha = todayISO();
     const hoy = todayISO(), vista = state.sgVista || "tarjetas";
     const d = state.sgDatos && state.sgDatos.fecha === state.sgFecha ? state.sgDatos : null;
@@ -4709,12 +4828,13 @@
           <div><small>Solicitud</small><b>${escA(sgVal(f[ix("f_inicio")]))}</b></div>
           <div><small>Tipología</small><b>${escA(sgVal(f[ix("tipologia")]))}</b></div>
         </div>
-        <button class="sgVer gis-chip mt-3" data-i="${i}" aria-expanded="${!!abierto}">${abierto ? "▾ Ocultar detalle" : "▸ Ver los 29 campos"}</button>
+        <button class="sgVer gis-chip mt-3" data-i="${i}" aria-expanded="${!!abierto}">${abierto ? "▾ Ocultar detalle" : "▸ Ver los " + d.campos.length + " campos"}</button>
         ${abierto ? `<dl class="sg-det">${d.campos.map((c, k) => `<div class="${/^vobserv/.test(c) ? "sg-ancho" : ""}"><dt>${escA(SGIO_ETQ[c] || c)}</dt><dd>${escA(sgVal(f[k]))}</dd></div>`).join("")}</dl>` : ""}
       </div>`;
     };
     document.getElementById("app").innerHTML = `${estilosGis()}
       ${cabeceraGis("Incidencias SGIO", "fugas por día de solicitud", ICO_SGIO, "Gestión & Reportes")}
+      ${sgTabs("dia")}
       <div class="gis-wrap px-4 py-4 pb-24">
         <div class="card p-4 mb-3">
           <label class="text-sm font-semibold block mb-2" for="sgFecha" style="color:var(--ink-soft)">Día de solicitud (f_inicio)</label>
@@ -4770,6 +4890,7 @@
         @media (max-width:420px){.sg-lista{grid-template-columns:1fr}}
       </style>`;
     document.getElementById("gisVolver").onclick = () => salirVistaGis();
+    activarSgTabs();
     if (!d) { cargarSgio(state.sgFecha); return; }
     const inp = document.getElementById("sgFecha");
     inp.onchange = () => { if (!inp.value) return; state.sgFecha = inp.value > hoy ? hoy : inp.value; state.sgAbiertos = {}; cargarSgio(state.sgFecha); };
