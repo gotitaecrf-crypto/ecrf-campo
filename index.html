@@ -2369,9 +2369,12 @@
            defecto: { titulo: "Planificador de rutas", descripcion: "Ordena tus NIS por cercanía" } },
     LABORATORIO_ECRF: { tipo: "vista", soloAdmin: true, ico: () => ICO_LAB, abrir: () => abrirModulo("LABORATORIO_ECRF"), estilo: "background:#E6F6EF;border-color:#9BD3B0",
            defecto: { titulo: "Laboratorio ECRF", descripcion: "Ficha del vehículo y recorridos" } },
-    // Incidencias del SGIO: listado por rango de fechas y detalle por día de solicitud; lo ven todos los roles
+    // Incidencias del SGIO: listado por rango de fechas de revisión y ficha de cada fuga; lo ven todos los roles
     SGIO: { tipo: "vista", ico: () => ICO_SGIO, abrir: () => abrirModulo("SGIO"), estilo: "background:#FFF4DB;border-color:#F2C46D",
-           defecto: { titulo: "Incidencias SGIO", descripcion: "Fugas del SGIO por rango de fechas o por día" } }
+           defecto: { titulo: "Incidencias SGIO", descripcion: "Fugas del SGIO por fecha de revisión" } },
+    // Centro de Control: mapa de fugas pendientes (rojo) y atendidas hoy (verde), con asignación de laboratorio
+    CENTRO_CONTROL: { tipo: "vista", soloAdmin: true, ico: () => ICO_CC, abrir: () => abrirModulo("CENTRO_CONTROL"), estilo: "background:#FDE8E6;border-color:#F2A49B",
+           defecto: { titulo: "Centro de Control", descripcion: "Fugas pendientes y atendidas hoy en el mapa" } }
   };
   const MOD_RETIRADOS = ["MAPA_NIS", "REPLICA_GIS"];   // se unieron en PLANO_GIS
   function modulosConfig() {
@@ -3482,7 +3485,8 @@
     { k: "actividades", n: "Actividades planificadas (Contratista)", d: "Ítem 2 del Reporte diario de actividades", ej: "Ej.: Detección acústica de fugas" },
     { k: "actividades_ecrf", n: "Actividades planificadas (ECRF)", d: "Ítem 3 del Reporte diario de actividades", ej: "Ej.: Supervisión de contratista" },
     { k: "tecnicos", n: "Técnicos a cargo (contratista)", d: "Campo «Técnico a cargo» de la Verificación por muestreo (GPFO0416)", ej: "Ej.: Juan Pérez" },
-    { k: "motivos", n: "Motivos de salida del vehículo", d: "Campo «Motivo de salida» del Laboratorio ECRF (recorridos)", ej: "Ej.: Traslado de equipos" }
+    { k: "motivos", n: "Motivos de salida del vehículo", d: "Campo «Motivo de salida» del Laboratorio ECRF (recorridos)", ej: "Ej.: Traslado de equipos" },
+    { k: "laboratorios", n: "Laboratorios (unidades móviles)", d: "Botón «Asignar laboratorio» del Centro de Control", ej: "Ej.: 007-ABC123" }
   ];
   function htmlAdminCatalogo() {
     const d = state.adminRd;
@@ -3748,9 +3752,10 @@
     GPFO0381: ICS(`<path d="m12 14 4-4"/><path d="M3.34 19a10 10 0 1 1 17.32 0"/>`),
     GPFO0405: ICS(`<path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/>`),
     GPFO0416: ICS(`<circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/><path d="m8 11 2 2 4-4"/>`),
-    PLANIFICADOR_RUTAS: ICO_RUTA, LABORATORIO_ECRF: ICO_LAB, SGIO: ICS(`<path d="M12 3s-5 5.6-5 9a5 5 0 0 0 10 0c0-3.4-5-9-5-9z"/><path d="M4 21h16"/>`)
+    PLANIFICADOR_RUTAS: ICO_RUTA, LABORATORIO_ECRF: ICO_LAB, SGIO: ICS(`<path d="M12 3s-5 5.6-5 9a5 5 0 0 0 10 0c0-3.4-5-9-5-9z"/><path d="M4 21h16"/>`),
+    CENTRO_CONTROL: ICS(`<circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="5"/><circle cx="12" cy="12" r="1.5"/><path d="M12 1v3M12 20v3M1 12h3M20 12h3"/>`)
   };
-  const ICO_SGIO = ICO_LAT.SGIO;
+  const ICO_SGIO = ICO_LAT.SGIO, ICO_CC = ICO_LAT.CENTRO_CONTROL;
   const GRUPOS_NAV = [
     { id: "OPER", nombre: "Operaciones diarias", color: "#EAF6EE" },
     { id: "FORM", nombre: "Formularios ECRF", color: "#E1F3FB" },
@@ -3758,7 +3763,7 @@
     { id: "GESTION", nombre: "Gestión & Reportes", color: "#FFF4DB" }
   ];
   const GRUPO_DE = { REPORTE_DIARIO: "OPER", GPFO0381: "FORM", GPFO0405: "FORM", GPFO0416: "FORM", PDF: "FORM",
-                     PLANO_GIS: "GIS", PLANIFICADOR_RUTAS: "GIS", LABORATORIO_ECRF: "GIS", SGIO: "GESTION" };
+                     PLANO_GIS: "GIS", PLANIFICADOR_RUTAS: "GIS", LABORATORIO_ECRF: "GIS", SGIO: "GESTION", CENTRO_CONTROL: "GESTION" };
   // Los elementos que se ven en el menú, agrupados (respeta lo que configuró el administrador)
   function navAgrupado() {
     const mods = modulosMenu();
@@ -3781,7 +3786,7 @@
     else if (MODULOS_APP[id] && MODULOS_APP[id].tipo === "form") {
       state.form = id; sessionStorage.setItem("ecrf_form", id); state.tab = "nuevo";
       resetForm(); state.rutaSel = null; state.rutaQuery = "";
-    } else if (["PLANO_GIS", "PLANIFICADOR_RUTAS", "LABORATORIO_ECRF", "SGIO"].includes(id)) {
+    } else if (["PLANO_GIS", "PLANIFICADOR_RUTAS", "LABORATORIO_ECRF", "SGIO", "CENTRO_CONTROL"].includes(id)) {
       state.vista = id; state.labTab = "vehiculo";
       if (id === "PLANO_GIS") { state.rgRadio = state.rgRadio || RG_RADIO_DEF; state.rgDatos = null; state.rgAuto = true; }   // al entrar: el plano alrededor de donde estás
     }
@@ -3832,12 +3837,15 @@
         <span class="logo-chip"><img src="${LOGO_SEDAPAL}" alt="SEDAPAL"></span>
       </div></div>`;
   }
-  let mapaNisL = null, planL = null;
+  let mapaNisL = null, planL = null, ccL = null, ccReloj = null;
   function salirVistaGis(pintar) {
     if (mapaNisL) { mapaNisL.remove(); mapaNisL = null; }
     if (planL) { planL.remove(); planL = null; }
     if (typeof replicaL !== "undefined" && replicaL) { replicaL.remove(); replicaL = null; }
     const d = document.getElementById("labDetalle"); if (d) d.remove();
+    cerrarFichaFuga();
+    if (ccL) { ccL.remove(); ccL = null; }
+    clearInterval(ccReloj); ccReloj = null;
     if (pintar === false) return;
     state.vista = null; render(); window.scrollTo(0, 0);
   }
@@ -3847,6 +3855,7 @@
     if (state.vista === "PLANO_GIS") renderPlano();
     else if (state.vista === "PLANIFICADOR_RUTAS") renderPlanificador();
     else if (state.vista === "SGIO") renderSgio();
+    else if (state.vista === "CENTRO_CONTROL") renderCentroControl();
     else renderLaboratorio();
     const v = document.getElementById("gisVolver"); if (v) v.onclick = () => salirVistaGis();
   }
@@ -4656,268 +4665,325 @@
     if (state.admin && state.adminTab === "vehiculo") renderAdmin();
   }
   /* ---------------- INCIDENCIAS SGIO (módulo SGIO) ----------------
-     Listado de fugas por rango de fechas (de revisión o de registro), como «Inspecciones de Fugas» del SGIO, y
-     detalle por día de solicitud (f_inicio) con todos los campos. */
-  const SGIO_ETQ = { tipo_fuga: "Tipo de fuga", tipologia: "Tipología (ubicación)", municipio: "Distrito", localidad: "Localidad", direccion: "Dirección",
-    cliente: "Cliente", cod_sector: "Sector", labmovil: "Laboratorio móvil", gerencia: "Gerencia", centro: "Centro de servicios",
-    ncod_fugas: "Código SGIO", f_aviso: "Fecha de aviso", nis_rad: "NIS", vobservaciones_fugas: "Observación de la fuga", nconexiones: "Conexiones revisadas",
-    ndiametro_red: "Diámetro", npresion: "Presión (mca)", f_revision: "Fecha de detección (revisión)", ncaudal: "Caudal (L/día)", nkm: "Km de red revisados",
-    vmaterial: "Material", est_fuga: "Estado de la fuga", equipo: "Equipo de reparación", estado_fuga: "Estado de atención", vobservaciones_aviso: "Observación del aviso",
-    f_inicio: "Fecha de solicitud", vnextel: "Nextel", vpersona_responsable: "Responsable", vpersona_solicita: "Solicitante",
-    f_alta: "Fecha de registro", secsaten: "Tiempo de atención (días)" };
-  const sgCache = {};
+     Listado de fugas por rango de fecha de revisión, como «Inspecciones de Fugas» del SGIO. Al tocar el código se abre la
+     ficha de la fuga (como «Reporte FNV Programada - Emergencia» del SGIO). */
   const sgVal = v => v === "" || v == null ? "—" : String(v);
-  async function cargarSgio(fecha, forzar) {
-    const c = sgCache[fecha];
-    if (c && !forzar && (fecha !== todayISO() || Date.now() - c.__t < 5 * 60000)) { state.sgDatos = c; return renderSgio(); }   // lo de hoy se vuelve a pedir cada 5 min
-    state.sgDatos = { fecha, cargando: true }; renderSgio();
-    try { const r = await rdApi("sgio_dia", { fecha }); r.__t = Date.now(); sgCache[fecha] = r; if (state.sgFecha === fecha) state.sgDatos = r; }
-    catch (e) { if (state.sgFecha === fecha) state.sgDatos = { fecha, error: msgError(e) }; }
-    if (state.vista === "SGIO") renderSgio();
-  }
-  function sgFiltradas(d) {
-    const ix = c => d.campos.indexOf(c), q = (state.sgQ || "").trim().toUpperCase(), tf = state.sgTipo || "";
-    return d.filas.filter(f => (!tf || String(f[ix("tipo_fuga")]).toUpperCase() === tf) && (!q || f.some(v => String(v).toUpperCase().includes(q))));
-  }
-  function sgCambiarDia(delta) {
-    const t = new Date(state.sgFecha + "T12:00:00"); t.setDate(t.getDate() + delta);
-    state.sgFecha = t.toISOString().slice(0, 10); state.sgAbiertos = {}; cargarSgio(state.sgFecha);
-  }
-  /* ---- Listado por rango de fechas (como «Inspecciones de Fugas» del SGIO) ---- */
   const SG_COLS = [["ncod_fugas", "Código"], ["nis_rad", "NIS"], ["estado_fuga", "Estado de fuga"], ["f_alta", "Fecha de registro"], ["f_revision", "Fecha de revisión"],
     ["secsaten", "Tiempo de atención (días)"], ["municipio", "Distrito"], ["localidad", "Localidad"], ["direccion", "Dirección"]];
-  const sgColEstado = v => /GENERAR OT/.test(v) ? "#FDE4E1;color:#A3180B" : /PENDIENTE/.test(v) ? "#FFF1C7;color:#7A4B00" : /SIN FUGA/.test(v) ? "#EEF2F6;color:#3B4757"
+  // Estados: «Generar OT» en naranja y «Pendiente» en rojo
+  const sgColEstado = v => /PENDIENTE/.test(v) ? "#FDE4E1;color:#A3180B" : /GENERAR OT/.test(v) ? "#FFE8D1;color:#9A4A00" : /SIN FUGA/.test(v) ? "#EEF2F6;color:#3B4757"
     : /CON FUGA/.test(v) ? "#E1ECFE;color:#1A47A6" : /ATENDIDO|FINALIZ/.test(v) ? "#DDF3E7;color:#12613B" : "#EEF2F6;color:#334155";
-  const sgEstTxt = e => (e.charAt(0) + e.slice(1).toLowerCase()).replace(/\bot\b/g, "OT");
+  const SG_FILTROS = [["nis", "NIS", "nis_rad"], ["distrito", "Distrito", "municipio"], ["sector", "Sector", "cod_sector"], ["centro", "Centro de Servicios", "centro"]];
+  const sgEsPend = v => String(v || "").trim().toUpperCase() === "PENDIENTE";
+  // «dd/mm/aaaa hh:mm» → «aaaammddhhmm» (para ordenar)
+  const sgOrdenFecha = v => { const m = String(v || "").match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})(?:\s+(\d{1,2}):(\d{2}))?/);
+    return m ? m[3] + m[2].padStart(2, "0") + m[1].padStart(2, "0") + (m[4] || "0").padStart(2, "0") + (m[5] || "00") : ""; };
   let sgPedido = 0;
   async function buscarSgioRango() {
-    const desde = state.sgDesde, hasta = state.sgHasta, por = state.sgPor || "revision", n = ++sgPedido;
+    const desde = state.sgDesde, hasta = state.sgHasta, n = ++sgPedido;
     if (!desde || !hasta) { state.sgR = { error: "Elige la fecha de inicio y la de término" }; return renderSgio(); }
     if (desde > hasta) { state.sgR = { error: "La fecha de inicio es posterior a la de término" }; return renderSgio(); }
-    state.sgR = { cargando: true }; state.sgREst = ""; renderSgio();
-    try { const r = await rdApi("sgio_rango", { desde, hasta, por }); if (n === sgPedido) state.sgR = r; }
-    catch (e) { if (n === sgPedido) state.sgR = { error: msgError(e) }; }
+    state.sgR = { cargando: true }; renderSgio();
+    try {
+      const r = await rdApi("sgio_rango", { desde, hasta, por: "revision" });
+      const ix = r.campos.indexOf("f_revision");
+      r.filas.sort((x, y) => { const a = sgOrdenFecha(x[ix]), b = sgOrdenFecha(y[ix]); return a < b ? 1 : a > b ? -1 : 0; });   // la revisión más reciente primero
+      if (n === sgPedido) state.sgR = r;
+    } catch (e) { if (n === sgPedido) state.sgR = { error: msgError(e) }; }
     if (n === sgPedido && state.vista === "SGIO") renderSgio();
   }
   function sgRangoFiltradas(r) {
-    const ix = c => r.campos.indexOf(c), q = (state.sgRQ || "").trim().toUpperCase(), est = state.sgREst || "";
-    return r.filas.filter(f => (!est || String(f[ix("estado_fuga")]).toUpperCase() === est) && (!q || f.some(v => String(v).toUpperCase().includes(q))));
+    const ix = c => r.campos.indexOf(c), est = state.sgREst || "", ie = ix("estado_fuga");
+    const fil = SG_FILTROS.find(f => f[0] === state.sgFCampo), q = (state.sgFValor || "").trim().toUpperCase();
+    const ic = fil ? ix(fil[2]) : -1;
+    return r.filas.filter(f => (!est || (est === "pend" ? sgEsPend(f[ie]) : !sgEsPend(f[ie])))
+      && (!fil || !q || String(f[ic] == null ? "" : f[ic]).toUpperCase().includes(q)));
   }
-  // valor de cada columna del listado (la fecha de registro de los datos antiguos, sin f_alta, se toma de f_aviso)
+  // la fecha de registro de los datos antiguos (sin f_alta) se toma de f_aviso
   const sgCelda = (r, f, c) => { const ix = k => r.campos.indexOf(k); const v = f[ix(c)];
     return c === "f_alta" && (v === "" || v == null) ? f[ix("f_aviso")] : v; };
-  function sgTabs(modo) {
-    return `<div style="background:var(--card);border-bottom:1px solid var(--line)"><div class="gis-wrap flex px-4">
-      <div class="tab-btn sgModo ${modo === "rango" ? "active" : ""}" data-m="rango" role="button" tabindex="0">Listado por fechas</div>
-      <div class="tab-btn sgModo ${modo === "dia" ? "active" : ""}" data-m="dia" role="button" tabindex="0">Detalle por día</div>
-    </div></div>`;
-  }
-  function activarSgTabs() {
-    document.querySelectorAll(".sgModo").forEach(b => b.onclick = b.onkeydown = ev => {
-      if (ev.type === "keydown" && ev.key !== "Enter" && ev.key !== " ") return;
-      state.sgModo = b.dataset.m; window.scrollTo(0, 0); renderSgio(); });
-  }
-  function renderSgio() { return (state.sgModo || "rango") === "rango" ? renderSgioRango() : renderSgioDia(); }
-  function renderSgioRango() {
-    const hoy = todayISO();
-    if (!state.sgDesde) state.sgDesde = hoy.slice(0, 8) + "01";
-    if (!state.sgHasta) state.sgHasta = hoy;
-    const por = state.sgPor || "revision", r = state.sgR;
-    const listo = r && !r.cargando && !r.error && r.filas;
-    const filas = listo ? sgRangoFiltradas(r) : [];
-    const ixE = listo ? r.campos.indexOf("estado_fuga") : -1;
-    const estados = listo ? Object.entries(r.filas.reduce((o, f) => { const e = String(f[ixE] || "SIN ESTADO").toUpperCase(); o[e] = (o[e] || 0) + 1; return o; }, {})).sort((a, b) => b[1] - a[1]) : [];
+  function htmlTablaSg(r) {
+    const filas = sgRangoFiltradas(r), iIni = r.campos.indexOf("f_inicio");
     const celda = (f, c) => {
       const v = sgCelda(r, f, c);
       if (c === "estado_fuga") return v ? `<span class="sg-badge" style="background:${sgColEstado(String(v).toUpperCase())}">${escA(v)}</span>` : "—";
-      if (c === "ncod_fugas") return `<b>${escA(sgVal(v))}</b>`;
+      if (c === "ncod_fugas") return `<button class="sgr-cod" data-cod="${escA(v)}" data-f="${escA(f[iIni])}" title="Ver la ficha de la fuga ${escA(v)}">${escA(sgVal(v))}</button>`;
       return escA(sgVal(v));
     };
+    return `<div class="text-xs mb-2" style="color:var(--ink-soft)">${filas.length} de ${r.filas.length} fuga(s) · fecha de revisión del ${fechaTxt(r.desde)} al ${fechaTxt(r.hasta)} · la más reciente primero${r.actualizado ? " · Última carga: " + escA(r.actualizado) : ""}</div>
+      ${!filas.length ? `<div class="text-sm py-6 text-center" style="color:var(--ink-soft)">Ninguna fuga coincide con el filtro.</div>`
+      : `<div class="sg-tabla-w"><table class="sg-tabla sgr-tabla"><thead><tr>${SG_COLS.map(([c, t]) => `<th class="sgr-${c}">${escA(t)}</th>`).join("")}</tr></thead>
+          <tbody>${filas.map(f => `<tr>${SG_COLS.map(([c]) => `<td class="sgr-${c}">${celda(f, c)}</td>`).join("")}</tr>`).join("")}</tbody></table></div>`}`;
+  }
+  function renderSgio() {
+    const hoy = todayISO();
+    if (!state.sgDesde) state.sgDesde = hoy.slice(0, 8) + "01";
+    if (!state.sgHasta) state.sgHasta = hoy;
+    const r = state.sgR, listo = !!(r && !r.cargando && !r.error && r.filas);
+    const ie = listo ? r.campos.indexOf("estado_fuga") : -1;
+    const nPend = listo ? r.filas.filter(f => sgEsPend(f[ie])).length : 0, est = state.sgREst || "";
+    const fil = state.sgFCampo || "";
     document.getElementById("app").innerHTML = `${estilosGis()}
-      ${cabeceraGis("Incidencias SGIO", "listado de fugas por fechas", ICO_SGIO, "Gestión & Reportes")}
-      ${sgTabs("rango")}
+      ${cabeceraGis("Incidencias SGIO", "listado de fugas por fecha de revisión", ICO_SGIO, "Gestión & Reportes")}
       <div class="gis-wrap px-4 py-4 pb-24">
         <form id="sgRForm" class="card p-4 mb-3" autocomplete="off">
-          <div class="sgr-filtros">
+          <div class="sgr-fechas">
             <label><span>Fecha inicio</span><input id="sgDesde" type="date" class="input" value="${state.sgDesde}" required></label>
             <label><span>Fecha término</span><input id="sgHasta" type="date" class="input" value="${state.sgHasta}" required></label>
-            <label><span>Buscar por</span><select id="sgPor" class="input">
-              <option value="revision" ${por === "revision" ? "selected" : ""}>Fecha de revisión</option>
-              <option value="registro" ${por === "registro" ? "selected" : ""}>Fecha de registro</option></select></label>
-            <button id="sgBuscar" type="submit" class="btn-primary" ${r && r.cargando ? "disabled" : ""}>${r && r.cargando ? "Buscando…" : "Buscar"}</button>
           </div>
-          <div class="text-xs mt-2" style="color:var(--ink-soft)">Rango máximo: 3 meses.</div>
+          <button id="sgBuscar" type="submit" class="btn-primary w-full mt-3" ${r && r.cargando ? "disabled" : ""}>${r && r.cargando ? "Buscando…" : "Buscar"}</button>
+          <div class="text-xs mt-2" style="color:var(--ink-soft)">Busca por fecha de revisión · rango máximo: 3 meses.</div>
+          <div class="sgr-filtro mt-4">
+            <label><span>Filtro</span><select id="sgFCampo" class="input" ${listo ? "" : "disabled"}>
+              <option value="">Sin filtro</option>${SG_FILTROS.map(([k, t]) => `<option value="${k}" ${fil === k ? "selected" : ""}>${t}</option>`).join("")}</select></label>
+            <label><span>Valor</span><input id="sgFValor" class="input" ${listo && fil ? "" : "disabled"} value="${escA(state.sgFValor || "")}"
+              placeholder="${!listo ? "Primero pulsa Buscar" : !fil ? "Elige un filtro" : "Escribe " + escA((SG_FILTROS.find(f => f[0] === fil) || [])[1] || "").toLowerCase()}" ${fil === "nis" || fil === "sector" ? 'inputmode="numeric"' : ""} autocomplete="off"></label>
+          </div>
+          ${!listo ? `<div class="text-xs mt-2" style="color:var(--ink-soft)">El filtro se habilita después de buscar y se aplica sobre ese periodo.</div>` : ""}
         </form>
         ${!r ? `<div class="card text-center text-sm" style="padding:20px;color:var(--ink-soft)">Elige la fecha de inicio y la de término y pulsa <b>Buscar</b> para ver el listado de fugas.</div>`
-        : r.cargando ? `<div class="text-sm py-6" style="color:var(--ink-soft)">Buscando fugas del ${fechaTxt(state.sgDesde)} al ${fechaTxt(state.sgHasta)}…</div>`
+        : r.cargando ? `<div class="text-sm py-6" style="color:var(--ink-soft)">Buscando fugas revisadas del ${fechaTxt(state.sgDesde)} al ${fechaTxt(state.sgHasta)}…</div>`
         : r.error ? `<div class="card p-4"><div class="text-sm" style="color:var(--danger);font-weight:600">${escA(r.error)}</div></div>`
-        : !r.filas.length ? `<div class="card text-center text-sm" style="padding:20px;color:var(--ink-soft)">No hay fugas con fecha de ${r.por === "registro" ? "registro" : "revisión"} del ${fechaTxt(r.desde)} al ${fechaTxt(r.hasta)}.</div>`
+        : !r.filas.length ? `<div class="card text-center text-sm" style="padding:20px;color:var(--ink-soft)">No hay fugas con fecha de revisión del ${fechaTxt(r.desde)} al ${fechaTxt(r.hasta)}.</div>`
         : `
-        <div class="sg-res">
-          <div><small>Fugas</small><b>${r.filas.length}</b></div>
-          ${estados.slice(0, 5).map(([e, n]) => `<div><small>${escA(sgEstTxt(e))}</small><b>${n}</b></div>`).join("")}
+        <div class="flex gap-2 mb-2" style="flex-wrap:wrap" role="group" aria-label="Estado">
+          ${[["", "Todos", r.filas.length], ["pend", "Pendientes", nPend], ["aten", "Atendidos", r.filas.length - nPend]].map(([k, t, n]) =>
+            `<button class="gis-chip sgREst" data-e="${k}" aria-pressed="${est === k}">${t} <span class="sgr-n">${n}</span></button>`).join("")}
         </div>
-        <div class="sg-barra">
-          <input id="sgRQ" class="input" placeholder="Buscar: código, NIS, dirección, distrito…" value="${escA(state.sgRQ || "")}" autocomplete="off">
-          <div class="flex gap-2" style="flex-wrap:wrap">
-            ${[["", "Todos"], ...estados.map(([e]) => [e, sgEstTxt(e)])].map(([e, t]) => `<button class="gis-chip sgREst" data-e="${escA(e)}" aria-pressed="${(state.sgREst || "") === e}">${escA(t)}</button>`).join("")}
-            <span style="flex:1"></span>
-            <button id="sgRCsv" class="gis-chip">⬇ Excel (CSV)</button>
-          </div>
-        </div>
-        <div class="text-xs mb-2" style="color:var(--ink-soft)">${filas.length} de ${r.filas.length} fuga(s) · fecha de ${r.por === "registro" ? "registro" : "revisión"} del ${fechaTxt(r.desde)} al ${fechaTxt(r.hasta)}${r.actualizado ? " · Última carga: " + escA(r.actualizado) : ""}</div>
-        ${!filas.length ? `<div class="text-sm py-6 text-center" style="color:var(--ink-soft)">Ninguna coincide con la búsqueda.</div>`
-        : `<div class="sg-tabla-w"><table class="sg-tabla sgr-tabla"><thead><tr>${SG_COLS.map(([c, t]) => `<th class="sgr-${c}">${escA(t)}</th>`).join("")}</tr></thead>
-            <tbody>${filas.map(f => `<tr>${SG_COLS.map(([c]) => `<td class="sgr-${c}">${celda(f, c)}</td>`).join("")}</tr>`).join("")}</tbody></table></div>`}`}
-      </div>
-      <style>
-        .sgr-filtros{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:10px;align-items:end}.sgr-filtros label{min-width:0}.sgr-filtros .input{width:100%;min-width:0;box-sizing:border-box}.sgr-filtros label span{display:block;font-size:12px;font-weight:700;color:var(--ink-soft);margin-bottom:4px}
-        .sgr-filtros .btn-primary,.sgr-filtros label:nth-child(3){grid-column:1/-1}
-        @media (min-width:760px){.sgr-filtros{grid-template-columns:repeat(3,minmax(150px,220px)) 140px}.sgr-filtros .btn-primary,.sgr-filtros label:nth-child(3){grid-column:auto}}
-        .sg-res{display:grid;grid-template-columns:repeat(auto-fit,minmax(110px,1fr));gap:8px;margin-bottom:12px}
-        .sg-res>div{background:var(--bg);border-radius:12px;padding:8px 10px}.sg-res small{display:block;font-size:11px;font-weight:700;color:var(--ink-soft);text-transform:uppercase}.sg-res b{font-size:22px}
-        .sg-barra{display:grid;gap:8px;margin-bottom:8px}.sg-badge{font-size:11px;font-weight:800;border-radius:999px;padding:3px 9px;white-space:nowrap}
-        .sg-tabla-w{overflow:auto;max-height:70vh;border:1px solid var(--line);border-radius:12px;background:#fff}
-        .sg-tabla{border-collapse:collapse;font-size:12.5px;min-width:100%}.sg-tabla th{position:sticky;top:0;background:#03204C;color:#fff;text-align:left;padding:8px;white-space:nowrap;font-weight:700;z-index:2}
-        .sg-tabla td{padding:7px 8px;border-top:1px solid var(--line);white-space:nowrap;vertical-align:top}.sg-tabla tr:nth-child(even) td{background:#F7FAFC}
-        .sgr-tabla th.sgr-ncod_fugas,.sgr-tabla td.sgr-ncod_fugas{position:sticky;left:0;z-index:1;background:#fff;box-shadow:1px 0 0 var(--line)}
-        .sgr-tabla th.sgr-ncod_fugas{z-index:3;background:#03204C}.sgr-tabla tr:nth-child(even) td.sgr-ncod_fugas{background:#F7FAFC}
-        .sgr-tabla td.sgr-secsaten{text-align:center}.sgr-tabla td.sgr-direccion{min-width:240px}
-      </style>`;
-    document.getElementById("gisVolver").onclick = () => salirVistaGis();
-    activarSgTabs();
-    const fd = document.getElementById("sgDesde"), fh = document.getElementById("sgHasta"), fp = document.getElementById("sgPor");
-    fd.onchange = () => { state.sgDesde = fd.value; }; fh.onchange = () => { state.sgHasta = fh.value; }; fp.onchange = () => { state.sgPor = fp.value; };
-    document.getElementById("sgRForm").onsubmit = ev => { ev.preventDefault(); state.sgDesde = fd.value; state.sgHasta = fh.value; state.sgPor = fp.value; buscarSgioRango(); };
-    const q = document.getElementById("sgRQ");
-    if (q) q.oninput = () => { state.sgRQ = q.value; const pos = q.selectionStart; renderSgio(); const n = document.getElementById("sgRQ"); n.focus(); n.setSelectionRange(pos, pos); };
-    document.querySelectorAll(".sgREst").forEach(b => b.onclick = () => { state.sgREst = b.dataset.e; renderSgio(); });
-    const csv = document.getElementById("sgRCsv");
-    if (csv) csv.onclick = () => {
-      const c = v => { const t = String(v == null ? "" : v); return /[";\n]/.test(t) ? '"' + t.replace(/"/g, '""') + '"' : t; };
-      const txt = "﻿" + [SG_COLS.map(x => x[1]), ...sgRangoFiltradas(r).map(f => SG_COLS.map(([k]) => sgCelda(r, f, k)))].map(x => x.map(c).join(";")).join("\r\n");
-      const a = document.createElement("a"); a.href = URL.createObjectURL(new Blob([txt], { type: "text/csv;charset=utf-8" }));
-      a.download = "SGIO_" + r.desde + "_al_" + r.hasta + ".csv"; document.body.appendChild(a); a.click(); a.remove(); toast("Descarga lista");
-    };
-  }
-  function renderSgioDia() {
-    if (!state.sgFecha) state.sgFecha = todayISO();
-    const hoy = todayISO(), vista = state.sgVista || "tarjetas";
-    const d = state.sgDatos && state.sgDatos.fecha === state.sgFecha ? state.sgDatos : null;
-    const listo = d && d.fecha === state.sgFecha && !d.cargando && !d.error;
-    const ix = c => listo ? d.campos.indexOf(c) : -1;
-    const filas = listo ? sgFiltradas(d) : [];
-    const cuenta = (c, v) => listo ? d.filas.filter(f => String(f[ix(c)]).toUpperCase() === v).length : 0;
-    const tipos = listo ? [...new Set(d.filas.map(f => String(f[ix("tipo_fuga")]).toUpperCase()).filter(Boolean))].sort() : [];
-    const badge = (t, bg) => `<span class="sg-badge" style="background:${bg}">${escA(t)}</span>`;
-    const colEst = v => /NO/.test(v) ? "#FBE0DD;color:#8E2019" : /REPAR/.test(v) ? "#DDF3E7;color:#12613B" : "#EEF2F6;color:#334155";
-    const tarjeta = (f, i) => {
-      const abierto = (state.sgAbiertos || {})[i];
-      return `<div class="card p-4 sg-card">
-        <div class="flex items-start gap-2" style="flex-wrap:wrap">
-          <b class="sg-cod">SGIO ${escA(sgVal(f[ix("ncod_fugas")]))}</b>
-          ${f[ix("tipo_fuga")] ? badge(f[ix("tipo_fuga")], /EMERG/i.test(f[ix("tipo_fuga")]) ? "#FFE6D5;color:#8A3A00" : "#E1F3FB;color:#0B4A6B") : ""}
-          ${f[ix("est_fuga")] ? badge(f[ix("est_fuga")], colEst(String(f[ix("est_fuga")]).toUpperCase())) : ""}
-          ${f[ix("estado_fuga")] ? badge(f[ix("estado_fuga")], "#EEF2F6;color:#334155") : ""}
-        </div>
-        <div class="font-semibold mt-2">${escA(sgVal(f[ix("direccion")]))}</div>
-        <div class="text-sm" style="color:var(--ink-soft)">${escA([f[ix("localidad")], f[ix("municipio")], f[ix("cod_sector")] !== "" ? "Sector " + f[ix("cod_sector")] : ""].filter(Boolean).join(" · "))}</div>
-        <div class="sg-kpis">
-          <div><small>NIS</small><b>${escA(sgVal(f[ix("nis_rad")]))}</b></div>
-          <div><small>Caudal</small><b>${f[ix("ncaudal")] === "" ? "—" : escA(f[ix("ncaudal")]) + " L/día"}</b></div>
-          <div><small>Solicitud</small><b>${escA(sgVal(f[ix("f_inicio")]))}</b></div>
-          <div><small>Tipología</small><b>${escA(sgVal(f[ix("tipologia")]))}</b></div>
-        </div>
-        <button class="sgVer gis-chip mt-3" data-i="${i}" aria-expanded="${!!abierto}">${abierto ? "▾ Ocultar detalle" : "▸ Ver los " + d.campos.length + " campos"}</button>
-        ${abierto ? `<dl class="sg-det">${d.campos.map((c, k) => `<div class="${/^vobserv/.test(c) ? "sg-ancho" : ""}"><dt>${escA(SGIO_ETQ[c] || c)}</dt><dd>${escA(sgVal(f[k]))}</dd></div>`).join("")}</dl>` : ""}
-      </div>`;
-    };
-    document.getElementById("app").innerHTML = `${estilosGis()}
-      ${cabeceraGis("Incidencias SGIO", "fugas por día de solicitud", ICO_SGIO, "Gestión & Reportes")}
-      ${sgTabs("dia")}
-      <div class="gis-wrap px-4 py-4 pb-24">
-        <div class="card p-4 mb-3">
-          <label class="text-sm font-semibold block mb-2" for="sgFecha" style="color:var(--ink-soft)">Día de solicitud (f_inicio)</label>
-          <div class="sg-dia">
-            <button id="sgAnt" class="btn-ghost" aria-label="Día anterior">‹</button>
-            <input id="sgFecha" type="date" class="input" value="${state.sgFecha}" max="${hoy}">
-            <button id="sgSig" class="btn-ghost" aria-label="Día siguiente" ${state.sgFecha >= hoy ? "disabled" : ""}>›</button>
-          </div>
-          ${state.sgFecha !== hoy ? `<button id="sgHoy" class="gis-chip mt-2">Volver a hoy</button>` : `<div class="text-xs mt-2" style="color:var(--ink-soft)">Mostrando las incidencias de <b>hoy</b>.</div>`}
-        </div>
-        ${!d || d.cargando ? `<div class="text-sm py-6" style="color:var(--ink-soft)">Cargando incidencias del ${fechaTxt(state.sgFecha)}…</div>`
-        : d.error ? `<div class="card p-4"><div class="text-sm" style="color:var(--danger);font-weight:600">${escA(d.error)}</div><button id="sgReint" class="btn-primary w-full mt-3">Reintentar</button></div>`
-        : `
-        ${d.aviso ? `<div class="p-3 mb-3 rounded-xl text-sm font-semibold" style="background:#FFF1C7;color:#6B4A00">⚠ ${escA(d.aviso)}</div>` : ""}
-        <div class="sg-res">
-          <div><small>Incidencias</small><b>${d.filas.length}</b></div>
-          ${tipos.map(t => `<div><small>${escA(t.charAt(0) + t.slice(1).toLowerCase())}</small><b>${cuenta("tipo_fuga", t)}</b></div>`).join("")}
-          <div><small>Reparadas</small><b>${cuenta("est_fuga", "REPARADO")}</b></div>
-          <div><small>No reparadas</small><b>${cuenta("est_fuga", "NO REPARADO")}</b></div>
-        </div>
-        ${d.filas.length ? `
-        <div class="sg-barra">
-          <input id="sgQ" class="input" placeholder="Buscar: código, NIS, dirección, distrito…" value="${escA(state.sgQ || "")}" autocomplete="off">
-          <div class="flex gap-2" style="flex-wrap:wrap">
-            ${["", ...tipos].map(t => `<button class="gis-chip sgTipo" data-t="${escA(t)}" aria-pressed="${(state.sgTipo || "") === t}">${t ? escA(t.charAt(0) + t.slice(1).toLowerCase()) : "Todas"}</button>`).join("")}
-            <span style="flex:1"></span>
-            <button class="gis-chip sgVista" data-v="tarjetas" aria-pressed="${vista === "tarjetas"}">Tarjetas</button>
-            <button class="gis-chip sgVista" data-v="tabla" aria-pressed="${vista === "tabla"}">Tabla</button>
-            <button id="sgCsv" class="gis-chip">⬇ Excel (CSV)</button>
-          </div>
-        </div>
-        <div class="text-xs mb-2" style="color:var(--ink-soft)">${filas.length} de ${d.filas.length} incidencia(s)${d.actualizado ? " · Última carga: " + escA(d.actualizado) : ""}</div>
-        ${!filas.length ? `<div class="text-sm py-6 text-center" style="color:var(--ink-soft)">Ninguna coincide con la búsqueda.</div>`
-          : vista === "tabla" ? `<div class="sg-tabla-w"><table class="sg-tabla"><thead><tr>${d.campos.map(c => `<th>${escA(SGIO_ETQ[c] || c)}</th>`).join("")}</tr></thead>
-              <tbody>${filas.map(f => `<tr>${f.map((v, k) => `<td class="${/^vobserv/.test(d.campos[k]) ? "sg-largo" : ""}">${escA(sgVal(v))}</td>`).join("")}</tr>`).join("")}</tbody></table></div>`
-          : `<div class="sg-lista">${filas.map(f => tarjeta(f, d.filas.indexOf(f))).join("")}</div>`}`
-        : `<div class="card p-6 text-center text-sm" style="color:var(--ink-soft)">No hay incidencias con fecha de solicitud ${fechaTxt(state.sgFecha)}${d.hayMes === false ? " (aún no hay datos cargados para ese mes)" : ""}.</div>`}`}
+        <div id="sgrRes">${htmlTablaSg(r)}</div>`}
         ${esAdmin() ? htmlSgioAdmin() : ""}
       </div>
       <style>
-        .sg-dia{display:grid;grid-template-columns:52px 1fr 52px;gap:8px}.sg-dia .btn-ghost{padding:0;font-size:24px;font-weight:800}
-        .sg-res{display:grid;grid-template-columns:repeat(auto-fit,minmax(110px,1fr));gap:8px;margin-bottom:12px}
-        .sg-res>div,.sg-kpis>div{background:var(--bg);border-radius:12px;padding:8px 10px}.sg-res small,.sg-kpis small{display:block;font-size:11px;font-weight:700;color:var(--ink-soft);text-transform:uppercase}
-        .sg-res b{font-size:22px}.sg-kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:8px;margin-top:10px}.sg-kpis b{font-size:14px;word-break:break-word}
-        .sg-barra{display:grid;gap:8px;margin-bottom:8px}.sg-lista{display:grid;gap:10px;grid-template-columns:repeat(auto-fill,minmax(320px,1fr))}
-        .sg-badge{font-size:11px;font-weight:800;border-radius:999px;padding:3px 9px}.sg-cod{color:var(--brand-dark);font-size:17px}
-        .sg-det{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px 12px;margin-top:12px;border-top:1px solid var(--line);padding-top:12px}
-        .sg-det dt{font-size:11px;font-weight:700;color:var(--ink-soft);text-transform:uppercase}.sg-det dd{margin:0;font-size:14px;word-break:break-word;white-space:pre-line}.sg-ancho{grid-column:1/-1}
+        .sgr-fechas,.sgr-filtro{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:10px;align-items:end}
+        .sgr-fechas label,.sgr-filtro label{min-width:0}.sgr-fechas .input,.sgr-filtro .input{width:100%;min-width:0;box-sizing:border-box}
+        .sgr-fechas label span,.sgr-filtro label span{display:block;font-size:12px;font-weight:700;color:var(--ink-soft);margin-bottom:4px}
+        .sgr-filtro .input:disabled{background:#F1F4F7;color:#8A97A8;cursor:not-allowed}
+        @media (min-width:760px){.sgr-fechas,.sgr-filtro{grid-template-columns:repeat(2,minmax(0,260px))}#sgBuscar{max-width:530px}}
+        .sgr-n{font-weight:800;opacity:.75;margin-left:2px}
+        .sg-badge{font-size:11px;font-weight:800;border-radius:999px;padding:3px 9px;white-space:nowrap}
         .sg-tabla-w{overflow:auto;max-height:70vh;border:1px solid var(--line);border-radius:12px;background:#fff}
-        .sg-tabla{border-collapse:collapse;font-size:12.5px;min-width:100%}.sg-tabla th{position:sticky;top:0;background:#03204C;color:#fff;text-align:left;padding:8px;white-space:nowrap;font-weight:700}
-        .sg-tabla td{padding:7px 8px;border-top:1px solid var(--line);white-space:nowrap;vertical-align:top}.sg-tabla td.sg-largo{white-space:normal;min-width:280px}
-        .sg-tabla tr:nth-child(even) td{background:#F7FAFC}
-        @media (max-width:420px){.sg-lista{grid-template-columns:1fr}}
+        .sg-tabla{border-collapse:separate;border-spacing:0;font-size:12.5px;min-width:100%}.sg-tabla th{position:sticky;top:0;background:#03204C;color:#fff;text-align:left;padding:8px;white-space:nowrap;font-weight:700;z-index:2}
+        .sg-tabla td{padding:7px 8px;border-top:1px solid var(--line);white-space:nowrap;vertical-align:top;background:#fff}.sg-tabla tr:nth-child(even) td{background:#F7FAFC}
+        /* Código y NIS inmovilizados al deslizar la tabla hacia la derecha */
+        .sgr-tabla .sgr-ncod_fugas,.sgr-tabla .sgr-nis_rad{position:sticky;box-sizing:border-box}
+        .sgr-tabla .sgr-ncod_fugas{left:0;width:84px;min-width:84px;max-width:84px}
+        .sgr-tabla .sgr-nis_rad{left:84px;width:82px;min-width:82px;max-width:82px;box-shadow:2px 0 0 var(--line)}
+        .sgr-tabla td.sgr-ncod_fugas,.sgr-tabla td.sgr-nis_rad{z-index:1}.sgr-tabla th.sgr-ncod_fugas,.sgr-tabla th.sgr-nis_rad{z-index:3}
+        .sgr-tabla td.sgr-secsaten{text-align:center}.sgr-tabla td.sgr-direccion{min-width:240px}
+        .sgr-cod{font-weight:800;color:#0B5FA5;text-decoration:underline;text-underline-offset:2px;background:none;border:0;padding:0;font-size:12.5px;cursor:pointer}
+        .sgr-cod:focus-visible{outline:2px solid #0B5FA5;outline-offset:2px;border-radius:3px}
       </style>`;
     document.getElementById("gisVolver").onclick = () => salirVistaGis();
-    activarSgTabs();
-    if (!d) { cargarSgio(state.sgFecha); return; }
-    const inp = document.getElementById("sgFecha");
-    inp.onchange = () => { if (!inp.value) return; state.sgFecha = inp.value > hoy ? hoy : inp.value; state.sgAbiertos = {}; cargarSgio(state.sgFecha); };
-    document.getElementById("sgAnt").onclick = () => sgCambiarDia(-1);
-    document.getElementById("sgSig").onclick = () => { if (state.sgFecha < hoy) sgCambiarDia(1); };
-    const bh = document.getElementById("sgHoy"); if (bh) bh.onclick = () => { state.sgFecha = hoy; state.sgAbiertos = {}; cargarSgio(hoy); };
-    const re = document.getElementById("sgReint"); if (re) re.onclick = () => cargarSgio(state.sgFecha, true);
-    const q = document.getElementById("sgQ");
-    if (q) q.oninput = () => { state.sgQ = q.value; const pos = q.selectionStart; renderSgio(); const n = document.getElementById("sgQ"); n.focus(); n.setSelectionRange(pos, pos); };
-    document.querySelectorAll(".sgTipo").forEach(b => b.onclick = () => { state.sgTipo = b.dataset.t; renderSgio(); });
-    document.querySelectorAll(".sgVista").forEach(b => b.onclick = () => { state.sgVista = b.dataset.v; renderSgio(); });
-    document.querySelectorAll(".sgVer").forEach(b => b.onclick = () => { state.sgAbiertos = state.sgAbiertos || {}; state.sgAbiertos[b.dataset.i] = !state.sgAbiertos[b.dataset.i]; const y = window.scrollY; renderSgio(); window.scrollTo(0, y); });
-    const csv = document.getElementById("sgCsv");
-    if (csv) csv.onclick = () => {
-      const c = v => { const t = String(v == null ? "" : v); return /[";\n]/.test(t) ? '"' + t.replace(/"/g, '""') + '"' : t; };
-      const txt = "﻿" + [d.campos.map(k => SGIO_ETQ[k] || k), ...sgFiltradas(d)].map(r => r.map(c).join(";")).join("\r\n");
-      const a = document.createElement("a"); a.href = URL.createObjectURL(new Blob([txt], { type: "text/csv;charset=utf-8" }));
-      a.download = "SGIO_" + state.sgFecha + ".csv"; document.body.appendChild(a); a.click(); a.remove(); toast("Descarga lista");
-    };
+    const fd = document.getElementById("sgDesde"), fh = document.getElementById("sgHasta");
+    fd.onchange = () => { state.sgDesde = fd.value; }; fh.onchange = () => { state.sgHasta = fh.value; };
+    document.getElementById("sgRForm").onsubmit = ev => { ev.preventDefault(); state.sgDesde = fd.value; state.sgHasta = fh.value; buscarSgioRango(); };
+    const fc = document.getElementById("sgFCampo"), fv = document.getElementById("sgFValor");
+    fc.onchange = () => { state.sgFCampo = fc.value; if (!fc.value) state.sgFValor = ""; renderSgio(); const n = document.getElementById("sgFValor"); if (n && !n.disabled) n.focus(); };
+    let espera = null;
+    fv.oninput = () => { state.sgFValor = fv.value; clearTimeout(espera); espera = setTimeout(actualizarTablaSg, 250); };   // se actualiza solo al terminar de escribir
+    document.querySelectorAll(".sgREst").forEach(b => b.onclick = () => { state.sgREst = b.dataset.e;
+      document.querySelectorAll(".sgREst").forEach(x => x.setAttribute("aria-pressed", String(x === b))); actualizarTablaSg(); });
+    activarTablaSg();
     if (esAdmin()) activarSgioAdmin();
   }
+  function actualizarTablaSg() {
+    const c = document.getElementById("sgrRes"), r = state.sgR;
+    if (!c || !r || !r.filas) return;
+    c.innerHTML = htmlTablaSg(r); activarTablaSg();
+  }
+  function activarTablaSg() { document.querySelectorAll(".sgr-cod").forEach(b => b.onclick = () => abrirFichaFuga(b.dataset.cod, b.dataset.f, b)); }
+
+  // ----- Ficha de la fuga (ventana sobre el listado) -----
+  const sgFichas = {};
+  const SG_TIPO_RED = v => String(v) === "1" ? "Agua" : String(v) === "0" ? "Desagüe" : sgVal(v);
+  const SG_FICHA = [
+    { t: "Ubicación", c: [["direccion", "Dirección", 1], ["localidad", "Localidad"], ["municipio", "Distrito"], ["cod_sector", "Sector"], ["centro", "Centro"]] },
+    { t: "Aviso", c: [["ncod_fugas", "Código"], ["responsable", "Solicitante", 1], ["f_aviso", "F Aviso"], ["nis_rad", "Nis Rad"], ["vpersona_responsable", "Operativo Responsable"],
+      ["vnextel", "Nextel"], ["nis_origen", "Nis Origen"], ["ncod_aviso", "Aviso"], ["vobservaciones_aviso", "Observaciones Aviso", 1]] },
+    { t: "Datos de Fuga", c: [["tipo_fuga", "Tipo de Detección"], ["ntipored", "Tipo de Red"], ["f_alta", "Fecha de Registro"], ["f_inicio", "Fecha de Solicitud"],
+      ["f_fin", "Fecha de Atención/Revisión"], ["tipologia", "Ubicación de Fuga"], ["vmaterial", "Material de Red"], ["ndiametro_red", "Diámetro"], ["npresion", "Presión"],
+      ["vunidad", "Unidad - Lab Móvil"], ["nkm", "Recorrido de la Unidad"], ["ncaudal", "Caudal"], ["vobservaciones_fugas", "Observación Fugas", 1],
+      ["nro_ot", "Nro OT Sedapal"], ["vdato1", "Nro OT Contratista"], ["estado_fuga", "ESTADO"]] }
+  ];
+  async function abrirFichaFuga(cod, fecha, origen) {
+    cerrarFichaFuga();
+    const v = document.createElement("div"); v.id = "sgFicha"; v.className = "sgf-fondo";
+    v.innerHTML = `<div class="sgf-caja" role="dialog" aria-modal="true" aria-labelledby="sgfTit" tabindex="-1">
+      <div class="sgf-cab"><div><small>REPORTE FNV PROGRAMADA - EMERGENCIA</small><b id="sgfTit">Fuga ${escA(cod)}</b></div>
+        <button class="sgf-x" id="sgfCerrar" aria-label="Cerrar">✕</button></div>
+      <div class="sgf-cuerpo" id="sgfCuerpo"><div class="text-sm py-6 text-center" style="color:var(--ink-soft)">Cargando la ficha…</div></div></div>
+      <style>
+        .sgf-fondo{position:fixed;inset:0;background:rgba(3,32,76,.55);z-index:9000;display:flex;align-items:flex-start;justify-content:center;padding:16px;overflow:auto}
+        .sgf-caja{background:#fff;border-radius:16px;width:100%;max-width:880px;box-shadow:0 20px 50px rgba(0,0,0,.35);margin:auto 0;outline:none}
+        .sgf-cab{display:flex;align-items:flex-start;justify-content:space-between;gap:10px;background:#03204C;color:#fff;border-radius:16px 16px 0 0;padding:14px 18px}
+        .sgf-cab small{display:block;font-size:11px;letter-spacing:.06em;color:#C9D8EA;font-weight:700}.sgf-cab b{font-size:20px}
+        .sgf-x{color:#fff;font-size:20px;background:rgba(255,255,255,.12);border:0;border-radius:10px;width:40px;height:40px;flex:0 0 40px}
+        .sgf-cuerpo{padding:16px 18px 20px}
+        .sgf-sec{border:1px solid var(--line);border-radius:12px;padding:12px;margin-top:12px}.sgf-sec:first-child{margin-top:0}
+        .sgf-sec h3{font-size:13px;font-weight:800;color:#03204C;margin:0 0 10px;text-transform:uppercase;letter-spacing:.04em}
+        .sgf-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:8px}
+        .sgf-c{background:#F2F5F8;border-radius:10px;padding:8px 10px;min-width:0}.sgf-c.ancho{grid-column:1/-1}
+        .sgf-c small{display:block;font-size:11px;font-weight:700;color:var(--ink-soft);text-transform:uppercase;letter-spacing:.03em}
+        .sgf-c b{display:block;font-size:14px;font-weight:600;color:#0F1B2D;overflow-wrap:anywhere;white-space:pre-line}
+      </style>`;
+    document.body.appendChild(v);
+    const caja = v.querySelector(".sgf-caja"); caja.focus();
+    const cerrar = () => { cerrarFichaFuga(); if (origen && origen.isConnected) origen.focus(); };
+    v.onclick = e => { if (e.target === v) cerrar(); };
+    v.querySelector("#sgfCerrar").onclick = cerrar;
+    v.onkeydown = e => { if (e.key === "Escape") cerrar(); };
+    let d = sgFichas[cod];
+    if (!d) { try { d = await rdApi("sgio_fuga", { cod, fecha }); sgFichas[cod] = d; } catch (e) { d = { error: msgError(e) }; } }
+    const cu = document.getElementById("sgfCuerpo"); if (!cu || document.getElementById("sgFicha") !== v) return;
+    if (d.error) { cu.innerHTML = `<div class="text-sm" style="color:var(--danger);font-weight:600">${escA(d.error)}</div>`; return; }
+    const val = c => { const i = d.campos.indexOf(c), x = i < 0 ? "" : d.fila[i];
+      if (c === "ntipored") return SG_TIPO_RED(x);
+      if (c === "f_alta" && (x === "" || x == null)) return sgVal(d.fila[d.campos.indexOf("f_aviso")]);
+      if (c === "estado_fuga" && x) return `<span class="sg-badge" style="background:${sgColEstado(String(x).toUpperCase())}">${escA(x)}</span>`;
+      return escA(sgVal(x)); };
+    cu.innerHTML = SG_FICHA.map(s => `<section class="sgf-sec"><h3>${s.t}</h3><div class="sgf-grid">${s.c.map(([c, t, ancho]) =>
+      `<div class="sgf-c ${ancho ? "ancho" : ""}"><small>${escA(t)}</small><b>${val(c)}</b></div>`).join("")}</div></section>`).join("");
+  }
+  function cerrarFichaFuga() { const v = document.getElementById("sgFicha"); if (v) v.remove(); }
+
+  /* ---------------- CENTRO DE CONTROL (módulo CENTRO_CONTROL) ----------------
+     Mapa con las fugas del SGIO en estado PENDIENTE (rojo vivo parpadeante) y las atendidas hoy (verde vivo parpadeante),
+     ubicadas por su NIS. Al tocar un punto: datos principales de la fuga y el botón para asignarle un laboratorio. */
+  const CC_COLOR = { pendiente: "#FF1A1A", hoy: "#00D65A" };
+  const iconoCC = tipo => L.divIcon({ className: "", iconSize: [26, 26], iconAnchor: [13, 13], popupAnchor: [0, -12],
+    html: `<span class="cc-pto cc-${tipo}" aria-hidden="true"><i></i></span>` });
+  async function cargarCentroControl(silencio) {
+    if (!silencio) { state.ccDatos = { ...(state.ccDatos || {}), cargando: true, error: null }; renderCentroControl(); }
+    try { const r = await rdApi("sgio_control"); r.en = Date.now(); state.ccDatos = r; }
+    catch (e) { if (!silencio || !state.ccDatos || !state.ccDatos.fugas) state.ccDatos = { error: msgError(e) }; }
+    if (state.vista === "CENTRO_CONTROL") renderCentroControl(true);
+  }
+  function renderCentroControl(conservarMapa) {
+    const d = state.ccDatos, listo = d && d.fugas;
+    const fugas = listo ? d.fugas : [], pend = fugas.filter(f => f.tipo === "pendiente"), hoyA = fugas.filter(f => f.tipo === "hoy");
+    const sinUb = fugas.filter(f => f.lat == null).length, ver = state.ccVer || "todas";
+    const visibles = fugas.filter(f => ver === "todas" || f.tipo === ver);
+    const item = f => `<button class="cc-item ccIr" data-cod="${escA(f.cod)}" ${f.lat == null ? "disabled" : ""}>
+        <span class="cc-dot" style="background:${CC_COLOR[f.tipo]}"></span>
+        <span class="min-w-0"><b>${escA(f.cod)} · NIS ${escA(f.nis || "—")}</b><small>${escA(f.dir || "—")}${f.dist ? " · " + escA(f.dist) : ""}</small>
+          <small>${f.tipo === "pendiente" ? "Pendiente" : "Atendida hoy"}${f.asignado ? " · Lab. " + escA(f.asignado.lab) : ""}${f.lat == null ? " · sin ubicación en la base" : ""}</small></span></button>`;
+    document.getElementById("app").innerHTML = `${estilosGis()}
+      ${cabeceraGis("Centro de Control", "fugas pendientes y atendidas hoy", ICO_CC, "Gestión & Reportes")}
+      <div class="gis-wrap px-4 py-4 pb-24 gis-split cc-split">
+        <div class="gis-panel">
+          <div class="card p-4">
+            <div class="cc-kpis">
+              <button class="cc-kpi ccVer" data-v="pendiente" aria-pressed="${ver === "pendiente"}"><span class="cc-dot cc-late" style="background:${CC_COLOR.pendiente}"></span><small>Pendientes</small><b>${listo ? pend.length : "—"}</b></button>
+              <button class="cc-kpi ccVer" data-v="hoy" aria-pressed="${ver === "hoy"}"><span class="cc-dot cc-late" style="background:${CC_COLOR.hoy}"></span><small>Atendidas hoy</small><b>${listo ? hoyA.length : "—"}</b></button>
+            </div>
+            <div class="flex gap-2 mt-3 items-center" style="flex-wrap:wrap">
+              <button class="gis-chip ccVer" data-v="todas" aria-pressed="${ver === "todas"}">Ver todas</button>
+              <span style="flex:1"></span>
+              <button id="ccAct" class="gis-chip" ${d && d.cargando ? "disabled" : ""}>${d && d.cargando ? "Actualizando…" : "↻ Actualizar"}</button>
+            </div>
+            <div class="text-xs mt-2" style="color:var(--ink-soft)">${d && d.error ? `<span style="color:var(--danger);font-weight:600">${escA(d.error)}</span>`
+              : listo ? `Se actualiza solo cada 3 minutos${d.actualizado ? " · Última carga del SGIO: " + escA(d.actualizado) : ""}${sinUb ? ` · ${sinUb} sin ubicación en la base de NIS` : ""}` : "Cargando fugas…"}</div>
+          </div>
+          ${listo ? `<div class="card p-4 mt-3"><div class="gis-lbl">${ver === "pendiente" ? "Fugas pendientes" : ver === "hoy" ? "Atendidas hoy" : "Fugas en el mapa"} (${visibles.length})</div>
+            ${visibles.length ? `<div class="cc-lista">${visibles.map(item).join("")}</div>` : `<div class="text-sm" style="color:var(--ink-soft)">No hay fugas ${ver === "pendiente" ? "pendientes" : ver === "hoy" ? "atendidas hoy" : "pendientes ni atendidas hoy"}.</div>`}</div>` : ""}
+        </div>
+        <div class="gis-mapa cc-mapa" id="ccMapa" role="region" aria-label="Mapa del Centro de Control"></div>
+      </div>
+      <style>
+        .cc-mapa{height:72vh;min-height:380px}@media (min-width:900px){.cc-split{grid-template-columns:minmax(0,360px) minmax(0,1fr)}.cc-mapa{height:calc(100vh - 140px)}}
+        .cc-kpis{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+        .cc-kpi{text-align:left;border:1.5px solid var(--line);border-radius:12px;padding:10px 12px;background:#fff;position:relative}
+        .cc-kpi[aria-pressed="true"]{border-color:#03204C;box-shadow:0 0 0 2px rgba(3,32,76,.15)}
+        .cc-kpi small{display:block;font-size:11px;font-weight:800;color:var(--ink-soft);text-transform:uppercase;letter-spacing:.04em;margin-left:18px}.cc-kpi b{font-size:28px;font-variant-numeric:tabular-nums}
+        .cc-kpi .cc-dot{position:absolute;left:12px;top:14px}
+        .cc-dot{width:12px;height:12px;border-radius:50%;display:inline-block;flex:0 0 12px;box-shadow:0 0 0 2px #fff,0 0 0 3px rgba(0,0,0,.15)}
+        .cc-lista{display:grid;gap:6px;max-height:46vh;overflow:auto}
+        .cc-item{display:flex;gap:10px;align-items:flex-start;text-align:left;border:1px solid var(--line);border-radius:10px;padding:8px 10px;background:#fff}
+        .cc-item .cc-dot{margin-top:4px}.cc-item b{display:block;font-size:13.5px}.cc-item small{display:block;font-size:12px;color:var(--ink-soft)}
+        .cc-item:disabled{opacity:.6}
+        /* puntos parpadeantes */
+        .cc-pto{position:relative;display:block;width:26px;height:26px}
+        .cc-pto i{position:absolute;left:6px;top:6px;width:14px;height:14px;border-radius:50%;border:2px solid #fff;box-shadow:0 0 6px rgba(0,0,0,.45)}
+        .cc-pto::before{content:"";position:absolute;inset:0;border-radius:50%;animation:ccOnda 1.1s ease-out infinite}
+        .cc-pendiente i{background:#FF1A1A;animation:ccParpadeo .8s steps(2,start) infinite}.cc-pendiente::before{background:rgba(255,26,26,.55)}
+        .cc-hoy i{background:#00D65A;animation:ccParpadeo 1.2s steps(2,start) infinite}.cc-hoy::before{background:rgba(0,214,90,.5)}
+        .cc-late{animation:ccParpadeo 1s steps(2,start) infinite}
+        @keyframes ccOnda{0%{transform:scale(.4);opacity:1}100%{transform:scale(1.9);opacity:0}}
+        @keyframes ccParpadeo{to{opacity:.25}}
+        @media (prefers-reduced-motion:reduce){.cc-pto::before{animation:none;transform:scale(1.4);opacity:.45}.cc-pto i,.cc-late{animation-duration:2s}}
+        .cc-pop{font:14px Roboto,Arial,sans-serif;color:#0F1B2D;min-width:230px}
+        .cc-pop-tit{font-weight:800;font-size:15px;margin-bottom:6px;display:flex;align-items:center;gap:6px}
+        .cc-pop dl{display:grid;grid-template-columns:auto 1fr;gap:3px 10px;margin:0 0 8px}.cc-pop dt{font-weight:700;color:#5B6B7F;font-size:12px}.cc-pop dd{margin:0;font-size:13px}
+        .cc-pop select{width:100%;border:1.5px solid #CBD5E1;border-radius:8px;padding:7px;font-size:14px;margin-bottom:6px}
+        .cc-asig{width:100%;background:#03204C;color:#fff;border:0;border-radius:8px;padding:9px;font-weight:800;font-size:14px}
+        .cc-asig:disabled{opacity:.6}.cc-ya{background:#E1F3FB;color:#0B4A6B;border-radius:8px;padding:6px 8px;font-size:12.5px;margin-bottom:6px}
+      </style>`;
+    document.getElementById("gisVolver").onclick = () => salirVistaGis();
+    document.querySelectorAll(".ccVer").forEach(b => b.onclick = () => { state.ccVer = b.dataset.v === state.ccVer && b.dataset.v !== "todas" ? "todas" : b.dataset.v; renderCentroControl(); });
+    document.getElementById("ccAct").onclick = () => cargarCentroControl();
+    document.querySelectorAll(".ccIr").forEach(b => b.onclick = () => ccAbrir(b.dataset.cod));
+    if (!d) { cargarCentroControl(); }
+    if (!ccReloj) ccReloj = setInterval(() => { if (state.vista === "CENTRO_CONTROL" && !document.querySelector(".leaflet-popup")) cargarCentroControl(true); }, 180000);
+    pintarCentroControl(visibles, conservarMapa);
+  }
+  let ccMarcas = {}, ccVista = null;
+  async function pintarCentroControl(fugas, conservar) {
+    const turno = ++turnoMapa;
+    try { await cargarLeaflet(); } catch (e) { const m = document.getElementById("ccMapa"); if (m) m.innerHTML = `<div class="gis-sinmapa">No se pudo cargar el mapa. Revisa tu internet.</div>`; return; }
+    if (turno !== turnoMapa || !document.getElementById("ccMapa")) return;
+    if (ccL) { ccVista = conservar ? { c: ccL.getCenter(), z: ccL.getZoom() } : null; ccL.remove(); ccL = null; }
+    ccL = L.map("ccMapa", { zoomControl: true, maxZoom: 20 }); capaBase(ccL);
+    ccMarcas = {};
+    const lim = [];
+    fugas.filter(f => f.lat != null).sort((a, b) => a.tipo === b.tipo ? 0 : a.tipo === "pendiente" ? 1 : -1).forEach(f => {   // los pendientes quedan encima
+      const m = L.marker([f.lat, f.lon], { icon: iconoCC(f.tipo), zIndexOffset: f.tipo === "pendiente" ? 500 : 0, title: (f.tipo === "pendiente" ? "Pendiente" : "Atendida hoy") + " · fuga " + f.cod + " · NIS " + f.nis })
+        .addTo(ccL).bindPopup(() => ventanaCC(f), { maxWidth: 300 });
+      m.on("popupopen", ev => activarVentanaCC(f, ev.popup));
+      ccMarcas[f.cod] = m; lim.push([f.lat, f.lon]);
+    });
+    if (ccVista) ccL.setView(ccVista.c, ccVista.z);
+    else if (lim.length) ccL.fitBounds(lim, { padding: [40, 40], maxZoom: 16 }); else ccL.setView([-12.06, -77.04], 11);
+  }
+  function ccAbrir(cod) {
+    const m = ccMarcas[cod]; if (!m || !ccL) return;
+    ccL.setView(m.getLatLng(), Math.max(ccL.getZoom(), 16)); m.openPopup();
+    if (window.innerWidth < 900) document.getElementById("ccMapa").scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+  function ventanaCC(f) {
+    const labs = (state.ccDatos && state.ccDatos.laboratorios) || [];
+    return `<div class="cc-pop">
+      <div class="cc-pop-tit"><span class="cc-dot" style="background:${CC_COLOR[f.tipo]}"></span>${f.tipo === "pendiente" ? "Fuga pendiente" : "Atendida hoy"}</div>
+      <dl><dt>NIS</dt><dd>${escA(f.nis || "—")}</dd><dt>Código de fuga</dt><dd>${escA(f.cod)}</dd><dt>Dirección</dt><dd>${escA(f.dir || "—")}</dd>
+        <dt>Localidad</dt><dd>${escA(f.loc || "—")}</dd><dt>Distrito</dt><dd>${escA(f.dist || "—")}</dd><dt>Fecha de registro</dt><dd>${escA(f.registro || "—")}</dd>
+        <dt>Estado</dt><dd>${escA(f.estado || "—")}</dd></dl>
+      ${f.asignado ? `<div class="cc-ya">Laboratorio asignado: <b>${escA(f.asignado.lab)}</b><br><small>${escA(f.asignado.por)} · ${escA(f.asignado.en)}</small></div>` : ""}
+      <select id="ccLab" aria-label="Laboratorio"><option value="">Elige el laboratorio…</option>${labs.map(l => `<option ${f.asignado && f.asignado.lab === l ? "selected" : ""}>${escA(l)}</option>`).join("")}</select>
+      <button class="cc-asig" id="ccAsig">${f.asignado ? "Cambiar laboratorio" : "Asignar laboratorio"}</button>
+      <div id="ccMsg" style="font-size:12.5px;font-weight:600;margin-top:6px"></div>
+    </div>`;
+  }
+  function activarVentanaCC(f, popup) {
+    const cont = popup.getElement(); if (!cont) return;
+    const btn = cont.querySelector("#ccAsig"), sel = cont.querySelector("#ccLab"), msg = cont.querySelector("#ccMsg");
+    btn.onclick = async () => {
+      if (!sel.value) { msg.style.color = "var(--danger)"; msg.textContent = "Elige un laboratorio de la lista"; sel.focus(); return; }
+      btn.disabled = true; btn.textContent = "Asignando…"; msg.textContent = "";
+      try {
+        const r = await rdApi("sgio_asignar", { cod: f.cod, nis: f.nis, lab: sel.value });
+        f.asignado = r.asignado; toast("Laboratorio " + r.asignado.lab + " asignado a la fuga " + f.cod);
+        popup.setContent(ventanaCC(f)); activarVentanaCC(f, popup);
+        const it = document.querySelector(`.ccIr[data-cod="${f.cod}"] small:last-child`);
+        if (it) it.textContent = (f.tipo === "pendiente" ? "Pendiente" : "Atendida hoy") + " · Lab. " + f.asignado.lab;
+      } catch (e) { btn.disabled = false; btn.textContent = f.asignado ? "Cambiar laboratorio" : "Asignar laboratorio"; msg.style.color = "var(--danger)"; msg.textContent = msgError(e); }
+    };
+  }
+
   // Administradores: preparar los Excel de la carpeta ECRF_SGIO (los grandes, uno por uno)
   function htmlSgioAdmin() {
     const a = state.sgAdmin;
     return `<details class="card p-4 mt-4" id="sgAdm" ${state.sgAdmAbierto ? "open" : ""}>
       <summary class="font-bold" style="cursor:pointer;color:var(--brand-dark)">⚙ Historial del SGIO (administrador)</summary>
-      <div class="text-xs mt-2 mb-3" style="color:var(--ink-soft)">Los Excel de la carpeta <b>ECRF_SGIO</b> del Drive se preparan una vez para la app. El del mes en curso se prepara solo al consultar; los grandes (un año) hay que prepararlos aquí, uno por uno (cada uno puede tardar unos minutos).</div>
+      <div class="text-xs mt-2 mb-3" style="color:var(--ink-soft)">Los Excel de la carpeta <b>ECRF_SGIO</b> del Drive se preparan aquí una vez para la app, uno por uno (los de un año pueden tardar unos minutos cada uno). Lo del mes en curso llega solo desde la PC del SGIO.</div>
       ${!a ? `<button id="sgAdmCargar" class="btn-ghost w-full">Ver archivos</button>`
       : a.error ? `<div class="rd-err">${escA(a.error)}</div><button id="sgAdmCargar" class="btn-ghost w-full mt-2">Reintentar</button>`
       : `<div class="grid gap-2">${a.archivos.map(x => `
@@ -4950,7 +5016,7 @@
         } catch (e) { a.msg = msgError(e); a.msgErr = true; break; }
       }
       a.trabajando = null;
-      if (hechos) { Object.keys(sgCache).forEach(k => delete sgCache[k]); state.sgDatos = null; }
+      if (hechos) { state.sgR = null; Object.keys(sgFichas).forEach(k => delete sgFichas[k]); }
       if (state.vista === "SGIO") { const y = window.scrollY; renderSgio(); window.scrollTo(0, y); }
     };
     document.querySelectorAll(".sgPrep").forEach(b => b.onclick = () => preparar([b.dataset.id]));
