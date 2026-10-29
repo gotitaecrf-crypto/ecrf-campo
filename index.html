@@ -1236,10 +1236,10 @@
       <div class="flex-1 flex flex-col px-6 pb-10" style="margin-top:-8px;position:relative;z-index:1">
         <form class="card p-5 mb-4" id="loginForm" autocomplete="on" novalidate style="max-width:420px;width:100%;margin-left:auto;margin-right:auto">
           <label class="text-sm font-semibold block mb-2" for="loginUsuario" style="color:var(--ink-soft)">Usuario</label>
-          <input id="loginUsuario" name="username" class="input mb-4" inputmode="numeric" autocomplete="username" maxlength="${LARGO_FICHA}" placeholder="Tu ficha (${LARGO_FICHA} dígitos)" value="${escA(fichaGuardada)}">
+          <input id="loginUsuario" name="username" class="input mb-4" inputmode="numeric" autocomplete="username" maxlength="${LARGO_FICHA}" value="${escA(fichaGuardada)}">
           <label class="text-sm font-semibold block mb-2" for="loginClave" style="color:var(--ink-soft)">Contraseña</label>
           <div style="position:relative">
-            <input id="loginClave" name="password" class="input" type="password" inputmode="numeric" autocomplete="current-password" maxlength="12" placeholder="Tu DNI" style="padding-right:48px">
+            <input id="loginClave" name="password" class="input" type="password" inputmode="numeric" autocomplete="current-password" maxlength="12" style="padding-right:48px">
             <button type="button" id="loginOjo" aria-label="Mostrar contraseña" aria-pressed="false" style="position:absolute;right:6px;top:50%;transform:translateY(-50%);width:40px;height:40px;display:flex;align-items:center;justify-content:center;color:var(--ink-soft);background:none;border:0">${OJO_ABIERTO}</button>
           </div>
           <div id="loginErr" class="rd-err" role="alert" style="min-height:18px;margin-top:8px">${escA(state.loginError || "")}</div>
@@ -1255,8 +1255,9 @@
     document.getElementById("loginForm").onsubmit = e => {
       e.preventDefault();
       const err = document.getElementById("loginErr");
-      if (us.value.length !== LARGO_FICHA) { err.textContent = `El usuario es tu ficha de ${LARGO_FICHA} dígitos`; us.focus(); return; }
-      if (!cl.value) { err.textContent = "Escribe tu contraseña (DNI)"; cl.focus(); return; }
+      if (!us.value) { err.textContent = "Escribe tu usuario"; us.focus(); return; }
+      if (us.value.length !== LARGO_FICHA) { err.textContent = "Usuario o contraseña incorrectos"; us.focus(); return; }
+      if (!cl.value) { err.textContent = "Escribe tu contraseña"; cl.focus(); return; }
       tryLogin(us.value, cl.value);
     };
     (us.value ? cl : us).focus();
@@ -2572,9 +2573,9 @@
       el.style.cssText = "position:fixed;inset:0;z-index:96;background:rgba(3,32,76,.55);display:flex;align-items:center;justify-content:center;padding:16px";
       el.innerHTML = `<div style="background:#fff;border-radius:18px;padding:18px;width:100%;max-width:360px">
         <div class="font-bold text-lg mb-1">${escA(titulo || "Confirma tu contraseña")}</div>
-        <div class="text-sm mb-3" style="color:var(--ink-soft)">${escA(texto || "Por seguridad, los cambios del panel se guardan solo con la contraseña (DNI) del administrador.")}</div>
-        ${fichaSabida ? "" : `<input id="admUsuarioIn" class="input mb-2" inputmode="numeric" maxlength="${LARGO_FICHA}" placeholder="Usuario (tu ficha)" autocomplete="username" aria-label="Usuario (ficha)">`}
-        <input id="admFichaIn" class="input" type="password" inputmode="numeric" maxlength="12" placeholder="Contraseña (DNI)" autocomplete="current-password" aria-label="Contraseña (DNI)">
+        <div class="text-sm mb-3" style="color:var(--ink-soft)">${escA(texto || "Por seguridad, los cambios del panel se guardan solo con la contraseña del administrador.")}</div>
+        ${fichaSabida ? "" : `<input id="admUsuarioIn" class="input mb-2" inputmode="numeric" maxlength="${LARGO_FICHA}" placeholder="Usuario" autocomplete="username" aria-label="Usuario">`}
+        <input id="admFichaIn" class="input" type="password" inputmode="numeric" maxlength="12" placeholder="Contraseña" autocomplete="current-password" aria-label="Contraseña">
         <div style="display:flex;gap:10px;margin-top:14px">
           <button id="admFichaNo" class="btn-ghost" style="flex:1">Cancelar</button>
           <button id="admFichaSi" class="btn-primary" style="flex:1">${escA(boton || "Guardar")}</button>
@@ -2588,8 +2589,8 @@
       el.querySelector("#admFichaNo").onclick = () => fin(null);
       el.querySelector("#admFichaSi").onclick = () => {
         const ficha = us ? us.value : fichaSabida;
-        if (ficha.length !== LARGO_FICHA) { toast(`El usuario es tu ficha de ${LARGO_FICHA} dígitos`, true); return; }
-        if (!inp.value) { toast("Escribe tu contraseña (DNI)", true); return; }
+        if (ficha.length !== LARGO_FICHA) { toast(ficha ? "Usuario o contraseña incorrectos" : "Escribe tu usuario", true); return; }
+        if (!inp.value) { toast("Escribe tu contraseña", true); return; }
         if (us) localStorage.setItem("ecrf_ficha", ficha);
         fin({ ficha, clave: inp.value });
       };
