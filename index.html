@@ -2664,6 +2664,12 @@
         .rd-video{position:relative;width:100%;aspect-ratio:16/9;background:#0F1B2D;border-radius:12px;overflow:hidden}
         .rd-video iframe,.rd-video>div,.rd-video video{position:absolute;inset:0;width:100%;height:100%;border:0}
         .rd-video video{object-fit:contain;background:#000}
+        .rd-vctl{flex-wrap:wrap}
+        /* pantalla completa (o, en iPhone, el video ocupa toda la pantalla dentro de la app); sigue sin poder adelantarse */
+        .rd-vcaja:fullscreen,.rd-vcaja.rd-vgrande{background:#000;display:flex;flex-direction:column;justify-content:center;padding:10px;gap:8px}
+        .rd-vcaja.rd-vgrande{position:fixed;inset:0;z-index:9500}
+        .rd-vcaja:fullscreen .rd-video,.rd-vcaja.rd-vgrande .rd-video{flex:1;aspect-ratio:auto;border-radius:0;margin:0}
+        .rd-vcaja:fullscreen .rd-vctl,.rd-vcaja.rd-vgrande .rd-vctl{margin:0;justify-content:center}
         .rd-capa{z-index:2;cursor:pointer;background:transparent}
         .rd-capa.rd-capa-toca{pointer-events:none}
         .rd-vctl{display:grid;grid-template-columns:1fr auto;gap:8px}
@@ -2755,7 +2761,9 @@
           ${rep && rep.cerradoEn ? `<div class="rd-dato"><small>Cierre</small><b>${horaDe(rep.cerradoEn)}</b></div>` : ""}
         </div>
       </div>
-      <div id="rdEtapa"></div>`;
+      <div id="rdEtapa"></div>
+      ${esAdmin() && !cierre ? htmlRdSupervisor(d) : ""}`;
+    if (esAdmin() && !cierre) activarRdSupervisor(d);
     c.querySelectorAll(".rdCerrarAnt").forEach(b => b.onclick = async () => {
       try { const r = await rdApi("rd_detalle", { id: b.dataset.id }); state.rdCierreId = b.dataset.id; state.rdCierreRep = r.reporte; renderRdHoy(); window.scrollTo(0, 0); }
       catch (e) { toast(msgError(e), true); }
@@ -2827,23 +2835,19 @@
   }
   const mapaPunto = g => g && isFinite(g.lat) ? `<a href="https://www.google.com/maps/search/?api=1&query=${g.lat},${g.lon}" target="_blank" rel="noopener" style="color:var(--brand);font-weight:700">📍 Ver ubicación</a>${g.precision != null && g.precision !== "" && !isNaN(g.precision) ? ` <span style="color:var(--ink-soft)">(±${g.precision} m)</span>` : ""}` : "";
   const EPP_MAX_FOTOS = 3;
-  // En prueba: el ítem 4 (EPP y EPC), la salida a campo y el retorno a la oficina solo los ven supervisores y administradores
-  const rdPiloto = () => ["SUPERVISOR", "ADMINISTRADOR"].includes(rolDe(state.operario));
-  // Ítem 4: verificación de EPP y EPC completos, con registro fotográfico
+  // Ítem 4 (Verificación de EPPs), salida a campo y retorno a la oficina: para todos los roles (antes, solo en prueba)
+  const rdPiloto = () => true;
+  // Ítem 4: Verificación de EPPs con registro fotográfico (la foto basta: se entiende que son los EPP)
   function bloqueEppRd(borr, completada) {
     const e = borr.epp || {}, fotos = e.fotos || [];
     return `
         <div class="card p-4 rd-bloq ${completada ? "" : "off"}" id="rdBloqueEpp">
           <div class="rd-candado">🔒 Completa la charla de seguridad para registrar tus actividades</div>
-          <div class="rd-step"><span>4</span>Verificación de EPP y EPC completos</div>
-          <div class="text-sm mb-3" style="color:var(--ink-soft)">Confirma que cuentas con tu equipo de protección personal (EPP) y el equipo de protección colectiva (EPC) completos, y toma una foto como evidencia.</div>
-          <div class="grid grid-cols-2 gap-2 mb-3">
-            <button class="rd-chip e1 rdEpp" data-k="epp" aria-pressed="${!!e.epp}">${e.epp ? "✅ " : ""}EPP completos</button>
-            <button class="rd-chip e1 rdEpp" data-k="epc" aria-pressed="${!!e.epc}">${e.epc ? "✅ " : ""}EPC completos</button>
-          </div>
+          <div class="rd-step"><span>4</span>Verificación de EPPs</div>
+          <div class="text-sm mb-3" style="color:var(--ink-soft)">Toma una foto de tu equipo de protección personal (EPP) completo como evidencia. Va en los anexos del PDF del reporte.</div>
           <div class="text-xs font-semibold mb-1" style="color:var(--ink-soft)">Registro fotográfico * (${fotos.length} de ${EPP_MAX_FOTOS})</div>
           <div class="rd-fotos">
-            ${fotos.map((f, i) => `<div class="rd-foto"><img src="${f}" alt="Foto ${i + 1} de EPP y EPC"><button class="rdEppQuitar" data-i="${i}" aria-label="Quitar foto ${i + 1}">✕</button></div>`).join("")}
+            ${fotos.map((f, i) => `<div class="rd-foto"><img src="${f}" alt="Foto ${i + 1} de tus EPP"><button class="rdEppQuitar" data-i="${i}" aria-label="Quitar foto ${i + 1}">✕</button></div>`).join("")}
             ${fotos.length < EPP_MAX_FOTOS ? `<label class="rd-foto rd-foto-add" for="rdEppFoto">📷<span>Tomar foto</span></label>` : ""}
           </div>
           <input id="rdEppFoto" type="file" accept="image/*" capture="environment" style="display:none">
@@ -2854,8 +2858,7 @@
     const e = borr.epp || {}, f = [];
     if (!completada) f.push("la charla de seguridad");
     if (!borr.acts.length) f.push("al menos una actividad");
-    if (rdPiloto() && (!e.epp || !e.epc)) f.push("confirmar EPP y EPC completos");
-    if (rdPiloto() && !(e.fotos || []).length) f.push("la foto de EPP y EPC");
+    if (rdPiloto() && !(e.fotos || []).length) f.push("la foto de tus EPP");
     return f;
   };
   function renderRdManana(rep) {
@@ -2874,8 +2877,8 @@
           <div class="font-bold">${escA(ch.titulo)}</div>
           ${ch.descripcion ? `<div class="text-sm mb-2" style="color:var(--ink-soft)">${escA(ch.descripcion)}</div>` : `<div class="mb-2"></div>`}
           ${completada ? `<div class="p-3 rounded-lg text-sm font-semibold mb-2" style="background:#DDF3E7;color:#12613B">✅ Charla completada</div>`
-            : `<div class="rd-video mb-2"><div id="rdPlayer"></div><div id="rdCapa" class="rd-capa" aria-hidden="true"></div></div>
-               <div class="rd-vctl mb-2"><button id="rdVPlay" class="btn-primary" disabled>▶ Reproducir</button><button id="rdVAtras" class="btn-ghost" disabled>⏪ 10 s</button></div>
+            : `<div class="rd-vcaja" id="rdVCaja"><div class="rd-video mb-2"><div id="rdPlayer"></div><div id="rdCapa" class="rd-capa" aria-hidden="true"></div></div>
+               <div class="rd-vctl mb-2"><button id="rdVPlay" class="btn-primary" disabled>▶ Reproducir</button><button id="rdVAtras" class="btn-ghost" disabled>⏪ 10 s</button><button id="rdVGrande" class="btn-ghost" aria-pressed="false">⛶ Pantalla completa</button></div></div>
                <div class="text-xs mb-2" style="color:var(--ink-soft)">Debes ver el video completo: puedes pausar y retroceder, pero no adelantar.</div>`}
           <div class="rd-barra mb-1"><i id="rdBarra" style="width:${completada ? 100 : cv && cv.duracion ? Math.min(100, Math.round(cv.visto / cv.duracion * 100)) : 0}%"></i></div>
           <div class="text-xs mb-2" style="color:var(--ink-soft)" id="rdAvance">${completada ? "Visto al 100 %" : cv && cv.duracion ? `Visto ${Math.min(100, Math.round(cv.visto / cv.duracion * 100))} %` : "Reproduce el video hasta el final"}</div>
@@ -2921,9 +2924,6 @@
     document.querySelectorAll(".rdQuitar").forEach(b => b.onclick = () => { borr.acts.splice(+b.dataset.i, 1); guardarBorr(claveBorrador(), borr); state.rdEditando = null; renderRdManana(rep); });
     // ítem 4: confirmaciones y fotos (se guardan en el celular hasta enviar el reporte)
     const reEpp = () => { const y = window.scrollY; renderRdManana(rep); window.scrollTo(0, y); };
-    document.querySelectorAll(".rdEpp").forEach(x => x.onclick = () => {
-      const b = leerBorr(claveBorrador()) || borr; b.epp = b.epp || {}; b.epp[x.dataset.k] = !b.epp[x.dataset.k]; guardarBorr(claveBorrador(), b); reEpp();
-    });
     document.querySelectorAll(".rdEppQuitar").forEach(x => x.onclick = () => {
       const b = leerBorr(claveBorrador()) || borr; (b.epp.fotos || []).splice(+x.dataset.i, 1); guardarBorr(claveBorrador(), b); reEpp();
     });
@@ -2945,10 +2945,10 @@
     const borr = leerBorr(claveBorrador());
     if (!borr || !borr.acts.length) { err.textContent = "Registra al menos una actividad"; return; }
     const e = borr.epp || {};
-    if (rdPiloto() && (!e.epp || !e.epc || !(e.fotos || []).length)) { err.textContent = "Completa el ítem 4: EPP y EPC completos y su foto"; return; }
+    if (rdPiloto() && !(e.fotos || []).length) { err.textContent = "Completa el ítem 4: toma la foto de tus EPP"; return; }
     btn.disabled = true; btn.textContent = "Guardando…"; err.textContent = "";
     try {
-      const r = await rdApi("rd_manana", { clave: borr.clave, actividades: borr.acts, ...(rdPiloto() ? { epp: { epp: true, epc: true, fotos: e.fotos } } : {}) });
+      const r = await rdApi("rd_manana", { clave: borr.clave, actividades: borr.acts, ...(rdPiloto() ? { epp: { fotos: e.fotos } } : {}) });
       borrarBorr(claveBorrador());
       state.rdDatos.reporte = r.reporte;
       toast("Reporte de la mañana guardado ✅");
@@ -3018,6 +3018,27 @@
       duracion: () => (p.getDuration ? p.getDuration() : 0) || 0, ir: t => p.seekTo && p.seekTo(t, true),
       reproduciendo: () => !!(p.getPlayerState && p.getPlayerState() === YT.PlayerState.PLAYING), destroy: () => { try { p.destroy(); } catch (e) {} } };
   }
+  // Botón «Pantalla completa» del video de la charla (incluye los botones Reproducir/Pausar y −10 s)
+  function activarPantallaCompleta() {
+    const caja = document.getElementById("rdVCaja"), b = document.getElementById("rdVGrande"); if (!caja || !b) return;
+    const pinta = on => { b.textContent = on ? "✕ Salir de pantalla completa" : "⛶ Pantalla completa"; b.setAttribute("aria-pressed", String(on)); };
+    const nativo = !!(caja.requestFullscreen || caja.webkitRequestFullscreen);
+    b.onclick = async () => {
+      const dentro = document.fullscreenElement === caja || document.webkitFullscreenElement === caja || caja.classList.contains("rd-vgrande");
+      if (dentro) {
+        if (caja.classList.contains("rd-vgrande")) { caja.classList.remove("rd-vgrande"); document.body.style.overflow = ""; pinta(false); }
+        else (document.exitFullscreen || document.webkitExitFullscreen).call(document);
+        return;
+      }
+      try {
+        if (!nativo) throw 0;
+        await (caja.requestFullscreen || caja.webkitRequestFullscreen).call(caja);
+        try { await screen.orientation.lock("landscape"); } catch (e) {}       // en celular, se gira solo si el sistema lo permite
+      } catch (e) { caja.classList.add("rd-vgrande"); document.body.style.overflow = "hidden"; pinta(true); }
+    };
+    const cambio = () => pinta(document.fullscreenElement === caja || document.webkitFullscreenElement === caja);
+    caja.addEventListener("fullscreenchange", cambio); caja.addEventListener("webkitfullscreenchange", cambio);
+  }
   async function montarVideo(ch, cv) {
     detenerVideo();
     const msg = t => { const m = document.getElementById("rdVMsg"); if (m) m.textContent = t || ""; };
@@ -3039,6 +3060,7 @@
     let visto = 0, ultimo = null, dur = 0, maximo = 0, inicioEnviado = !!(cv && cv.inicio), ultimoEnvio = 0, enviandoFin = false;
     const marca = (a, b) => { if (!(b > a) || b - a > 1.6) return; for (let s = Math.floor(a); s < Math.ceil(b - 0.05); s++) cubiertos.add(s); visto = Math.min(dur || Infinity, cubiertos.size); };
     const bPlay = document.getElementById("rdVPlay"), bAtras = document.getElementById("rdVAtras"), capa = document.getElementById("rdCapa");
+    activarPantallaCompleta();
     const botonPlay = () => { if (bPlay) bPlay.innerHTML = rdPlayer && rdPlayer.reproduciendo() ? "⏸ Pausar" : "▶ Reproducir"; };
     const enviar = async (evento, extra) => {
       try {
@@ -3216,8 +3238,50 @@
     };
   }
 
+  // PDF del reporte (se genera solo al cerrar el registro del día; si faltara, se genera al pedirlo)
+  async function abrirPdfRd(id, btn) {
+    const w = window.open("", "_blank");               // se abre ya (si se abre después de esperar, el navegador lo bloquea)
+    try { if (w) w.document.write("<p style='font:16px Arial;padding:24px'>Generando el PDF del reporte…</p>"); } catch (e) {}
+    const txt = btn ? btn.textContent : "";
+    if (btn) { btn.disabled = true; btn.textContent = "Generando PDF…"; }
+    try {
+      const r = await rdApi("rd_pdf", { id });
+      if (w) w.location.href = r.url; else location.href = r.url;
+    } catch (e) { if (w) w.close(); toast(msgError(e), true); }
+    if (btn) { btn.disabled = false; btn.textContent = txt; }
+  }
+  document.addEventListener("click", ev => { const b = ev.target.closest && ev.target.closest(".rdPdfBtn"); if (b) { ev.preventDefault(); abrirPdfRd(b.dataset.id, b); } });
+  const botonPdfRd = rep => rep.estado === "CERRADO" ? `<button class="btn-primary w-full mb-3 rdPdfBtn" data-id="${escA(rep.id)}">📄 Ver PDF del reporte</button>` : "";
+  // Supervisor ECRF que firma «Responsable de programación y autorización» en el PDF (lo elige un administrador)
+  function htmlRdSupervisor(d) {
+    const s = d.supervisor, usuarios = listaUsuarios().filter(u => (u.rol || "OPERARIO") !== "OPERARIO");
+    return `<div class="card p-4 mt-4" id="rdSupCard">
+      <div class="font-bold mb-1" style="color:var(--brand-dark)">Supervisor ECRF del PDF</div>
+      <div class="text-xs mb-3" style="color:var(--ink-soft)">Firma como «Responsable de programación y autorización» en el PDF de todos los reportes diarios. Solo lo ven los administradores.</div>
+      <div class="grid gap-2" style="grid-template-columns:minmax(0,1fr) minmax(0,1fr)">
+        <div><label class="text-xs font-semibold block mb-1" for="rdSupNom" style="color:var(--ink-soft)">Supervisor</label>
+          <select id="rdSupNom" class="input"><option value="">— Sin supervisor —</option>${usuarios.map(u => `<option ${s && s.nombre === u.name ? "selected" : ""}>${escA(u.name)}</option>`).join("")}</select></div>
+        <div><label class="text-xs font-semibold block mb-1" for="rdSupCargo" style="color:var(--ink-soft)">Cargo</label>
+          <input id="rdSupCargo" class="input" maxlength="80" value="${escA(s ? s.cargo : "Supervisor ECRF")}"></div>
+      </div>
+      <button id="rdSupGuardar" class="btn-ghost w-full mt-3">Guardar supervisor</button>
+      <div id="rdSupMsg" class="text-xs mt-2" style="color:var(--ink-soft)">${s ? `Actual: <b>${escA(s.nombre)}</b> · ${escA(s.cargo)}${s.por ? " (lo eligió " + escA(s.por) + ")" : ""}` : "Aún no hay supervisor: esa firma saldrá en blanco."}</div>
+    </div>`;
+  }
+  function activarRdSupervisor(d) {
+    const b = document.getElementById("rdSupGuardar"); if (!b) return;
+    b.onclick = async () => {
+      const nombre = document.getElementById("rdSupNom").value, cargo = document.getElementById("rdSupCargo").value.trim();
+      b.disabled = true; b.textContent = "Guardando…";
+      try {
+        const r = await rdApi("rd_admin_supervisor", { nombre, cargo });
+        d.supervisor = r.supervisor; toast(r.supervisor ? "Supervisor del PDF: " + r.supervisor.nombre : "Se quitó el supervisor del PDF");
+        const card = document.getElementById("rdSupCard"); if (card) { card.outerHTML = htmlRdSupervisor(d); activarRdSupervisor(d); }
+      } catch (e) { b.disabled = false; b.textContent = "Guardar supervisor"; document.getElementById("rdSupMsg").innerHTML = `<span style="color:var(--danger);font-weight:600">${escA(msgError(e))}</span>`; }
+    };
+  }
   function detalleRdHTML(rep) {
-    return `
+    return `${botonPdfRd(rep)}
       <div class="grid grid-cols-2 gap-2 text-sm mb-3">
         <div class="rd-dato"><small>Cumplimiento</small><b>${fmtPct(rep.cumplimiento)}</b></div>
         <div class="rd-dato"><small>Estado</small><b>${RD_EST_TXT[rep.estado] || rep.estado}</b></div>
@@ -3226,8 +3290,8 @@
         <div class="rd-dato"><small>Cierre</small><b>${horaDe(rep.cerradoEn) || "—"}</b></div>
         <div class="rd-dato"><small>Planif. · Ejec. · Parc. · No</small><b>${rep.nActividades} · ${rep.nEjecutadas} · ${rep.nParciales} · ${rep.nNoEjecutadas}</b></div>
       </div>
-      ${rep.epp && rep.epp.en ? `<div class="rd-dato mb-3 text-sm"><small>Verificación de EPP y EPC</small>
-        ${rep.epp.epp ? "✅ EPP completos" : "EPP: —"} · ${rep.epp.epc ? "✅ EPC completos" : "EPC: —"} · ${horaDe(rep.epp.en)}
+      ${rep.epp && rep.epp.en ? `<div class="rd-dato mb-3 text-sm"><small>Verificación de EPPs</small>
+        ✅ ${rep.epp.fotos.length} foto(s) · ${horaDe(rep.epp.en)}
         ${rep.epp.fotos.length ? `<div class="flex gap-2 mt-2" style="flex-wrap:wrap">${rep.epp.fotos.map((u, i) => `<a href="${escA(u)}" target="_blank" rel="noopener" class="gis-chip">📷 Foto ${i + 1}</a>`).join("")}</div>` : ""}</div>` : ""}
       ${rep.salida || rep.retorno ? `<div class="grid grid-cols-2 gap-2 text-sm mb-3">
         <div class="rd-dato"><small>Salida a campo</small><b>${rep.salida ? horaDe(rep.salida.en) : "—"}</b>${rep.salida ? `<div class="text-xs">${mapaPunto(rep.salida)}</div>` : ""}</div>
@@ -3268,7 +3332,7 @@
       try {
         const gps = await obtenerGps(); bt.textContent = "Registrando…";
         const r = await rdApi("rd_retorno", { id: rep.id, gps });
-        toast("Retorno registrado ✅ " + horaDe(r.reporte.retorno.en) + ". Registro del día cerrado");
+        toast("Retorno registrado ✅ " + horaDe(r.reporte.retorno.en) + ". Registro del día cerrado" + (r.reporte.pdf ? " · PDF generado" : ""));
         if (state.rdCierreId) { state.rdCierreId = null; state.rdCierreRep = null; state.rdDatos = null; cargarRdHoy(); }
         else { state.rdDatos.reporte = r.reporte; renderRdHoy(); }
         window.scrollTo(0, 0);
@@ -3322,7 +3386,7 @@
         <button class="card p-4 mb-3 w-full rdItem" data-id="${escA(x.id)}" style="text-align:left;display:block">
           <div class="flex justify-between items-start gap-2 mb-1"><div class="font-bold">${fechaTxt(x.fecha)} · ${escA(x.trabajador)}</div>${badgeRd(x.estado)}</div>
           <div class="text-sm" style="color:var(--ink)">Cumplimiento <b>${fmtPct(x.cumplimiento)}</b> · Planificadas ${x.nActividades} · Ejecutadas ${x.nEjecutadas} · Parciales ${x.nParciales} · No ejecutadas ${x.nNoEjecutadas}</div>
-          <div class="text-xs mt-1" style="color:var(--ink-soft)">Inicio ${horaDe(x.inicioEn) || "—"} · Cierre ${horaDe(x.cerradoEn) || "—"}${x.observaciones ? " · " + escA(x.observaciones.slice(0, 80)) : ""}</div>
+          <div class="text-xs mt-1" style="color:var(--ink-soft)">Inicio ${horaDe(x.inicioEn) || "—"} · Cierre ${horaDe(x.cerradoEn) || "—"}${x.pdf ? " · 📄 PDF listo" : ""}${x.observaciones ? " · " + escA(x.observaciones.slice(0, 80)) : ""}</div>
         </button>`).join("") : `<div class="text-center text-sm py-8" style="color:var(--ink-soft)">No hay reportes con esos filtros</div>`}
       ${paginas > 1 ? `<div class="flex items-center justify-between mt-2">
         <button id="rfAnt" class="btn-ghost" ${r.pagina <= 1 ? "disabled" : ""}>‹ Anterior</button>
