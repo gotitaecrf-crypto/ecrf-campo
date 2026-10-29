@@ -346,7 +346,7 @@
   const OPERARIOS_DEFECTO = [
     { name: "Erick Espinoza Pacosonco", ficha: "24741" },
     { name: "Miguel Lozano Quinto", ficha: "23237" },
-    { name: "Brayan (Supervisor)", ficha: "16355" }
+    { name: "Brayan Miguel Alca Vasquez", ficha: "16355", rol: "ADMINISTRADOR" }
   ];
   const PROVINCIA = "Provincia de Lima";
   /* ====================================================== */
@@ -355,7 +355,7 @@
   // Lista de usuarios: la del servidor (hoja USUARIOS) si ya se descargó; si no, la de respaldo
   function listaUsuarios() {
     try { const u = JSON.parse(localStorage.getItem("ecrf_usuarios") || "null"); if (u && u.length) return u; } catch (e) {}
-    return OPERARIOS_DEFECTO.map(o => ({ name: o.name, ficha: o.ficha, rol: /supervisor/i.test(o.name) ? "SUPERVISOR" : "OPERARIO" }));
+    return OPERARIOS_DEFECTO.map(o => ({ name: o.name, ficha: o.ficha, rol: o.rol || "OPERARIO" }));
   }
   const OPERARIOS = { find: f => listaUsuarios().find(f), filter: f => listaUsuarios().filter(f), map: f => listaUsuarios().map(f), some: f => listaUsuarios().some(f) };
   const app = document.getElementById("app");
@@ -809,8 +809,9 @@
     return file.lastModified ? new Date(file.lastModified) : new Date();
   }
 
-  function watermarkPhoto(file, info, fecha, real) {
-    const dato = info || state.nisSel;
+  // info === false: sin datos de NIS (p. ej. la foto de EPPs); «extra»: líneas adicionales debajo de la fecha y hora
+  function watermarkPhoto(file, info, fecha, real, extra) {
+    const dato = info === false ? null : (info || state.nisSel);
     return new Promise((resolve, reject) => {
       const url = URL.createObjectURL(file);
       const img = new Image();
@@ -827,6 +828,7 @@
         const lines = [];
         const cuando = fecha || new Date();
         lines.push(fmtCaptureStamp(cuando));
+        (extra || []).forEach(l => l && lines.push(l));
         if (dato) {
           if (String(dato.direccion || "").trim()) lines.push(tituloWM(dato.direccion));
           if (String(dato.urb || "").trim()) lines.push(tituloWM(dato.urb));
@@ -2470,9 +2472,11 @@
           <button class="adm-tab" data-admtab="charlas" aria-current="${tab === "charlas"}">Charlas de seguridad</button>
           <button class="adm-tab" data-admtab="catalogo" aria-current="${tab === "catalogo"}">Dominios</button>
           <button class="adm-tab" data-admtab="vehiculo" aria-current="${tab === "vehiculo"}">Laboratorio (vehículo)</button>
+          <button class="adm-tab" data-admtab="rdpdf" aria-current="${tab === "rdpdf"}">Supervisor del PDF</button>
           <button class="adm-tab" disabled title="Próximamente">Usuarios · próximamente</button>
         </div>
         ${tab === "charlas" ? estilosGis() + estilosCharlas() + htmlAdminCharlas()
+          : tab === "rdpdf" ? (!state.adminRd ? (cargarAdminRd(), `<div class="text-sm py-6" style="color:var(--ink-soft)">Cargando…</div>`) : state.adminRd.error ? `<div class="card p-4 text-sm" style="color:var(--danger)">${escA(state.adminRd.error)}</div>` : htmlRdSupervisor(state.adminRd))
           : tab === "catalogo" ? `<div class="text-sm mb-3" style="color:var(--ink-soft)">Dominios: listas de valores que los trabajadores eligen en la app. Los valores no se borran: se desactivan, y los registros anteriores conservan su texto.</div>` + htmlAdminCatalogo()
           : tab === "vehiculo" ? `<div class="text-sm mb-3" style="color:var(--ink-soft)">Ficha del vehículo laboratorio que ven todos en «Laboratorio ECRF». Las fechas de SOAT, revisión técnica y mantenimiento generan las alertas de vencimiento.</div>` + estilosGis() + htmlAdminVehiculo() : `
         <div class="text-sm mb-3" style="color:var(--ink-soft)">Activa o desactiva cada módulo, cambia su orden y su nombre, y elige qué roles lo ven en el menú. Los cambios llegan a todos los celulares la próxima vez que abran la app con internet.</div>
@@ -2523,6 +2527,7 @@
       renderAdmin(); window.scrollTo(0, 0);
     });
     if (tab === "vehiculo") { document.getElementById("admVolver").onclick = salirAdmin; activarAdminVehiculo(app); return; }
+    if (tab === "rdpdf") { document.getElementById("admVolver").onclick = salirAdmin; if (state.adminRd && !state.adminRd.error) activarRdSupervisor(state.adminRd, () => { const y = window.scrollY; renderAdmin(); window.scrollTo(0, y); }); return; }
     if (tab !== "modulos") { activarAdminRd(app); return; }
 
     const cambio = () => { state.adminDirty = true; const y = window.scrollY; renderAdmin(); window.scrollTo(0, y); };
@@ -2761,9 +2766,7 @@
           ${rep && rep.cerradoEn ? `<div class="rd-dato"><small>Cierre</small><b>${horaDe(rep.cerradoEn)}</b></div>` : ""}
         </div>
       </div>
-      <div id="rdEtapa"></div>
-      ${esAdmin() && !cierre ? htmlRdSupervisor(d) : ""}`;
-    if (esAdmin() && !cierre) activarRdSupervisor(d);
+      <div id="rdEtapa"></div>`;
     c.querySelectorAll(".rdCerrarAnt").forEach(b => b.onclick = async () => {
       try { const r = await rdApi("rd_detalle", { id: b.dataset.id }); state.rdCierreId = b.dataset.id; state.rdCierreRep = r.reporte; renderRdHoy(); window.scrollTo(0, 0); }
       catch (e) { toast(msgError(e), true); }
@@ -2931,7 +2934,12 @@
     if (fe) fe.onchange = async () => {
       const f = fe.files && fe.files[0]; if (!f) return;
       try {
-        const url = await fotoReducida(f, 1024);
+        // marca de agua: fecha y hora de la toma y la ubicación GPS del celular en ese momento
+        const ahora = new Date(); ensureLocation();
+        const c = state.coords && state.coords.lat != null ? state.coords : state.gpsUltimo;
+        const ubic = c && c.lat != null ? `Lat ${Number(c.lat).toFixed(6)}  Lon ${Number(c.lon).toFixed(6)}` : "Ubicación GPS no disponible";
+        const marcada = await watermarkPhoto(f, false, ahora, ahora, [ubic, "Verificación de EPPs · " + (state.operario || "")]);
+        const url = await fotoReducida(marcada, 1280);
         const b = leerBorr(claveBorrador()) || borr; b.epp = b.epp || {}; b.epp.fotos = [...(b.epp.fotos || []), url].slice(0, EPP_MAX_FOTOS);
         guardarBorr(claveBorrador(), b); reEpp();
       } catch (e) { const er = document.getElementById("rdEppErr"); if (er) er.textContent = "No se pudo leer la foto. Vuelve a tomarla."; }
@@ -3125,7 +3133,7 @@
       const v = rep.actividades.map(a => (b.res[a.id] || {}).estado);
       return { ej: v.filter(x => x === "EJECUTADA").length, pa: v.filter(x => x === "PARCIAL").length, no: v.filter(x => x === "NO_EJECUTADA").length, tot: rep.actividades.length };
     };
-    const k = cuenta(), pct = k.tot ? Math.round(k.ej / k.tot * 10000) / 100 : 0;
+    const k = cuenta(), pct = k.tot ? Math.round((2 * k.ej + k.pa) / (2 * k.tot) * 10000) / 100 : 0;   // ponderado: ejecutada 2, parcial 1, no 0
     // flujo con salida y retorno: jornada de hoy que registró el ítem 4 (los reportes antiguos se cierran como antes)
     const conGps = !!(rep.epp && rep.epp.en) && rep.fecha === (state.rdDatos && state.rdDatos.fecha);
     const sinSalida = conGps && !rep.salida;
@@ -3169,7 +3177,7 @@
         <div class="card p-4" style="position:sticky;top:12px">
           <div class="text-sm font-bold mb-1">Cumplimiento</div>
           <div class="rd-pct" id="rdPct">${fmtPct(pct)}</div>
-          <div class="text-xs mb-3" style="color:var(--ink-soft)">Se calcula solo: ejecutadas ÷ planificadas × 100</div>
+          <div class="text-xs mb-3" style="color:var(--ink-soft)">Se calcula solo, ponderado: ejecutada = 2, parcial = 1, no ejecutada = 0 (suma ÷ 2 × planificadas × 100)</div>
           <div class="grid grid-cols-2 gap-2 text-sm mb-3">
             <div class="rd-dato"><small>Planificadas</small><b>${k.tot}</b></div>
             <div class="rd-dato"><small>Ejecutadas</small><b>${k.ej}</b></div>
@@ -3252,31 +3260,46 @@
   }
   document.addEventListener("click", ev => { const b = ev.target.closest && ev.target.closest(".rdPdfBtn"); if (b) { ev.preventDefault(); abrirPdfRd(b.dataset.id, b); } });
   const botonPdfRd = rep => rep.estado === "CERRADO" ? `<button class="btn-primary w-full mb-3 rdPdfBtn" data-id="${escA(rep.id)}">📄 Ver PDF del reporte</button>` : "";
-  // Supervisor ECRF que firma «Responsable de programación y autorización» en el PDF (lo elige un administrador)
+  // Supervisor ECRF que firma «Responsable de programación y autorización» en el PDF (Panel de administración).
+  // Queda fijo hasta que se cambie; cada reporte guarda el que estaba designado cuando se generó su PDF.
   function htmlRdSupervisor(d) {
-    const s = d.supervisor, usuarios = listaUsuarios().filter(u => (u.rol || "OPERARIO") !== "OPERARIO");
-    return `<div class="card p-4 mt-4" id="rdSupCard">
-      <div class="font-bold mb-1" style="color:var(--brand-dark)">Supervisor ECRF del PDF</div>
-      <div class="text-xs mb-3" style="color:var(--ink-soft)">Firma como «Responsable de programación y autorización» en el PDF de todos los reportes diarios. Solo lo ven los administradores.</div>
+    const s = d.supervisor, usuarios = listaUsuarios().filter(u => (u.rol || "OPERARIO") !== "OPERARIO").map(u => u.name);
+    const otro = state.rdSupOtro || !!(s && s.nombre && !usuarios.includes(s.nombre));
+    return `<div class="card p-4" id="rdSupCard" style="max-width:760px">
+      <div class="font-bold mb-1" style="color:var(--brand-dark)">Supervisor ECRF del PDF del Reporte diario</div>
+      <div class="text-xs mb-3" style="color:var(--ink-soft)">Firma como «Responsable de programación y autorización» en el PDF. Queda fijo hasta que lo cambies aquí; los PDF ya generados conservan el supervisor que tenían. También recibe el PDF por correo, si tiene correo en la hoja USUARIOS.</div>
       <div class="grid gap-2" style="grid-template-columns:minmax(0,1fr) minmax(0,1fr)">
         <div><label class="text-xs font-semibold block mb-1" for="rdSupNom" style="color:var(--ink-soft)">Supervisor</label>
-          <select id="rdSupNom" class="input"><option value="">— Sin supervisor —</option>${usuarios.map(u => `<option ${s && s.nombre === u.name ? "selected" : ""}>${escA(u.name)}</option>`).join("")}</select></div>
+          <select id="rdSupNom" class="input"><option value="">— Sin supervisor —</option>${usuarios.map(n => `<option ${!otro && s && s.nombre === n ? "selected" : ""}>${escA(n)}</option>`).join("")}<option value="__otro" ${otro ? "selected" : ""}>Otro nombre…</option></select></div>
         <div><label class="text-xs font-semibold block mb-1" for="rdSupCargo" style="color:var(--ink-soft)">Cargo</label>
           <input id="rdSupCargo" class="input" maxlength="80" value="${escA(s ? s.cargo : "Supervisor ECRF")}"></div>
+        ${otro ? `<div style="grid-column:1/-1"><label class="text-xs font-semibold block mb-1" for="rdSupOtro" style="color:var(--ink-soft)">Nombre completo del supervisor</label>
+          <input id="rdSupOtro" class="input" maxlength="120" placeholder="Ej.: Gustavo Quispe Alcarraz" value="${escA(s && !usuarios.includes(s.nombre) ? s.nombre : "")}"></div>` : ""}
       </div>
-      <button id="rdSupGuardar" class="btn-ghost w-full mt-3">Guardar supervisor</button>
-      <div id="rdSupMsg" class="text-xs mt-2" style="color:var(--ink-soft)">${s ? `Actual: <b>${escA(s.nombre)}</b> · ${escA(s.cargo)}${s.por ? " (lo eligió " + escA(s.por) + ")" : ""}` : "Aún no hay supervisor: esa firma saldrá en blanco."}</div>
+      <button id="rdSupGuardar" class="btn-primary w-full mt-3">Guardar supervisor</button>
+      <div id="rdSupMsg" class="text-xs mt-2" style="color:var(--ink-soft)">${s ? `Actual: <b>${escA(s.nombre)}</b> · ${escA(s.cargo)}${s.por ? " (lo designó " + escA(s.por) + (s.en ? " el " + escA(s.en) : "") + ")" : ""}` : "Aún no hay supervisor: esa firma saldrá en blanco."}</div>
     </div>`;
   }
-  function activarRdSupervisor(d) {
+  function activarRdSupervisor(d, repintar) {
     const b = document.getElementById("rdSupGuardar"); if (!b) return;
+    const sel = document.getElementById("rdSupNom");
+    sel.onchange = () => {   // solo se repinta al mostrar u ocultar el campo «Otro nombre»; elegir de la lista no borra la elección
+      const otro = sel.value === "__otro", cargo = document.getElementById("rdSupCargo").value;
+      if (otro === !!document.getElementById("rdSupOtro")) return;
+      state.rdSupOtro = otro; state.rdSupSel = otro ? "" : sel.value; repintar();
+      const s2 = document.getElementById("rdSupNom"); if (!otro && s2) s2.value = state.rdSupSel;
+      document.getElementById("rdSupCargo").value = cargo; state.rdSupSel = null;
+      const o = document.getElementById("rdSupOtro"); if (o) o.focus();
+    };
     b.onclick = async () => {
-      const nombre = document.getElementById("rdSupNom").value, cargo = document.getElementById("rdSupCargo").value.trim();
+      const otro = sel.value === "__otro", nombre = otro ? (document.getElementById("rdSupOtro").value || "").trim() : sel.value;
+      const cargo = document.getElementById("rdSupCargo").value.trim();
+      if (otro && !nombre) { document.getElementById("rdSupMsg").innerHTML = `<span style="color:var(--danger);font-weight:600">Escribe el nombre completo del supervisor</span>`; return; }
       b.disabled = true; b.textContent = "Guardando…";
       try {
         const r = await rdApi("rd_admin_supervisor", { nombre, cargo });
-        d.supervisor = r.supervisor; toast(r.supervisor ? "Supervisor del PDF: " + r.supervisor.nombre : "Se quitó el supervisor del PDF");
-        const card = document.getElementById("rdSupCard"); if (card) { card.outerHTML = htmlRdSupervisor(d); activarRdSupervisor(d); }
+        d.supervisor = r.supervisor; state.rdSupOtro = false; toast(r.supervisor ? "Supervisor del PDF: " + r.supervisor.nombre : "Se quitó el supervisor del PDF");
+        repintar();
       } catch (e) { b.disabled = false; b.textContent = "Guardar supervisor"; document.getElementById("rdSupMsg").innerHTML = `<span style="color:var(--danger);font-weight:600">${escA(msgError(e))}</span>`; }
     };
   }
