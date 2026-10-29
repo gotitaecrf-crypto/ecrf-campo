@@ -2938,7 +2938,7 @@
         const ahora = new Date(); ensureLocation();
         const c = state.coords && state.coords.lat != null ? state.coords : state.gpsUltimo;
         const ubic = c && c.lat != null ? `Lat ${Number(c.lat).toFixed(6)}  Lon ${Number(c.lon).toFixed(6)}` : "Ubicación GPS no disponible";
-        const marcada = await watermarkPhoto(f, false, ahora, ahora, [ubic, "Verificación de EPPs · " + (state.operario || "")]);
+        const marcada = await watermarkPhoto(f, false, ahora, ahora, [ubic, String(state.operario || "").replace(/\s*\([^)]*\)\s*$/, "")]);
         const url = await fotoReducida(marcada, 1280);
         const b = leerBorr(claveBorrador()) || borr; b.epp = b.epp || {}; b.epp.fotos = [...(b.epp.fotos || []), url].slice(0, EPP_MAX_FOTOS);
         guardarBorr(claveBorrador(), b); reEpp();
