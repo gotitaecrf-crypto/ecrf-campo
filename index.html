@@ -4938,7 +4938,7 @@
         .cc-lista{display:grid;gap:6px;max-height:46vh;overflow:auto}
         .cc-fila{border:1px solid var(--line);border-radius:10px;background:#fff}
         .cc-item{display:flex;gap:10px;align-items:flex-start;text-align:left;padding:8px 10px;width:100%;background:none;border:0}
-        .cc-item .cc-dot{margin-top:4px}.cc-item b{display:block;font-size:13.5px}.cc-item small{display:block;font-size:12px;color:var(--ink-soft)}
+        .cc-item .cc-dot{margin-top:4px}.cc-item b{display:block;font-size:13.5px}.cc-item b.cc-por{display:inline;font-size:12px;color:#7A3E00}.cc-item small{display:block;font-size:12px;color:var(--ink-soft)}
         .cc-asig-in{border-top:1px dashed var(--line);padding:8px 10px 10px}
         /* puntos: parpadean pendientes (rojo), +1 día (negro) y asignadas (naranja); las atendidas quedan fijas en verde */
         .cc-pto{position:relative;display:block;width:26px;height:26px}
@@ -4982,7 +4982,7 @@
         <button class="cc-item ccIr" data-cod="${escA(f.cod)}" aria-expanded="${sinUbic ? "false" : ""}">
           <span class="cc-dot" style="background:${c.color}"></span>
           <span class="min-w-0"><b>${escA(f.cod)} · NIS ${escA(f.nis || "—")}</b><small>${escA(f.dir || "—")}${f.dist ? " · " + escA(f.dist) : ""}</small>
-            <small class="ccEst">${c.c}${h != null ? " · " + fmtHoras(h) + " sin atención" : ""}${f.asignado ? " · Lab. " + escA(f.asignado.lab) : ""}${sinUbic ? " · sin ubicación en la base" + (f.clase !== "atendida" ? (f.asignado ? " (toca para cambiar)" : " (toca para asignar)") : "") : ""}</small></span></button>
+            <small class="ccEst">${f.clase === "asignada" ? `Asignada por <b class="cc-por">${escA(f.asignado.por || "—")}</b>` : c.c}${f.asignado ? " · Lab. " + escA(f.asignado.lab) + (f.clase !== "asignada" ? ` (asignada por ${escA(f.asignado.por || "—")})` : "") : ""}${h != null ? " · " + fmtHoras(h) + " sin atención" : ""}${sinUbic ? " · sin ubicación en la base" + (f.clase !== "atendida" ? (f.asignado ? " (toca para cambiar)" : " (toca para asignar)") : "") : ""}</small></span></button>
         ${sinUbic && f.clase !== "atendida" ? `<div class="cc-asig-in" hidden>
           <select class="cc-sel ccLabIn" aria-label="Laboratorio para la fuga ${escA(f.cod)}"><option value="">Elige el laboratorio…</option>${labs.map(l => `<option ${f.asignado && f.asignado.lab === l ? "selected" : ""}>${escA(l)}</option>`).join("")}</select>
           <button class="cc-asig ccAsigIn">${f.asignado ? "Cambiar laboratorio" : "Asignar laboratorio"}</button><div class="cc-msg"></div></div>` : ""}
