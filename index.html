@@ -2508,9 +2508,10 @@
           <button class="adm-tab" data-admtab="catalogo" aria-current="${tab === "catalogo"}">Dominios</button>
           <button class="adm-tab" data-admtab="vehiculo" aria-current="${tab === "vehiculo"}">Laboratorio (vehículo)</button>
           <button class="adm-tab" data-admtab="rdpdf" aria-current="${tab === "rdpdf"}">Supervisor del PDF</button>
-          <button class="adm-tab" disabled title="Próximamente">Usuarios · próximamente</button>
+          <button class="adm-tab" data-admtab="usuarios" aria-current="${tab === "usuarios"}">Gestión de usuarios</button>
         </div>
         ${tab === "charlas" ? estilosGis() + estilosCharlas() + htmlAdminCharlas()
+          : tab === "usuarios" ? htmlAdminUsuarios()
           : tab === "rdpdf" ? (!state.adminRd ? (cargarAdminRd(), `<div class="text-sm py-6" style="color:var(--ink-soft)">Cargando…</div>`) : state.adminRd.error ? `<div class="card p-4 text-sm" style="color:var(--danger)">${escA(state.adminRd.error)}</div>` : htmlRdSupervisor(state.adminRd))
           : tab === "catalogo" ? `<div class="text-sm mb-3" style="color:var(--ink-soft)">Dominios: listas de valores que los trabajadores eligen en la app. Agrega, edita, activa/desactiva o elimina valores y luego presiona «Guardar cambios». Los registros anteriores conservan su texto.</div>` + htmlAdminCatalogo()
           : tab === "vehiculo" ? `<div class="text-sm mb-3" style="color:var(--ink-soft)">Ficha del vehículo laboratorio que ven todos en «Laboratorio ECRF». Las fechas de SOAT, revisión técnica y mantenimiento generan las alertas de vencimiento.</div>` + estilosGis() + htmlAdminVehiculo() : `
@@ -2557,11 +2558,12 @@
     app.querySelectorAll("[data-admtab]").forEach(b => b.onclick = () => {
       if (state.adminTab === b.dataset.admtab) return;
       if (b.dataset.admtab !== "modulos" && state.adminDirty) { toast("Guarda o deshaz los cambios de módulos primero", true); return; }
-      state.adminTab = b.dataset.admtab; if (state.adminTab !== "modulos") state.adminRd = null;
+      state.adminTab = b.dataset.admtab; if (state.adminTab !== "modulos") state.adminRd = null; state.usLista = null;
       if (state.adminTab === "vehiculo") { state.labDatos = null; state.adminVeh = null; }
       renderAdmin(); window.scrollTo(0, 0);
     });
     if (tab === "vehiculo") { document.getElementById("admVolver").onclick = salirAdmin; activarAdminVehiculo(app); return; }
+    if (tab === "usuarios") { document.getElementById("admVolver").onclick = salirAdmin; activarAdminUsuarios(app); return; }
     if (tab === "rdpdf") { document.getElementById("admVolver").onclick = salirAdmin; if (state.adminRd && !state.adminRd.error) activarRdSupervisor(state.adminRd, () => { const y = window.scrollY; renderAdmin(); window.scrollTo(0, y); }); return; }
     if (tab !== "modulos") { activarAdminRd(app); return; }
 
@@ -5099,6 +5101,115 @@
       `<div class="sgf-c ${ancho ? "ancho" : ""}"><small>${escA(t)}</small><b>${val(c)}</b></div>`).join("")}</div></section>`).join("");
   }
   function cerrarFichaFuga() { const v = document.getElementById("sgFicha"); if (v) v.remove(); }
+
+  /* ---------------- Panel de administración: Gestión de usuarios (hoja USUARIOS) ---------------- */
+  const US_ROL_TXT = { OPERARIO: "OPERATIVO", SUPERVISOR: "SUPERVISOR", ADMINISTRADOR: "ADMINISTRADOR" };
+  async function cargarUsuariosAdmin() {
+    try { state.usLista = await rdApi("us_lista"); } catch (e) { state.usLista = { error: msgError(e) }; }
+    if (state.admin && state.adminTab === "usuarios") { const y = window.scrollY; renderAdmin(); window.scrollTo(0, y); }
+  }
+  function htmlAdminUsuarios() {
+    const d = state.usLista;
+    if (!d) { cargarUsuariosAdmin(); return `<div class="text-sm py-6" style="color:var(--ink-soft)">Cargando usuarios…</div>`; }
+    if (d.error) return `<div class="card p-4 text-sm" style="color:var(--danger)">${escA(d.error)}</div>`;
+    const q = (state.usBuscar || "").toLowerCase().trim();
+    const lista = d.usuarios.filter(u => !q || [u.ficha, u.nombre, u.telefono, u.correo].some(x => String(x || "").toLowerCase().includes(q)));
+    const ver = state.usVerClave || {};
+    const fila = u => `<tr class="${u.activo ? "" : "us-off"}">
+        <td class="us-ficha">${escA(u.ficha)}</td>
+        <td><b>${escA(u.nombre)}</b>${u.correo ? `<small>${escA(u.correo)}</small>` : ""}</td>
+        <td data-l="Rol"><span class="us-rol ${u.rol}">${US_ROL_TXT[u.rol]}</span></td>
+        <td data-l="Celular">${u.telefono ? `<a class="us-tel" href="https://wa.me/51${escA(u.telefono)}" target="_blank" rel="noopener">${ICO_WA} +51 ${escA(u.telefono)}</a>` : `<span class="us-falta">Sin celular</span>`}</td>
+        <td class="us-clave" data-l="Contraseña"><span>${u.clave ? (ver[u.ficha] ? escA(u.clave) : "••••••••") : `<i>igual a la ficha</i>`}</span>${u.clave ? `<button class="us-ojo usOjo" data-f="${escA(u.ficha)}" aria-label="${ver[u.ficha] ? "Ocultar" : "Mostrar"} contraseña de ${escA(u.nombre)}">${ver[u.ficha] ? OJO_CERRADO : OJO_ABIERTO}</button>` : ""}</td>
+        <td data-l="Estado"><button class="us-est usEst ${u.activo ? "si" : "no"}" data-f="${escA(u.ficha)}" title="Clic para ${u.activo ? "deshabilitar" : "habilitar"}">${u.activo ? "✓ Habilitado" : "✕ Inactivo"}</button></td>
+        <td class="us-acc"><button class="us-btn usEd" data-f="${escA(u.ficha)}">✏️ Editar</button><button class="us-btn rojo usDel" data-f="${escA(u.ficha)}" aria-label="Eliminar a ${escA(u.nombre)}">🗑</button></td>
+      </tr>`;
+    return `${estilosCq()}<div class="card p-4" style="max-width:1100px">
+      <div class="us-cab"><div><div class="font-extrabold" style="color:var(--brand-dark);letter-spacing:.02em">GESTIÓN DE USUARIOS</div>
+          <div class="text-xs" style="color:var(--ink-soft)">Usuarios de la app (hoja USUARIOS): ficha, rol, celular, contraseña y estado. Para habilitar o deshabilitar, haz clic en «Habilitado» o «Inactivo».</div></div>
+        <div class="us-acciones"><input id="usBuscar" class="input" placeholder="Buscar ficha, nombre o teléfono…" value="${escA(state.usBuscar || "")}" aria-label="Buscar usuario">
+          <button id="usNuevo" class="btn-primary" style="width:auto;padding:10px 16px;white-space:nowrap">＋ Nuevo usuario</button></div></div>
+      <div class="us-tabla-w"><table class="us-tabla"><thead><tr><th>Ficha</th><th>Nombre completo</th><th>Rol</th><th>Celular (WhatsApp)</th><th>Contraseña</th><th>Estado</th><th>Acciones</th></tr></thead>
+        <tbody>${lista.map(fila).join("") || `<tr><td colspan="7" class="text-sm" style="color:var(--ink-soft);padding:16px">No hay usuarios que coincidan.</td></tr>`}</tbody></table></div>
+      <div id="usMsg" class="text-xs mt-2" style="color:var(--ink-soft)">${d.usuarios.filter(u => u.activo).length} habilitados de ${d.usuarios.length}. Los cambios valen desde que cada uno vuelve a abrir la app con internet.</div>
+    </div>
+    <style>
+      .us-cab{display:flex;justify-content:space-between;gap:12px;align-items:flex-start;flex-wrap:wrap;margin-bottom:14px}
+      .us-acciones{display:flex;gap:8px;flex-wrap:wrap}.us-acciones .input{width:260px;max-width:100%}
+      .us-tabla-w{border:1px solid var(--line);border-radius:12px;overflow:hidden}
+      .us-tabla{width:100%;border-collapse:collapse;font-size:14px}.us-tabla th{background:#F6F8FB;text-align:left;font-size:12px;color:#475569;padding:10px 12px;font-weight:700}
+      .us-tabla td{padding:12px;border-top:1px solid var(--line);vertical-align:middle}.us-tabla td small{display:block;font-size:11px;color:var(--ink-soft)}
+      .us-tabla tr.us-off td{background:#FCFCFD}.us-tabla tr.us-off td b{color:#64748B}
+      .us-ficha{font:700 14px ui-monospace,Menlo,Consolas,monospace}
+      .us-rol{font-size:12px;font-weight:700;border-radius:8px;padding:4px 10px;border:1px solid}.us-rol.OPERARIO{background:#E7F7EE;color:#12613B;border-color:#A7DDBE}
+      .us-rol.SUPERVISOR{background:#E6F0FB;color:#1F4E9C;border-color:#B5CDF0}.us-rol.ADMINISTRADOR{background:#FFF3D6;color:#8A5A00;border-color:#F2D08A}
+      .us-tel{display:inline-flex;align-items:center;gap:6px;font:600 13px ui-monospace,Menlo,Consolas,monospace;color:#0E6B3B;background:#EAF8F0;border:1px solid #A7DDBE;border-radius:8px;padding:5px 10px;white-space:nowrap}
+      .us-falta{font-size:12px;color:#B45309;font-weight:600}
+      .us-clave{font:13px ui-monospace,Menlo,Consolas,monospace;color:#475569;white-space:nowrap}.us-clave i{font-family:inherit;font-size:12px}
+      .us-ojo{border:0;background:none;color:#64748B;vertical-align:middle;margin-left:4px;padding:2px}.us-ojo svg{width:16px;height:16px}
+      .us-est{border:1px solid;border-radius:999px;font-size:12px;font-weight:700;padding:4px 12px;white-space:nowrap;cursor:pointer}
+      .us-est.si{background:#E7F7EE;color:#12613B;border-color:#A7DDBE}.us-est.no{background:#FDE8E7;color:#B42318;border-color:#F5B5B0}
+      .us-acc{white-space:nowrap}.us-btn{border:0;background:none;font-weight:700;color:#0F1B2D;padding:6px 8px;border-radius:8px}.us-btn:hover{background:#F1F4F8}.us-btn.rojo{color:#B42318}
+      @media (max-width:760px){.us-tabla thead{display:none}.us-tabla,.us-tabla tbody,.us-tabla tr,.us-tabla td{display:block;width:100%}
+        .us-tabla tr{border-top:1px solid var(--line);padding:10px 4px}.us-tabla td{border:0;padding:4px 10px}.us-tabla td[data-l]{display:flex;align-items:center;gap:10px}.us-tabla td[data-l]::before{content:attr(data-l);flex:none;width:90px;font:600 12px Roboto,Arial,sans-serif;color:var(--ink-soft)}.us-acciones .input{width:100%}}
+    </style>`;
+  }
+  function activarAdminUsuarios(app) {
+    const d = state.usLista; if (!d || d.error) return;
+    const repintar = () => { const y = window.scrollY; renderAdmin(); window.scrollTo(0, y); };
+    const msg = (t, err) => { const m = document.getElementById("usMsg"); if (m) { m.textContent = t; m.style.color = err ? "var(--danger)" : "var(--ink-soft)"; m.style.fontWeight = err ? "600" : ""; } if (err) toast(t, true); };
+    const llamar = async (tipo, datos, ok) => {
+      try { state.usLista = await rdApi(tipo, datos); repintar(); if (ok) toast(ok); cargarConfigServidor(); return true; }
+      catch (e) { msg(msgError(e), true); return false; }
+    };
+    const bus = document.getElementById("usBuscar");
+    bus.oninput = () => { state.usBuscar = bus.value; const p = bus.selectionStart; repintar(); const b2 = document.getElementById("usBuscar"); b2.focus(); b2.setSelectionRange(p, p); };
+    app.querySelectorAll(".usOjo").forEach(b => b.onclick = () => { state.usVerClave = state.usVerClave || {}; state.usVerClave[b.dataset.f] = !state.usVerClave[b.dataset.f]; repintar(); });
+    app.querySelectorAll(".usEst").forEach(b => b.onclick = () => {
+      const u = d.usuarios.find(x => x.ficha === b.dataset.f); b.disabled = true; b.textContent = "…";
+      llamar("us_estado", { ficha: u.ficha, activo: !u.activo }, (u.activo ? "Deshabilitado: " : "Habilitado: ") + u.nombre);
+    });
+    app.querySelectorAll(".usDel").forEach(b => b.onclick = () => {
+      const u = d.usuarios.find(x => x.ficha === b.dataset.f);
+      if (!confirm("¿Eliminar a " + u.nombre + " (ficha " + u.ficha + ")?\nYa no podrá entrar a la app. Sus registros guardados se conservan con su nombre.")) return;
+      llamar("us_eliminar", { ficha: u.ficha }, "Usuario eliminado");
+    });
+    app.querySelectorAll(".usEd").forEach(b => b.onclick = () => formUsuario(d.usuarios.find(x => x.ficha === b.dataset.f)));
+    document.getElementById("usNuevo").onclick = () => formUsuario(null);
+    function formUsuario(u) {
+      const n = !u, x = u || { rol: "OPERARIO" };
+      const el = modalCq(`<div class="cq-mcab"><b>👥 ${n ? "Nuevo usuario" : "Editar usuario"}</b><button class="cq-x oscuro cqCerrar" aria-label="Cerrar">✕</button></div>
+        <div class="p-5 cq-form"><div class="cq-f2">
+          <div><label class="cq-lbl" for="usFi">Número de ficha * <span style="float:right;font-weight:600;color:#94A3B8">5 dígitos</span></label><input id="usFi" class="input" inputmode="numeric" maxlength="5" value="${escA(x.ficha || "")}" autocomplete="off"></div>
+          <div><label class="cq-lbl" for="usCl">Contraseña (DNI)</label><input id="usCl" class="input" inputmode="numeric" maxlength="12" value="${escA(x.clave || "")}" autocomplete="off" placeholder="Vacía = entra con su ficha"></div>
+          <div style="grid-column:1/-1"><label class="cq-lbl" for="usNo">Nombre y apellidos completos *</label><input id="usNo" class="input" maxlength="120" value="${escA(x.nombre || "")}" autocomplete="off"></div>
+          <div style="grid-column:1/-1"><label class="cq-lbl" for="usTe">Celular (WhatsApp) * <span style="float:right;font-weight:600;color:#12613B">+51 (Perú)</span></label>
+            <div style="position:relative"><span style="position:absolute;left:12px;top:50%;transform:translateY(-50%);color:#12613B;font-weight:700">+51</span><input id="usTe" class="input" inputmode="tel" maxlength="9" value="${escA(x.telefono || "")}" style="padding-left:48px" autocomplete="off" placeholder="9XXXXXXXX"></div></div>
+          <div><label class="cq-lbl" for="usRo">Rol *</label><select id="usRo" class="input">${["OPERARIO", "SUPERVISOR", "ADMINISTRADOR"].map(r => `<option value="${r}" ${x.rol === r ? "selected" : ""}>${ROL_TXT[r]}</option>`).join("")}</select></div>
+          <div><label class="cq-lbl" for="usCo">Correo institucional</label><input id="usCo" class="input" type="email" maxlength="120" value="${escA(x.correo || "")}" autocomplete="off" placeholder="usuario@sedapal.com.pe"></div>
+        </div>
+        ${!n && x.nombre ? `<div class="text-xs mt-2" style="color:var(--ink-soft)">Si cambias el nombre, sus registros guardados pasan al nombre nuevo. Ese usuario tendrá que volver a ingresar.</div>` : ""}
+        <div id="usErr" class="rd-err mt-2"></div>
+        <div class="flex gap-2 justify-end mt-3"><button class="btn-ghost cqCerrar2" style="width:auto;padding:10px 16px">Cancelar</button><button id="usGu" class="btn-primary" style="width:auto;padding:10px 18px">💾 ${n ? "Crear usuario" : "Guardar cambios"}</button></div>
+        </div>`);
+      el.querySelector(".cqCerrar2").onclick = cerrarModalCq;
+      ["usFi", "usCl", "usTe"].forEach(id => { const i = el.querySelector("#" + id); i.oninput = () => { i.value = i.value.replace(/\D/g, "").slice(0, +i.maxLength); }; });
+      el.querySelector("#usGu").onclick = async e => {
+        const v = id => el.querySelector("#" + id).value.trim(), err = el.querySelector("#usErr"), b = e.currentTarget;
+        if (!/^\d{5}$/.test(v("usFi"))) { err.textContent = "La ficha tiene 5 dígitos"; return; }
+        if (!v("usNo")) { err.textContent = "Escribe el nombre y apellidos completos"; return; }
+        if (!/^9\d{8}$/.test(v("usTe"))) { err.textContent = "El celular tiene 9 dígitos y empieza con 9"; return; }
+        if (v("usCl") && !/^\d{4,12}$/.test(v("usCl"))) { err.textContent = "La contraseña es numérica, de 4 a 12 dígitos"; return; }
+        b.disabled = true; b.textContent = "Guardando…";
+        try {
+          state.usLista = await rdApi("us_guardar", { usuario: { fichaOriginal: u ? u.ficha : "", ficha: v("usFi"), nombre: v("usNo"), telefono: v("usTe"), clave: v("usCl"), rol: v("usRo"), correo: v("usCo") } });
+          cerrarModalCq(); toast(n ? "Usuario creado ✅" : state.usLista.renombrados ? "Guardado ✅ · sus registros pasaron al nombre nuevo" : "Guardado ✅");
+          cargarConfigServidor(); repintar();
+        } catch (x2) { b.disabled = false; b.textContent = "💾 " + (n ? "Crear usuario" : "Guardar cambios"); err.textContent = msgError(x2); }
+      };
+      el.querySelector("#usFi").focus();
+    }
+  }
 
   /* ---------------- CUADRILLAS FUGAS (módulo CUADRILLAS) ----------------
      Laboratorios de la contratista y camionetas 4x4 del personal ECRF: placa, empresa, técnico a cargo y personal
