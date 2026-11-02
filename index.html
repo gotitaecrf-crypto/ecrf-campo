@@ -382,7 +382,7 @@
     rutaPara: null,
     editId: null,
     codigoSgio: "", fechaDeteccion: "", ubicacion: "", caudal: "", fechaVerif: todayISO(), horaVerif: nowHM(), situacion: "Reparada",
-    m: { tecnico: "", cFecha: "", cUbi: "", cPres: "", cCaudal: "", sFecha: todayISO(), sHora: nowHM(), sUbi: "", sPres: "", sCaudal: "" },
+    m: { tecnico: "", laboratorio: "", cFecha: "", cUbi: "", cPres: "", cCaudal: "", sFecha: todayISO(), sHora: nowHM(), sUbi: "", sPres: "", sCaudal: "" },
     edFotos: [],
     edQuitadas: [],
     camDestino: "registro",
@@ -418,7 +418,7 @@
     try {
       const c = await apiGet({ action: "config" });
       if (c.usuarios && c.usuarios.length) localStorage.setItem("ecrf_usuarios", JSON.stringify(c.usuarios.map(u => ({ name: u.nombre, hash: u.hash, rol: u.rol }))));
-      guardarTecnicos(c.tecnicos);
+      guardarTecnicos(c.tecnicos); guardarLabs(c.laboratorios);
       if (Array.isArray(c.modulos) && c.modulos.length) {
         const antes = localStorage.getItem("ecrf_modulos"), ahora = JSON.stringify(c.modulos);
         localStorage.setItem("ecrf_modulos", ahora);
@@ -1031,7 +1031,7 @@
       ...(state.form === "GPFO0416" ? (() => {
         const m = state.m, r = calcVariacion(m.cCaudal, m.sCaudal);
         return {
-          codigoSgio: state.codigoSgio, tecnico: m.tecnico,
+          codigoSgio: state.codigoSgio, tecnico: m.tecnico, laboratorio: m.laboratorio || "",
           fechaContratista: m.cFecha, ubicacionContratista: m.cUbi, presionContratista: Number(m.cPres), caudalContratista: Number(m.cCaudal),
           fechaSedapal: m.sFecha, ubicacionSedapal: m.sUbi, presionSedapal: Number(m.sPres), caudalSedapal: Number(m.sCaudal),
           variacion: r.variacion, errorPct: r.error, fecha: m.sFecha, hora: m.sHora || nowHM()
@@ -1088,7 +1088,7 @@
     state.hora = nowHM();
     state.codigoSgio = ""; state.fechaDeteccion = ""; state.ubicacion = ""; state.caudal = "";
     state.fechaVerif = todayISO(); state.horaVerif = nowHM(); state.situacion = "Reparada"; state.horaFijadaPara = null;
-    state.m = { tecnico: "", cFecha: "", cUbi: "", cPres: "", cCaudal: "", sFecha: todayISO(), sHora: nowHM(), sUbi: "", sPres: "", sCaudal: "" };
+    state.m = { tecnico: "", laboratorio: "", cFecha: "", cUbi: "", cPres: "", cCaudal: "", sFecha: todayISO(), sHora: nowHM(), sUbi: "", sPres: "", sCaudal: "" };
   }
 
   /* ---------------- Export ---------------- */
@@ -1472,11 +1472,17 @@
       </div>
       <div class="card p-4 mb-4" style="border-left:6px solid #F2A900">
         <div class="font-bold mb-3">Contratista</div>
-        ${lbl("Técnico a cargo *")}
+        ${labsContratista().length ? `${lbl("Laboratorio *")}
+        <select id="f6Lab" class="input">
+          <option value="">Elegir laboratorio…</option>
+          ${labsContratista().map((l, i) => `<option value="${i}" ${l.codigo + " · " + [l.unidad, l.placa].filter(Boolean).join("-") === (m.laboratorio || "").split(" · ").slice(0, 2).join(" · ") ? "selected" : ""}>${escA(textoLab(l))}</option>`).join("")}
+        </select>
+        <div class="text-sm mt-2 mb-3" id="f6TecTxt" style="color:var(--ink-soft)">${m.tecnico ? `Técnico a cargo: <b style="color:var(--ink)">${escA(m.tecnico)}</b>` : "El técnico a cargo se completa solo al elegir el laboratorio (se registra en Cuadrillas Fugas)."}</div>`
+        : `${lbl("Técnico a cargo *")}
         <select id="f6Tecnico" class="input mb-3">
           <option value="">Elegir técnico…</option>
           ${[...new Set([m.tecnico, ...tecnicosContratista()].filter(Boolean))].map(t => `<option ${t === m.tecnico ? "selected" : ""}>${escA(t)}</option>`).join("")}
-        </select>
+        </select>`}
         ${lbl("Fecha *")}
         <input id="f6cFecha" type="date" class="input mb-3" value="${escA(m.cFecha)}">
         ${lbl("Fuga ubicada en *")}
@@ -1521,7 +1527,15 @@
       const el = document.getElementById(id);
       el.oninput = () => { el.value = el.value.replace(/\D/g, "").slice(0, max); m[k] = el.value; ok(); };
     });
-    document.getElementById("f6Tecnico").onchange = e => { m.tecnico = e.target.value; ok(); };
+    const f6T = document.getElementById("f6Tecnico"); if (f6T) f6T.onchange = e => { m.tecnico = e.target.value; ok(); };
+    const f6L = document.getElementById("f6Lab");
+    if (f6L) f6L.onchange = () => {
+      const l = labsContratista()[f6L.value];
+      m.laboratorio = l ? l.codigo + " · " + [l.unidad, l.placa].filter(Boolean).join("-") : ""; m.tecnico = l ? l.tecnico || "" : "";
+      document.getElementById("f6TecTxt").innerHTML = !l ? "El técnico a cargo se completa solo al elegir el laboratorio (se registra en Cuadrillas Fugas)."
+        : l.tecnico ? `Técnico a cargo: <b style="color:var(--ink)">${escA(l.tecnico)}</b>` : `<span style="color:var(--danger);font-weight:600">Este laboratorio no tiene técnico a cargo: pide a un administrador que lo registre en Cuadrillas Fugas</span>`;
+      ok();
+    };
     document.getElementById("f6cFecha").onchange = e => { m.cFecha = e.target.value; ok(); };
     const re6 = () => { const y = window.scrollY; renderNuevo(); window.scrollTo(0, y); };
     // SEDAPAL copia lo que indica la contratista (tipo y ubicación) mientras el operario no lo cambie; luego queda independiente
@@ -1967,6 +1981,7 @@
         const nuevo = es416 ? {
           direccion: v("ed_direccion"), urb: v("ed_urb"), distrito: v("ed_distrito"), sector: v("ed_sector"),
           codigoSgio: v("ed_codigo"), tecnico: v("ed_tec"),
+          laboratorio: (() => { const o = document.getElementById("ed_tec").selectedOptions[0]; return o && o.dataset.lab !== undefined ? o.dataset.lab : (r.laboratorio || ""); })(),
           fechaContratista: v("ed_cfecha"), ubicacionContratista: state.edCUbi, presionContratista: nn("ed_cpres"), caudalContratista: nn("ed_ccau"),
           fechaSedapal: v("ed_sfecha"), ubicacionSedapal: state.edSUbi, presionSedapal: nn("ed_spres"), caudalSedapal: nn("ed_scau"),
           hora: v("ed_hora")
@@ -2081,8 +2096,12 @@
           <div>${campo("ed_sector", "Sector", r.sector, 'inputmode="numeric" data-num="4" ' + fijoNis(r.sector))}</div>
           <div>${campo("ed_codigo", "Código SGIO *", r.codigoSgio, 'inputmode="numeric" data-num="7"')}</div>
         </div>
-        <label class="text-xs font-semibold block mb-1 mt-2" for="ed_tec" style="color:var(--ink-soft)">Técnico a cargo *</label>
-        <select id="ed_tec" class="input">${[...new Set([r.tecnico, ...tecnicosContratista()].filter(Boolean))].map(t => `<option ${t === r.tecnico ? "selected" : ""}>${escA(t)}</option>`).join("")}</select>
+        <label class="text-xs font-semibold block mb-1 mt-2" for="ed_tec" style="color:var(--ink-soft)">${labsContratista().length ? "Laboratorio · técnico a cargo *" : "Técnico a cargo *"}</label>
+        <select id="ed_tec" class="input">${labsContratista().length
+          ? (r.tecnico && !labsContratista().some(l => l.tecnico === r.tecnico) ? `<option value="${escA(r.tecnico)}" data-lab="${escA(r.laboratorio || "")}" selected>${escA((r.laboratorio ? r.laboratorio + " · " : "") + r.tecnico)} (registrado)</option>` : "") +
+            labsContratista().filter(l => l.tecnico).map(l => { const et = l.codigo + " · " + [l.unidad, l.placa].filter(Boolean).join("-");
+              return `<option value="${escA(l.tecnico)}" data-lab="${escA(et)}" ${l.tecnico === r.tecnico && (!r.laboratorio || r.laboratorio === et) ? "selected" : ""}>${escA(textoLab(l))}</option>`; }).join("")
+          : [...new Set([r.tecnico, ...tecnicosContratista()].filter(Boolean))].map(t => `<option ${t === r.tecnico ? "selected" : ""}>${escA(t)}</option>`).join("")}</select>
         <div class="font-bold text-sm mt-3">Contratista</div>
         <div class="grid grid-cols-2 gap-3">
           <div>${campo("ed_cfecha", "Fecha *", r.fechaContratista, 'type="date"')}</div>
@@ -2245,6 +2264,10 @@
     return TECNICOS_DEFECTO;
   }
   function guardarTecnicos(lista) { if (Array.isArray(lista) && lista.length) try { localStorage.setItem("ecrf_tecnicos", JSON.stringify(lista)); } catch (e) {} }
+  // Laboratorios de la contratista (módulo Cuadrillas Fugas): unidad, placa y técnico a cargo; se guardan en el celular para usarlos sin señal
+  function labsContratista() { try { const t = JSON.parse(localStorage.getItem("ecrf_labs") || "null"); if (Array.isArray(t)) return t; } catch (e) {} return []; }
+  function guardarLabs(lista) { if (Array.isArray(lista)) try { localStorage.setItem("ecrf_labs", JSON.stringify(lista)); } catch (e) {} }
+  const textoLab = l => l.codigo + " · " + [l.unidad, l.placa].filter(Boolean).join("-") + (l.tecnico ? " · " + l.tecnico : " · sin técnico a cargo");
   function calcVariacion(c, s) {
     if (c === "" || s === "" || c == null || s == null || isNaN(c) || isNaN(s)) return { variacion: "", error: "" };
     const v = Math.abs(Number(c) - Number(s));
@@ -2385,7 +2408,10 @@
            defecto: { titulo: "Incidencias SGIO", descripcion: "Fugas del SGIO por fecha de revisión" } },
     // Centro de Control: mapa de fugas pendientes (rojo) y atendidas hoy (verde), con asignación de laboratorio
     CENTRO_CONTROL: { tipo: "vista", soloAdmin: true, ico: () => ICO_CC, abrir: () => abrirModulo("CENTRO_CONTROL"), estilo: "background:#FDE8E6;border-color:#F2A49B",
-           defecto: { titulo: "Centro de Control", descripcion: "Fugas pendientes y atendidas hoy en el mapa" } }
+           defecto: { titulo: "Centro de Control", descripcion: "Fugas pendientes y atendidas hoy en el mapa" } },
+    // Cuadrillas Fugas: laboratorios, camionetas 4x4 y su personal; lo ven todos (solo los administradores editan)
+    CUADRILLAS: { tipo: "vista", ico: () => ICO_CQ, abrir: () => abrirModulo("CUADRILLAS"), estilo: "background:#EEF0FD;border-color:#B7BEF2",
+           defecto: { titulo: "Cuadrillas Fugas", descripcion: "Laboratorios, camionetas y su personal" } }
   };
   const MOD_RETIRADOS = ["MAPA_NIS", "REPLICA_GIS"];   // se unieron en PLANO_GIS
   function modulosConfig() {
@@ -3591,9 +3617,7 @@
   const DOMINIOS_APP = [
     { k: "actividades", n: "Actividades planificadas (Contratista)", d: "Ítem 2 del Reporte diario de actividades", ej: "Ej.: Detección acústica de fugas" },
     { k: "actividades_ecrf", n: "Actividades planificadas (ECRF)", d: "Ítem 3 del Reporte diario de actividades", ej: "Ej.: Supervisión de contratista" },
-    { k: "tecnicos", n: "Técnicos a cargo (contratista)", d: "Campo «Técnico a cargo» de la Verificación por muestreo (GPFO0416)", ej: "Ej.: Juan Pérez" },
-    { k: "motivos", n: "Motivos de salida del vehículo", d: "Campo «Motivo de salida» del Laboratorio ECRF (recorridos)", ej: "Ej.: Traslado de equipos" },
-    { k: "laboratorios", n: "Laboratorios (unidades móviles)", d: "Botón «Asignar laboratorio» del Centro de Control", ej: "Ej.: 007-ABC123" }
+    { k: "motivos", n: "Motivos de salida del vehículo", d: "Campo «Motivo de salida» del Laboratorio ECRF (recorridos)", ej: "Ej.: Traslado de equipos" }
   ];
   // Cambios pendientes de un dominio (se aplican todos juntos con «Guardar cambios»)
   const domPend = k => { state.domPend = state.domPend || {}; return state.domPend[k] = state.domPend[k] || { nuevos: [], cambios: {} }; };
@@ -3945,7 +3969,8 @@
     GPFO0405: ICS(`<path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/>`),
     GPFO0416: ICS(`<circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/><path d="m8 11 2 2 4-4"/>`),
     PLANIFICADOR_RUTAS: ICO_RUTA, LABORATORIO_ECRF: ICO_LAB, SGIO: ICS(`<path d="M12 3s-5 5.6-5 9a5 5 0 0 0 10 0c0-3.4-5-9-5-9z"/><path d="M4 21h16"/>`),
-    CENTRO_CONTROL: ICS(`<circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="5"/><circle cx="12" cy="12" r="1.5"/><path d="M12 1v3M12 20v3M1 12h3M20 12h3"/>`)
+    CENTRO_CONTROL: ICS(`<circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="5"/><circle cx="12" cy="12" r="1.5"/><path d="M12 1v3M12 20v3M1 12h3M20 12h3"/>`),
+    CUADRILLAS: ICS(`<rect x="1" y="7" width="15" height="10" rx="2"/><path d="M16 10h4l3 3v4h-7"/><circle cx="6" cy="18" r="2"/><circle cx="18" cy="18" r="2"/><path d="M5 11h3M10 11h2"/>`)
   };
   const ICO_SGIO = ICO_LAT.SGIO, ICO_CC = ICO_LAT.CENTRO_CONTROL;
   const GRUPOS_NAV = [
@@ -3955,7 +3980,7 @@
     { id: "GESTION", nombre: "Gestión & Reportes", color: "#FFF4DB" }
   ];
   const GRUPO_DE = { REPORTE_DIARIO: "OPER", GPFO0381: "FORM", GPFO0405: "FORM", GPFO0416: "FORM", PDF: "FORM",
-                     PLANO_GIS: "GIS", PLANIFICADOR_RUTAS: "GIS", LABORATORIO_ECRF: "GIS", SGIO: "GESTION", CENTRO_CONTROL: "GESTION" };
+                     PLANO_GIS: "GIS", PLANIFICADOR_RUTAS: "GIS", LABORATORIO_ECRF: "GIS", SGIO: "GESTION", CENTRO_CONTROL: "GESTION", CUADRILLAS: "GESTION" };
   // Los elementos que se ven en el menú, agrupados (respeta lo que configuró el administrador)
   function navAgrupado() {
     const mods = modulosMenu();
@@ -3978,9 +4003,10 @@
     else if (MODULOS_APP[id] && MODULOS_APP[id].tipo === "form") {
       state.form = id; sessionStorage.setItem("ecrf_form", id); state.tab = "nuevo";
       resetForm(); state.rutaSel = null; state.rutaQuery = "";
-    } else if (["PLANO_GIS", "PLANIFICADOR_RUTAS", "LABORATORIO_ECRF", "SGIO", "CENTRO_CONTROL"].includes(id)) {
+    } else if (["PLANO_GIS", "PLANIFICADOR_RUTAS", "LABORATORIO_ECRF", "SGIO", "CENTRO_CONTROL", "CUADRILLAS"].includes(id)) {
       state.vista = id; state.labTab = "vehiculo";
-      if (id === "CENTRO_CONTROL") { state.ccDatos = null; state.ccEncuadrado = false; }   // al entrar, siempre lo último del SGIO
+      if (id === "CENTRO_CONTROL") { state.ccDatos = null; state.ccEncuadrado = false; }
+      if (id === "CUADRILLAS") { state.cq = null; state.cqVerDetalle = false; }   // al entrar, siempre lo último   // al entrar, siempre lo último del SGIO
       if (id === "PLANO_GIS") { state.rgRadio = state.rgRadio || RG_RADIO_DEF; state.rgDatos = null; state.rgAuto = true; }   // al entrar: el plano alrededor de donde estás
     }
     render(); window.scrollTo(0, 0);
@@ -4036,7 +4062,7 @@
     if (planL) { planL.remove(); planL = null; }
     if (typeof replicaL !== "undefined" && replicaL) { replicaL.remove(); replicaL = null; }
     const d = document.getElementById("labDetalle"); if (d) d.remove();
-    cerrarFichaFuga();
+    cerrarFichaFuga(); cerrarModalCq();
     if (ccL) { ccL.remove(); ccL = null; }
     clearInterval(ccReloj); ccReloj = null;
     if (pintar === false) return;
@@ -4049,6 +4075,7 @@
     else if (state.vista === "PLANIFICADOR_RUTAS") renderPlanificador();
     else if (state.vista === "SGIO") renderSgio();
     else if (state.vista === "CENTRO_CONTROL") renderCentroControl();
+    else if (state.vista === "CUADRILLAS") renderCuadrillas();
     else renderLaboratorio();
     const v = document.getElementById("gisVolver"); if (v) v.onclick = () => salirVistaGis();
   }
@@ -5072,6 +5099,260 @@
       `<div class="sgf-c ${ancho ? "ancho" : ""}"><small>${escA(t)}</small><b>${val(c)}</b></div>`).join("")}</div></section>`).join("");
   }
   function cerrarFichaFuga() { const v = document.getElementById("sgFicha"); if (v) v.remove(); }
+
+  /* ---------------- CUADRILLAS FUGAS (módulo CUADRILLAS) ----------------
+     Laboratorios de la contratista y camionetas 4x4 del personal ECRF: placa, empresa, técnico a cargo y personal
+     (nombre, DNI, teléfono, fecha de incorporación y cargo). Todos ven todo; solo los administradores crean y editan.
+     Es la fuente de los laboratorios del Centro de Control y del técnico a cargo de la GPFO0416. */
+  const CQ_COLOR_CARGO = { "Técnico a cargo": "#E8E6FB;color:#3F33A8", "Técnico geófono": "#E1ECFB;color:#1F4E9C", "Técnico correlador": "#F3E6FB;color:#7A2E9C",
+    "Operador acústico": "#DFF6F4;color:#0E6F68", "Conductor": "#FFF1C7;color:#6B4A00", "Ayudante de campo": "#DDF3E7;color:#12613B" };
+  const cqIniciales = n => String(n || "").trim().split(/\s+/).filter(w => w.length > 2 || /^[A-ZÁÉÍÓÚÑ]/.test(w)).slice(0, 2).map(w => w[0].toUpperCase()).join("") || "?";
+  const cqTel = t => { const d = String(t || "").replace(/\D/g, ""); return d.length === 9 ? "51" + d : d; };
+  const ICO_WA = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 11.5a8.4 8.4 0 0 1-12.4 7.4L3 21l2.1-5.4A8.4 8.4 0 1 1 21 11.5z"/></svg>`;
+  const ICO_TEL = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M22 16.9v3a2 2 0 0 1-2.2 2 19.8 19.8 0 0 1-8.6-3.1 19.5 19.5 0 0 1-6-6A19.8 19.8 0 0 1 2.1 4.2 2 2 0 0 1 4.1 2h3a2 2 0 0 1 2 1.7c.1 1 .4 1.9.7 2.8a2 2 0 0 1-.5 2.1L8 9.9a16 16 0 0 0 6 6l1.3-1.3a2 2 0 0 1 2.1-.4c.9.3 1.8.6 2.8.7a2 2 0 0 1 1.7 2z"/></svg>`;
+  const ICO_CQ = ICO_LAT.CUADRILLAS;
+  async function cargarCuadrillas() {
+    try { state.cq = await rdApi("cq_datos"); }
+    catch (e) { state.cq = { error: msgError(e) }; }
+    if (state.cq && state.cq.cuadrillas) {
+      guardarLabs(state.cq.cuadrillas.filter(c => c.tipo === "LABORATORIO" && c.activo && c.estado !== "INOPERATIVA")
+        .map(c => ({ id: c.id, codigo: c.codigo, unidad: c.unidad, placa: c.placa, empresa: c.empresa, tecnico: c.tecnico })));
+      if (!state.cqSel || !state.cq.cuadrillas.some(c => c.id === state.cqSel)) state.cqSel = (state.cq.cuadrillas[0] || {}).id || null;
+    }
+    if (state.vista === "CUADRILLAS") { const y = window.scrollY; renderCuadrillas(); window.scrollTo(0, y); }
+  }
+  function renderCuadrillas() {
+    const d = state.cq;
+    if (!d) cargarCuadrillas();
+    const lista = d && d.cuadrillas ? d.cuadrillas.filter(c => c.activo || d.puedeEditar) : [];
+    const filtro = state.cqFiltro || "TODAS", vis = lista.filter(c => filtro === "TODAS" || c.tipo === filtro);
+    const sel = lista.find(c => c.id === state.cqSel), angosto = window.innerWidth < 900, verDetalle = angosto && state.cqVerDetalle && sel;
+    const tarjeta = c => `<button class="cq-card cqSel ${c.id === state.cqSel ? "on" : ""} ${c.activo ? "" : "inact"}" data-id="${escA(c.id)}">
+        <div class="cq-card-top"><span class="cq-cod">${escA(c.codigo)}</span><span class="cq-tipo ${c.tipo === "CAMIONETA" ? "cam" : ""}">${c.tipo === "CAMIONETA" ? "CAMIONETA 4X4" : "LABORATORIO"}</span>
+          <span class="cq-n" title="Personal">👥 ${c.personal.length}</span></div>
+        <b class="cq-nom">${escA(c.nombre || c.codigo)}</b>
+        <div class="cq-sub"><span class="cq-placa">${escA(c.placa)}</span>${c.tipo === "LABORATORIO" ? (c.tecnico ? " · " + escA(c.tecnico) : " · sin técnico a cargo") : (c.conductor ? " · " + escA(c.conductor) : "")}</div>
+        ${c.estado === "INOPERATIVA" || !c.activo ? `<div class="cq-alerta">${!c.activo ? "Dada de baja" : "Inoperativa"}</div>` : ""}
+      </button>`;
+    const persona = (p, c) => `<div class="cq-per">
+        <div class="cq-per-top"><span class="cq-av">${escA(cqIniciales(p.nombre))}</span>
+          <div class="min-w-0"><b>${escA(p.nombre)}</b><div class="flex items-center gap-2 mt-1" style="flex-wrap:wrap"><span class="cq-cargo" style="background:${CQ_COLOR_CARGO[p.cargo] || "#EEF1F4;color:#334155"}">${escA(p.cargo)}</span>${p.id === c.tecnicoId ? `<span class="cq-cargo" style="background:#03204C;color:#fff">A cargo</span>` : ""}</div>
+            <div class="cq-dni">DNI: ${escA(p.dni || "—")}</div></div></div>
+        <div class="cq-per-pie"><span class="cq-tel">${ICO_TEL} ${escA(p.telefono || "—")}</span><span class="flex gap-2">
+          ${p.telefono ? `<a class="cq-ib wa" href="https://wa.me/${cqTel(p.telefono)}" target="_blank" rel="noopener" aria-label="WhatsApp a ${escA(p.nombre)}">${ICO_WA}</a>` : ""}
+          <button class="cq-ver cqFicha" data-id="${escA(p.id)}">Ver ficha</button></span></div>
+      </div>`;
+    const detalle = c => {
+      const tec = c.personal.find(p => p.id === c.tecnicoId), cond = c.personal.find(p => /conductor/i.test(p.cargo));
+      const hist = (d.historial || []).filter(h => h.id === c.id);
+      return `<div class="card p-4 cq-det">
+        ${angosto ? `<button class="cq-volver" id="cqVolverLista">‹ Unidades</button>` : ""}
+        <div class="cq-head"><span class="cq-big">${escA(c.codigo)}</span>
+          <div class="min-w-0 flex-1"><div class="cq-titulo">${escA(c.nombre || c.codigo)}</div>
+            <div class="flex items-center gap-2 mt-1" style="flex-wrap:wrap"><span class="cq-est ${c.estado === "INOPERATIVA" || !c.activo ? "no" : ""}">● ${!c.activo ? "DADA DE BAJA" : c.estado}</span>
+              <span class="cq-tipo ${c.tipo === "CAMIONETA" ? "cam" : ""}">${c.tipo === "CAMIONETA" ? "CAMIONETA 4X4" : "LABORATORIO"}</span></div>
+            <div class="cq-meta">${[c.empresa ? "Empresa: <b>" + escA(c.empresa) + "</b>" : "", c.unidad ? "N° de unidad: <b>" + escA(c.unidad) + "</b>" : "", c.descripcion ? escA(c.descripcion) : ""].filter(Boolean).join(" · ")}</div></div>
+          ${d.puedeEditar ? `<button class="btn-ghost cqEditar" style="width:auto;padding:8px 14px">✏️ Editar unidad</button>` : ""}
+        </div>
+        <div class="cq-dos">
+          <div class="cq-box"><div class="cq-box-t">🚐 Vehículo asignado</div>
+            <div class="flex items-end justify-between gap-3" style="flex-wrap:wrap"><div><span class="cq-placa grande">${escA(c.placa)}</span>
+              <div class="text-sm mt-2">Conductor: <b>${escA(cond ? cond.nombre : "—")}</b></div></div>
+              <div class="text-right text-xs" style="color:var(--ink-soft)">DNI conductor<br><b style="font-size:15px;color:var(--ink)">${escA(cond && cond.dni ? cond.dni : "—")}</b></div></div></div>
+          <div class="cq-box"><div class="cq-box-t">🎧 ${c.tipo === "CAMIONETA" ? "Responsable" : "Técnico a cargo"}</div>
+            ${tec ? `<div class="flex items-center gap-3"><span class="cq-av lila">${escA(cqIniciales(tec.nombre))}</span><div class="min-w-0 flex-1"><b>${escA(tec.nombre)}</b><div class="cq-dni">DNI: ${escA(tec.dni || "—")}</div></div>
+              ${tec.telefono ? `<a class="cq-ib wa" href="https://wa.me/${cqTel(tec.telefono)}" target="_blank" rel="noopener" aria-label="WhatsApp">${ICO_WA}</a><a class="cq-ib tel" href="tel:+${cqTel(tec.telefono)}" aria-label="Llamar">${ICO_TEL}</a>` : ""}</div>`
+              : `<div class="text-sm" style="color:var(--danger);font-weight:600">Sin ${c.tipo === "CAMIONETA" ? "responsable" : "técnico a cargo"}${d.puedeEditar ? ": elígelo en «Editar unidad»" : ""}</div>`}</div>
+        </div>
+        <div class="cq-pers-cab"><div><b>PERSONAL ASIGNADO (${c.personal.length})</b></div>
+          ${d.puedeEditar ? `<button class="btn-primary cqNuevaPer" style="width:auto;padding:8px 14px">＋ Agregar personal</button>` : `<span class="cq-activos">${c.personal.length} activos</span>`}</div>
+        ${c.personal.length ? `<div class="cq-pers">${c.personal.map(p => persona(p, c)).join("")}</div>` : `<div class="text-sm py-3" style="color:var(--ink-soft)">Aún no hay personal registrado en esta unidad.</div>`}
+        <details class="cq-hist" ${state.cqHistAb ? "open" : ""}><summary>Historial de cambios (${hist.length})</summary>
+          ${hist.length ? hist.map(h => `<div class="cq-h"><small>${escA(h.en)} · ${escA(h.por)}</small><div>${escA(h.detalle)}</div></div>`).join("") : `<div class="text-sm py-2" style="color:var(--ink-soft)">Sin cambios registrados.</div>`}
+        </details>
+      </div>`;
+    };
+    document.getElementById("app").innerHTML = `${estilosGis()}${estilosCq()}
+      ${cabeceraGis("Cuadrillas Fugas", "laboratorios, camionetas y su personal", ICO_CQ, "Gestión & Reportes")}
+      <div class="gis-wrap px-4 py-4 pb-24">
+        ${!d ? `<div class="text-sm py-6" style="color:var(--ink-soft)">Cargando cuadrillas…</div>`
+        : d.error ? `<div class="card p-4 text-sm" style="color:var(--danger)">${escA(d.error)}</div>`
+        : `<div class="cq-grid ${verDetalle ? "solo-det" : ""}">
+          <aside class="cq-lista">
+            <div class="cq-lista-cab"><b>UNIDADES OPERATIVAS (${vis.length})</b>
+              <div class="cq-filtros">${[["TODAS", "Todas"], ["LABORATORIO", "Labs"], ["CAMIONETA", "4x4"]].map(([k, t]) => `<button class="cqFil" data-k="${k}" aria-pressed="${filtro === k}">${t}</button>`).join("")}</div></div>
+            ${d.puedeEditar ? `<button class="btn-ghost w-full mb-3 cqNueva">＋ Nueva unidad</button>` : ""}
+            ${vis.length ? vis.map(tarjeta).join("") : `<div class="text-sm" style="color:var(--ink-soft)">No hay unidades registradas.</div>`}
+          </aside>
+          <section class="cq-detcol">${sel ? detalle(sel) : `<div class="card p-4 text-sm" style="color:var(--ink-soft)">Elige una unidad.</div>`}</section>
+        </div>`}
+      </div>`;
+    const app = document.getElementById("app");
+    const gv = document.getElementById("gisVolver"); if (gv) gv.onclick = () => salirVistaGis();   // se repinta solo al llegar los datos
+    app.querySelectorAll(".cqFil").forEach(b => b.onclick = () => { state.cqFiltro = b.dataset.k; renderCuadrillas(); });
+    app.querySelectorAll(".cqSel").forEach(b => b.onclick = () => { state.cqSel = b.dataset.id; state.cqVerDetalle = true; renderCuadrillas(); if (window.innerWidth < 900) window.scrollTo(0, 0); });
+    const vl = document.getElementById("cqVolverLista"); if (vl) vl.onclick = () => { state.cqVerDetalle = false; renderCuadrillas(); };
+    app.querySelectorAll(".cqFicha").forEach(b => b.onclick = () => fichaPersonaCq(b.dataset.id));
+    const h = app.querySelector(".cq-hist"); if (h) h.ontoggle = () => { state.cqHistAb = h.open; };
+    if (!d || !d.cuadrillas) return;
+    const nu = app.querySelector(".cqNueva"); if (nu) nu.onclick = () => formUnidadCq(null);
+    const ed = app.querySelector(".cqEditar"); if (ed) ed.onclick = () => formUnidadCq(sel);
+    const np = app.querySelector(".cqNuevaPer"); if (np) np.onclick = () => formPersonaCq(null, sel);
+  }
+  function modalCq(html) {
+    cerrarModalCq();
+    const el = document.createElement("div"); el.id = "cqModal"; el.className = "cq-fondo";
+    el.innerHTML = `<div class="cq-modal" role="dialog" aria-modal="true">${html}</div>`;
+    document.body.appendChild(el);
+    el.onclick = e => { if (e.target === el) cerrarModalCq(); };
+    el.onkeydown = e => { if (e.key === "Escape") cerrarModalCq(); };
+    const x = el.querySelector(".cqCerrar"); if (x) x.onclick = cerrarModalCq;
+    return el;
+  }
+  function cerrarModalCq() { const m = document.getElementById("cqModal"); if (m) m.remove(); }
+  function fichaPersonaCq(id) {
+    const d = state.cq, c = d.cuadrillas.find(x => x.personal.some(p => p.id === id)), p = c && c.personal.find(x => x.id === id);
+    if (!p) return;
+    const el = modalCq(`<div class="cq-ficha-cab"><small>🛡 FICHA TÉCNICA DE COLABORADOR ACREDITADO ECRF</small>
+        <div class="flex items-center gap-3 mt-3"><span class="cq-av grande">${escA(cqIniciales(p.nombre))}</span>
+          <div class="min-w-0"><b style="font-size:20px">${escA(p.nombre)}</b><div style="color:#C9D8EA">${escA(p.cargo)}${p.id === c.tecnicoId ? " · a cargo de la unidad" : ""}</div>
+          <span class="cq-est" style="margin-top:6px;display:inline-block">ESTADO: ACTIVO</span></div></div>
+        <button class="cq-x cqCerrar" aria-label="Cerrar">✕</button></div>
+      <div class="p-5">
+        <div class="cq-campos">
+          <div class="cq-campo"><small>DNI DEL TRABAJADOR</small><b>${escA(p.dni || "—")}</b></div>
+          <div class="cq-campo"><small>CUADRILLA ASIGNADA</small><b style="color:#1F4E9C">${escA(c.codigo)}</b></div>
+          <div class="cq-campo"><small>TELÉFONO DE CONTACTO</small><b>${escA(p.telefono || "—")}</b>${p.telefono ? ` <a class="cq-ib wa" style="float:right;margin-top:-22px" href="https://wa.me/${cqTel(p.telefono)}" target="_blank" rel="noopener" aria-label="WhatsApp">${ICO_WA}</a>` : ""}</div>
+          <div class="cq-campo"><small>FECHA DE INCORPORACIÓN</small><b>${escA(p.fechaIngreso ? fechaTxt(p.fechaIngreso) : "—")}</b></div>
+        </div>
+        <div class="cq-unidad"><small>UNIDAD MÓVIL ASIGNADA</small><div class="flex items-center justify-between gap-2" style="flex-wrap:wrap"><b>${escA(c.nombre || c.codigo)}</b><span class="cq-placa">Placa: ${escA(c.placa)}</span></div></div>
+        <div class="cq-nota">ⓘ Registro del personal de campo para las actividades de detección de fugas. Las modificaciones las hace un administrador desde este módulo.</div>
+        <div class="flex gap-2 mt-4 justify-end" style="flex-wrap:wrap">
+          ${d.puedeEditar ? `<button class="btn-ghost" id="cqPerEd" style="width:auto;padding:10px 16px">✏️ Editar</button>` : ""}
+          <button class="btn-primary cqCerrar2" style="width:auto;padding:10px 18px;background:#0F1B2D">Cerrar ficha</button></div>
+      </div>`);
+    el.querySelector(".cqCerrar2").onclick = cerrarModalCq;
+    const e = el.querySelector("#cqPerEd"); if (e) e.onclick = () => formPersonaCq(p, c);
+  }
+  async function guardarCq(tipo, datos, btn, err) {
+    btn.disabled = true; const t = btn.textContent; btn.textContent = "Guardando…";
+    try {
+      const r = await rdApi(tipo, datos);
+      state.cq = r; if (r.guardadoId && tipo === "cq_guardar") state.cqSel = r.guardadoId;
+      guardarLabs(r.cuadrillas.filter(c => c.tipo === "LABORATORIO" && c.activo && c.estado !== "INOPERATIVA").map(c => ({ id: c.id, codigo: c.codigo, unidad: c.unidad, placa: c.placa, empresa: c.empresa, tecnico: c.tecnico })));
+      cerrarModalCq(); toast("Guardado ✅"); const y = window.scrollY; renderCuadrillas(); window.scrollTo(0, y);
+    } catch (e) { btn.disabled = false; btn.textContent = t; err.textContent = msgError(e); }
+  }
+  function formUnidadCq(c) {
+    const d = state.cq, n = !c, x = c || { tipo: state.cqFiltro === "CAMIONETA" ? "CAMIONETA" : "LABORATORIO", estado: "OPERATIVA", activo: true, empresa: (d.empresas || [])[0] || "" };
+    const campo = (id, t, v, extra) => `<label class="cq-lbl" for="${id}">${t}</label><input id="${id}" class="input" value="${escA(v || "")}" ${extra || ""}>`;
+    const el = modalCq(`<div class="cq-mcab"><b>${n ? "Nueva unidad" : "Editar " + escA(c.codigo)}</b><button class="cq-x oscuro cqCerrar" aria-label="Cerrar">✕</button></div>
+      <div class="p-5 cq-form">
+        <div class="cq-f2">
+          <div><label class="cq-lbl" for="cqTipo">Tipo</label><select id="cqTipo" class="input">${Object.entries(d.tipos).map(([k, t]) => `<option value="${k}" ${x.tipo === k ? "selected" : ""}>${t}</option>`).join("")}</select></div>
+          <div>${campo("cqCod", "Código *", x.codigo, 'maxlength="20" placeholder="Ej.: LAB-07 o CAM-03" style="text-transform:uppercase"')}</div>
+          <div style="grid-column:1/-1">${campo("cqNom", "Nombre / zona", x.nombre, 'maxlength="120" placeholder="Ej.: Cuadrilla Laboratorio 07 - Ate / Centro"')}</div>
+          <div>${campo("cqUni", "N° de unidad (SGIO)", x.unidad, 'maxlength="10" inputmode="numeric" placeholder="Ej.: 007"')}</div>
+          <div>${campo("cqPla", "Placa *", x.placa, 'maxlength="12" placeholder="Ej.: CJL274" style="text-transform:uppercase"')}</div>
+          <div style="grid-column:1/-1">${campo("cqEmp", "Empresa", x.empresa, 'maxlength="80" list="cqEmpLista" placeholder="Ej.: AGAL"')}<datalist id="cqEmpLista">${(d.empresas || []).map(e => `<option value="${escA(e)}">`).join("")}</datalist>
+            <div class="text-xs mt-1" style="color:var(--ink-soft)">Cambia con cada contrato: escribe la nueva empresa cuando corresponda.</div></div>
+          <div style="grid-column:1/-1">${campo("cqDesc", "Descripción", x.descripcion, 'maxlength="200" placeholder="Ej.: Laboratorio acústico móvil"')}</div>
+          <div><label class="cq-lbl" for="cqEst">Estado</label><select id="cqEst" class="input"><option value="OPERATIVA">Operativa</option><option value="INOPERATIVA" ${x.estado === "INOPERATIVA" ? "selected" : ""}>Inoperativa</option></select></div>
+          <div><label class="cq-lbl" for="cqTec">Técnico a cargo / responsable</label><select id="cqTec" class="input" ${n ? "disabled" : ""}><option value="">${n ? "Primero agrega su personal" : "— Nadie —"}</option>${(c ? c.personal : []).map(p => `<option value="${escA(p.id)}" ${p.id === x.tecnicoId ? "selected" : ""}>${escA(p.nombre)} (${escA(p.cargo)})</option>`).join("")}</select></div>
+          ${n ? "" : `<label class="flex items-center gap-2 text-sm" style="grid-column:1/-1"><input type="checkbox" id="cqAct" ${x.activo ? "checked" : ""}> Unidad activa (si la desmarcas queda como «dada de baja» y no se puede asignar)</label>`}
+        </div>
+        <div id="cqErr" class="rd-err mt-2"></div>
+        <button id="cqGuardar" class="btn-primary w-full mt-3">${n ? "Crear unidad" : "Guardar cambios"}</button>
+      </div>`);
+    el.querySelector("#cqGuardar").onclick = () => {
+      const v = id => el.querySelector("#" + id).value.trim(), err = el.querySelector("#cqErr");
+      if (!v("cqCod")) { err.textContent = "Escribe el código de la unidad"; return; }
+      if (!v("cqPla")) { err.textContent = "Escribe la placa"; return; }
+      guardarCq("cq_guardar", { cuadrilla: { id: c ? c.id : "", tipo: v("cqTipo"), codigo: v("cqCod"), nombre: v("cqNom"), unidad: v("cqUni"), placa: v("cqPla"),
+        empresa: v("cqEmp"), descripcion: v("cqDesc"), estado: v("cqEst"), tecnicoId: c ? v("cqTec") : "", activo: c ? el.querySelector("#cqAct").checked : true } }, el.querySelector("#cqGuardar"), err);
+    };
+    el.querySelector("#cqCod").focus();
+  }
+  function formPersonaCq(p, c) {
+    const d = state.cq, n = !p, x = p || { cargo: c && c.tipo === "CAMIONETA" ? "Conductor" : "Ayudante de campo", cuadrillaId: c ? c.id : "" };
+    const campo = (id, t, v, extra) => `<label class="cq-lbl" for="${id}">${t}</label><input id="${id}" class="input" value="${escA(v || "")}" ${extra || ""}>`;
+    const el = modalCq(`<div class="cq-mcab"><b>${n ? "Agregar personal" : "Editar " + escA(p.nombre)}</b><button class="cq-x oscuro cqCerrar" aria-label="Cerrar">✕</button></div>
+      <div class="p-5 cq-form">
+        <div class="cq-f2">
+          <div style="grid-column:1/-1">${campo("cqpNom", "Nombre completo *", x.nombre, 'maxlength="120" autocomplete="off"')}</div>
+          <div>${campo("cqpDni", "DNI", x.dni, 'maxlength="8" inputmode="numeric" autocomplete="off"')}</div>
+          <div>${campo("cqpTel", "Teléfono", x.telefono, 'maxlength="15" inputmode="tel" placeholder="Ej.: 984123456" autocomplete="off"')}</div>
+          <div>${campo("cqpFec", "Fecha de incorporación", x.fechaIngreso, 'type="date"')}</div>
+          <div>${campo("cqpCar", "Cargo", x.cargo, 'maxlength="60" list="cqCargos"')}<datalist id="cqCargos">${(d.cargos || []).map(t => `<option value="${escA(t)}">`).join("")}</datalist></div>
+          <div style="grid-column:1/-1"><label class="cq-lbl" for="cqpCua">Unidad</label><select id="cqpCua" class="input">${d.cuadrillas.filter(q => q.activo).map(q => `<option value="${escA(q.id)}" ${q.id === x.cuadrillaId ? "selected" : ""}>${escA(q.codigo + " · " + (q.nombre || q.placa))}</option>`).join("")}</select></div>
+          <label class="flex items-center gap-2 text-sm" style="grid-column:1/-1"><input type="checkbox" id="cqpTec" ${c && p && c.tecnicoId === p.id ? "checked" : ""}> Es el técnico a cargo / responsable de la unidad</label>
+        </div>
+        <div id="cqpErr" class="rd-err mt-2"></div>
+        <button id="cqpGuardar" class="btn-primary w-full mt-3">${n ? "Agregar" : "Guardar cambios"}</button>
+        ${n ? "" : `<button id="cqpRetirar" class="btn-ghost w-full mt-2" style="color:var(--danger)">Retirar del personal</button>`}
+      </div>`);
+    const dni = el.querySelector("#cqpDni"); dni.oninput = () => { dni.value = dni.value.replace(/\D/g, "").slice(0, 8); };
+    const enviar = (activo, btn) => {
+      const v = id => el.querySelector("#" + id).value.trim(), err = el.querySelector("#cqpErr");
+      if (!v("cqpNom")) { err.textContent = "Escribe el nombre completo"; return; }
+      if (v("cqpDni") && v("cqpDni").length !== 8) { err.textContent = "El DNI debe tener 8 dígitos"; return; }
+      guardarCq("cq_persona", { persona: { id: p ? p.id : "", nombre: v("cqpNom"), dni: v("cqpDni"), telefono: v("cqpTel"), fechaIngreso: v("cqpFec"), cargo: v("cqpCar"),
+        cuadrillaId: v("cqpCua"), activo, esTecnico: el.querySelector("#cqpTec").checked } }, btn, err);
+    };
+    el.querySelector("#cqpGuardar").onclick = e => enviar(true, e.currentTarget);
+    const r = el.querySelector("#cqpRetirar");
+    if (r) r.onclick = () => { if (confirm("¿Retirar a " + p.nombre + " del personal? Queda en el historial.")) enviar(false, r); };
+    el.querySelector("#cqpNom").focus();
+  }
+  function estilosCq() {
+    return `<style>
+      .cq-grid{display:grid;grid-template-columns:320px minmax(0,1fr);gap:18px;align-items:start}
+      @media (max-width:899px){.cq-grid{grid-template-columns:minmax(0,1fr)}.cq-grid .cq-detcol{display:none}.cq-grid.solo-det .cq-lista{display:none}.cq-grid.solo-det .cq-detcol{display:block}}
+      .cq-lista-cab{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:10px;font-size:13px;color:var(--brand-dark)}
+      .cq-filtros{display:flex;gap:4px;background:#EEF2F6;border-radius:10px;padding:3px}.cq-filtros button{border:0;background:none;font-size:12px;font-weight:700;padding:5px 9px;border-radius:8px;color:#5B6B7F}
+      .cq-filtros button[aria-pressed="true"]{background:#fff;color:#0F1B2D;box-shadow:0 1px 3px rgba(0,0,0,.12)}
+      .cq-card{display:block;width:100%;text-align:left;background:#fff;border:1.5px solid var(--line);border-radius:14px;padding:12px 14px;margin-bottom:10px;position:relative}
+      .cq-card.on{border-color:#3B82F6;background:#F4F8FF;box-shadow:inset 4px 0 0 #2563EB}.cq-card.inact{opacity:.6}
+      .cq-card-top{display:flex;align-items:center;gap:8px;margin-bottom:6px}.cq-cod{font:700 14px ui-monospace,Menlo,Consolas,monospace;border:1.5px solid var(--line);border-radius:8px;padding:2px 8px}
+      .cq-tipo{font-size:10px;font-weight:800;letter-spacing:.04em;background:#DCE8FB;color:#1F4E9C;border-radius:6px;padding:3px 7px}.cq-tipo.cam{background:#DDF3E7;color:#12613B}
+      .cq-n{margin-left:auto;font-size:12px;font-weight:700;border:1px solid var(--line);border-radius:999px;padding:2px 8px;color:#475569}
+      .cq-nom{display:block;font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.cq-sub{font-size:12px;color:var(--ink-soft);margin-top:6px}
+      .cq-placa{font:700 12px ui-monospace,Menlo,Consolas,monospace;background:#FFF8DB;border:1px solid #F2D97A;border-radius:6px;padding:1px 6px;color:#5B4500}
+      .cq-placa.grande{font-size:20px;background:#fff;border:2px solid #0F1B2D;color:#0F1B2D;padding:6px 14px;border-radius:10px;display:inline-block}
+      .cq-alerta{font-size:11px;font-weight:800;color:#B42318;margin-top:6px}
+      .cq-head{display:flex;gap:14px;align-items:flex-start;flex-wrap:wrap;padding-bottom:14px;border-bottom:1px solid var(--line)}
+      .cq-big{flex:none;width:64px;height:64px;border-radius:14px;background:linear-gradient(135deg,#2F3BB8,#5B2DB3);color:#fff;font:800 15px ui-monospace,Menlo,Consolas,monospace;display:flex;align-items:center;justify-content:center;text-align:center;line-height:1.1;padding:4px}
+      .cq-titulo{font-size:20px;font-weight:800;line-height:1.25}.cq-meta{font-size:12px;color:var(--ink-soft);margin-top:6px}
+      .cq-est{font-size:11px;font-weight:800;background:#DDF3E7;color:#12613B;border-radius:999px;padding:3px 10px}.cq-est.no{background:#FDE2E0;color:#B42318}
+      .cq-dos{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:12px;margin:14px 0}
+      .cq-box{border:1.5px solid var(--line);border-radius:14px;padding:14px;background:#F8FAFC}.cq-box-t{font-size:13px;font-weight:800;color:var(--brand-dark);margin-bottom:10px}
+      .cq-av{flex:none;width:44px;height:44px;border-radius:12px;background:#E6ECF3;color:#334155;font-weight:800;display:flex;align-items:center;justify-content:center}
+      .cq-av.lila{background:#4F46E5;color:#fff}.cq-av.grande{width:60px;height:60px;font-size:20px;background:rgba(255,255,255,.18);color:#fff}
+      .cq-dni{font:12px ui-monospace,Menlo,Consolas,monospace;color:var(--ink-soft);margin-top:4px}
+      .cq-ib{flex:none;width:36px;height:36px;border-radius:10px;display:inline-flex;align-items:center;justify-content:center}.cq-ib.wa{background:#DDF6E6;color:#0E8A4A}.cq-ib.tel{background:#0F1B2D;color:#fff}
+      .cq-pers-cab{display:flex;align-items:center;justify-content:space-between;gap:10px;margin:6px 0 10px;flex-wrap:wrap;font-size:14px}
+      .cq-activos{font-size:12px;font-weight:700;color:#1F4E9C;border:1px solid #BFD3F5;background:#F4F8FF;border-radius:8px;padding:4px 10px}
+      .cq-pers{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:12px}
+      .cq-per{border:1.5px solid var(--line);border-radius:14px;padding:14px;background:#fff}.cq-per-top{display:flex;gap:12px;align-items:flex-start}
+      .cq-cargo{font-size:11px;font-weight:700;border-radius:6px;padding:2px 8px}
+      .cq-per-pie{display:flex;align-items:center;justify-content:space-between;gap:8px;border-top:1px solid var(--line);margin-top:12px;padding-top:10px}
+      .cq-tel{font-size:13px;display:flex;align-items:center;gap:6px;color:#334155}.cq-ver{border:0;background:#F1F4F8;border-radius:9px;padding:8px 12px;font-weight:700;font-size:13px}
+      .cq-hist{margin-top:16px;border-top:1px solid var(--line);padding-top:10px}.cq-hist summary{cursor:pointer;font-weight:700;color:var(--brand-dark);font-size:14px}
+      .cq-h{border-left:3px solid #BFD3F5;padding:6px 10px;margin-top:8px;font-size:13px}.cq-h small{color:var(--ink-soft)}
+      .cq-volver{border:0;background:none;color:#0B5FA5;font-weight:700;padding:0 0 10px}
+      .cq-fondo{position:fixed;inset:0;z-index:9000;background:rgba(3,32,76,.55);display:flex;align-items:flex-start;justify-content:center;padding:16px;overflow:auto}
+      .cq-modal{background:#fff;border-radius:18px;width:100%;max-width:520px;margin:auto 0;overflow:hidden;box-shadow:0 20px 50px rgba(0,0,0,.35)}
+      .cq-ficha-cab{position:relative;background:linear-gradient(120deg,#1E2A78,#2B1A5E 60%,#0F1B2D);color:#fff;padding:18px 20px}.cq-ficha-cab small{font-size:11px;font-weight:700;letter-spacing:.05em;color:#A5B4FC}
+      .cq-x{position:absolute;top:14px;right:14px;width:34px;height:34px;border-radius:50%;border:0;background:rgba(255,255,255,.15);color:#fff;font-size:16px}.cq-x.oscuro{position:static;background:#EEF2F6;color:#0F1B2D}
+      .cq-mcab{display:flex;align-items:center;justify-content:space-between;padding:14px 18px;border-bottom:1px solid var(--line);font-size:17px}
+      .cq-campos{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.cq-campo{border:1.5px solid var(--line);border-radius:12px;padding:10px 12px}
+      .cq-campo small,.cq-unidad small{display:block;font-size:11px;font-weight:700;color:var(--ink-soft);letter-spacing:.03em}.cq-campo b{font-size:15px}
+      .cq-unidad{border:1.5px solid #BFD3F5;background:#F4F8FF;border-radius:12px;padding:12px;margin-top:10px}.cq-unidad small{color:#1F4E9C}
+      .cq-nota{background:#FFF8E6;border:1px solid #F2D97A;color:#6B4A00;border-radius:12px;padding:10px 12px;font-size:12px;margin-top:10px}
+      .cq-f2{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.cq-lbl{display:block;font-size:12px;font-weight:700;color:var(--ink-soft);margin-bottom:4px}
+      @media (max-width:420px){.cq-campos,.cq-f2{grid-template-columns:minmax(0,1fr)}.cq-f2>*{grid-column:auto!important}}
+    </style>`;
+  }
 
   /* ---------------- CENTRO DE CONTROL (módulo CENTRO_CONTROL) ----------------
      Solo fugas de EMERGENCIA, ubicadas por su NIS:
