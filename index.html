@@ -173,7 +173,36 @@
   .menu-grupo:first-child { margin-top: 4px; }
   /* Barra lateral (solo PC) */
   .lat { position: fixed; top: 0; bottom: 0; left: 0; width: 280px; background: #fff; border-right: 1px solid var(--line); z-index: 60; display: none; flex-direction: column; overflow-y: auto; }
-  @media (min-width: 1024px) { body.con-lat { padding-left: 280px; } body.con-lat .lat { display: flex; } }
+  @media (min-width: 1024px) { body.con-lat { padding-left: 280px; } body.con-lat .lat { display: flex; } body.con-lat .burger, body.con-lat .lat-cerrar { display: none; } }
+  .burger { position: fixed; top: calc(10px + env(safe-area-inset-top,0px)); left: 10px; z-index: 70; width: 42px; height: 42px; border-radius: 12px; border: 1px solid rgba(255,255,255,.35);
+    background: rgba(3,32,76,.92); color: #fff; display: none; align-items: center; justify-content: center; box-shadow: 0 2px 8px rgba(0,0,0,.25); }
+  body.con-burger .burger { display: flex; }
+  body.con-burger .menu-top, body.con-burger .adm-top-in, body.con-burger .rd-top > div, body.con-burger .form-top { padding-left: 52px !important; }
+  @media (min-width: 1024px) { body.con-lat .menu-top, body.con-lat .adm-top-in, body.con-lat .rd-top > div, body.con-lat .form-top { padding-left: 16px !important; } }
+  @media (min-width: 1024px) { body.con-lat.con-burger .burger { display: none; } }
+  .campana { position: fixed; top: calc(10px + env(safe-area-inset-top,0px)); right: 10px; z-index: 70; width: 42px; height: 42px; border-radius: 12px; border: 1px solid rgba(255,255,255,.35);
+    background: rgba(3,32,76,.92); color: #fff; display: flex; align-items: center; justify-content: center; box-shadow: 0 2px 8px rgba(0,0,0,.25); }
+  .campana.sonando { background: #C0352B; animation: campana 1.4s ease-in-out infinite; }
+  .campana-n { position: absolute; top: -6px; right: -6px; min-width: 20px; height: 20px; border-radius: 999px; background: #F2A900; color: #1F1600; font: 800 11px Roboto, Arial, sans-serif; display: flex; align-items: center; justify-content: center; padding: 0 5px; border: 2px solid #fff; }
+  @keyframes campana { 0%, 70%, 100% { transform: none; } 75% { transform: rotate(-14deg); } 85% { transform: rotate(12deg); } 95% { transform: rotate(-6deg); } }
+  body.con-campana .menu-top, body.con-campana .adm-top-in, body.con-campana .rd-top > div, body.con-campana .form-top { padding-right: 56px !important; }
+  .nt-panel { position: fixed; top: calc(58px + env(safe-area-inset-top,0px)); right: 10px; z-index: 9600; width: min(380px, calc(100vw - 20px)); max-height: calc(100vh - 80px); display: flex; flex-direction: column;
+    background: #fff; border-radius: 16px; box-shadow: 0 16px 40px rgba(3,32,76,.35); border: 1px solid var(--line); overflow: hidden; }
+  .nt-cab { display: flex; align-items: center; justify-content: space-between; gap: 8px; background: #03204C; color: #fff; padding: 12px 14px; }
+  .nt-x { border: 0; background: rgba(255,255,255,.15); color: #fff; width: 32px; height: 32px; border-radius: 50%; }
+  .nt-sub { font-size: 12px; color: var(--ink-soft); padding: 8px 14px; border-bottom: 1px solid var(--line); }
+  .nt-lista { overflow-y: auto; flex: 1; }
+  .nt-item { display: grid; grid-template-columns: auto 1fr; gap: 2px 8px; width: 100%; text-align: left; border: 0; border-bottom: 1px solid #EEF1F4; background: #fff; padding: 10px 14px; }
+  .nt-item.nueva { background: #FFF6F5; }
+  .nt-cod { font-weight: 800; color: #0B5FA5; text-decoration: underline; }
+  .nt-nueva { justify-self: start; font-size: 10px; font-weight: 800; color: #fff; background: #C0352B; border-radius: 6px; padding: 2px 6px; align-self: center; }
+  .nt-dir { grid-column: 1 / -1; font-size: 13px; font-weight: 600; }
+  .nt-meta { grid-column: 1 / -1; font-size: 11px; color: var(--ink-soft); }
+  .nt-pie { display: grid; gap: 8px; padding: 12px 14px; border-top: 1px solid var(--line); background: #F8FAFC; }
+  .lat-cerrar { border: 0; background: rgba(255,255,255,.15); color: #fff; width: 34px; height: 34px; border-radius: 50%; font-size: 15px; flex: none; }
+  body.lat-abierto .lat { display: flex; z-index: 9500; width: min(320px, 86vw); box-shadow: 8px 0 30px rgba(0,0,0,.3); animation: latEntra .18s ease-out; }
+  .lat-fondo { position: fixed; inset: 0; background: rgba(3,32,76,.5); z-index: 9400; }
+  @keyframes latEntra { from { transform: translateX(-100%); } to { transform: none; } }
   .lat-marca { display: flex; align-items: center; gap: 10px; padding: calc(14px + env(safe-area-inset-top,0px)) 16px 14px; background: var(--brand-dark); color: #fff; }
   .lat-marca b { display: block; font-size: 17px; font-weight: 900; line-height: 1.1; }
   .lat-marca small { display: block; font-size: 11px; color: #C9D8EA; }
@@ -417,7 +446,9 @@
     if (!apiListo() || !enLinea()) return;
     try {
       const c = await apiGet({ action: "config" });
-      if (c.usuarios && c.usuarios.length) localStorage.setItem("ecrf_usuarios", JSON.stringify(c.usuarios.map(u => ({ name: u.nombre, hash: u.hash, rol: u.rol }))));
+      if (c.usuarios && c.usuarios.length) localStorage.setItem("ecrf_usuarios", JSON.stringify(c.usuarios.map(u => ({ name: u.nombre, hash: u.hash, rol: u.rol, perfil: u.perfil || u.rol }))));
+      if (Array.isArray(c.perfiles)) localStorage.setItem("ecrf_perfiles", JSON.stringify(c.perfiles));
+      if (Array.isArray(c.grupos)) { const ga = localStorage.getItem("ecrf_grupos"), gb = JSON.stringify(c.grupos); localStorage.setItem("ecrf_grupos", gb); if (ga !== gb && state.operario && !state.form && !state.admin) render(); }
       guardarTecnicos(c.tecnicos); guardarLabs(c.laboratorios);
       if (Array.isArray(c.modulos) && c.modulos.length) {
         const antes = localStorage.getItem("ecrf_modulos"), ahora = JSON.stringify(c.modulos);
@@ -588,6 +619,16 @@
     return "OPERARIO";
   }
   const esAdmin = () => rolDe(state.operario) === "ADMINISTRADOR";
+  // Perfil del usuario (Panel → Privilegios de perfiles): decide qué módulos ve. Sin perfil guardado, vale su rol.
+  function perfilDe(nombre) {
+    const u = listaUsuarios().find(o => o.name === nombre);
+    return u && u.perfil ? String(u.perfil).toUpperCase() : rolDe(nombre);
+  }
+  const nombrePerfil = id => (perfilesGuardados().find(p => p.id === id) || {}).nombre || ROL_TXT[id] || id;
+  function perfilesGuardados() {
+    let p = null; try { p = JSON.parse(localStorage.getItem("ecrf_perfiles") || "null"); } catch (e) {}
+    return Array.isArray(p) && p.length ? p : [{ id: "OPERARIO", nombre: "Operativo", base: "OPERARIO", activo: true }, { id: "SUPERVISOR", nombre: "Supervisor", base: "SUPERVISOR", activo: true }, { id: "ADMINISTRADOR", nombre: "Administrador", base: "ADMINISTRADOR", activo: true }];
+  }
   // Ver y gestionar lo de otros (hechos, rutas, PDF, reportes): nadie. Cada usuario ve solo lo suyo, sea operario, supervisor o administrador.
   const esSupervisor = () => false;
   function misPendientes() {
@@ -1370,7 +1411,7 @@
     const syncBadge = `<span id="syncBadge"></span>`;
 
     app.innerHTML = `
-      <div class="px-4 pt-3 pb-3 flex items-center gap-3" style="background:var(--brand-dark);color:#fff">
+      <div class="form-top px-4 pt-3 pb-3 flex items-center gap-3" style="background:var(--brand-dark);color:#fff">
         <button id="btnInicio" class="text-white font-bold text-xl leading-none px-1" aria-label="Volver al inicio">‹</button>
         ${FORM_INFO[state.form].icono(46)}
         <div class="flex-1 min-w-0">
@@ -2393,7 +2434,7 @@
     GPFO0405: { tipo: "form", ico: () => ICO_0405, defecto: { titulo: "Verificación de reparación", descripcion: "GPFO0405 · fugas no visibles" } },
     GPFO0416: { tipo: "form", ico: () => ICO_0416, defecto: { titulo: "Verificación por muestreo", descripcion: "GPFO0416 · fugas detectadas" } },
     PDF: { tipo: "accion", ico: () => ICO_PDF, abrir: () => abrirPanelPdf(), estilo: "background:#E1F3FB;border-color:#7CCBEA",
-           defecto: { titulo: "Generar mis PDF", descripcion: "Formularios del mes · GPFO0416 por quincena" } },
+           defecto: { titulo: "Generar mis formularios", descripcion: "Los 3 formularios del mes, a tu correo" } },
     REPORTE_DIARIO: { tipo: "vista", soloAdmin: true, ico: () => ICO_RD, abrir: () => abrirReporteDiario(), estilo: "background:#EAF6EE;border-color:#9BD3B0",
            defecto: { titulo: "Reporte diario de actividades", descripcion: "Charla de seguridad, plan del día y cierre" } },
     // Plano GIS: une el antiguo «Mapa de NIS» y el «Plano GIS» (NIS, redes y lotes en un solo mapa); lo ven todos los roles
@@ -2425,7 +2466,7 @@
       .sort((a, b) => (a.orden || 0) - (b.orden || 0));
   }
   function modulosMenu() {
-    const r = rolDe(state.operario);
+    const r = perfilDe(state.operario);
     return modulosConfig().filter(m => MODULOS_APP[m.id] && m.activo !== false && (m.roles || []).includes(r));
   }
   function tarjetaModulo(m) {
@@ -2447,14 +2488,14 @@
     if (!esAdmin()) { state.admin = false; return render(); }
     const app = document.getElementById("app");
     app.classList.remove("max-w-md");
-    if (!state.adminMods) { state.adminMods = modulosConfig().map((m, i) => ({ ...m, orden: i + 1 })); state.adminDirty = false; }
+    if (!state.adminMods) { state.adminMods = modulosConfig().map((m, i) => ({ ...m, orden: i + 1 })); state.adminGrupos = gruposNav().map(g => g.id); state.adminDirty = false; }
     const mods = state.adminMods;
-    const rolVista = state.adminVista || "OPERARIO";
     const tab = state.adminTab || "modulos";
-    const chipRol = (m, r, i) => `<button type="button" class="adm-rol" data-i="${i}" data-r="${r}" aria-pressed="${(m.roles || []).includes(r)}">${ROL_TXT[r]}</button>`;
-    const ordenGrupo = m => GRUPOS_NAV.findIndex(g => g.id === (GRUPO_DE[m.id] || "FORM"));   // la vista previa sigue los grupos del menú
-    const vista = mods.filter(m => MODULOS_APP[m.id] && m.activo !== false && (m.roles || []).includes(rolVista))
-      .map((m, i) => ({ m, i })).sort((a, b) => ordenGrupo(a.m) - ordenGrupo(b.m) || a.i - b.i).map(x => x.m);
+    // «Orden del menú lateral»: secciones en el orden elegido y, dentro de cada una, sus módulos
+    const grupos = gruposNav(state.adminGrupos), grupoDe = m => GRUPO_DE[m.id] || "FORM";
+    const perfilesVista = perfilesGuardados().filter(p => p.activo !== false);
+    const pVista = perfilesVista.some(p => p.id === state.adminVista) ? state.adminVista : (perfilesVista[0] || {}).id;
+    const omFiltro = grupos.some(g => g.id === state.omFiltro) ? state.omFiltro : "TODAS";
     app.innerHTML = `
       <style>
         .adm-top{background:#03204C;color:#fff;padding:calc(14px + env(safe-area-inset-top,0px)) 16px 16px}
@@ -2467,7 +2508,7 @@
         .adm-grid{display:grid;gap:18px}
         .adm-head{display:none}
         .adm-mod{background:#fff;border:1px solid var(--line);border-radius:16px;padding:14px;margin-bottom:12px;display:grid;gap:10px;
-          grid-template-columns:auto 1fr auto;grid-template-areas:"ord ico act" "tit tit tit" "des des des" "rol rol rol"}
+          grid-template-columns:auto 1fr auto;grid-template-areas:"ord ico act" "tit tit tit" "des des des"}
         .adm-mod.off{background:#F6F8FA}
         .adm-ord{grid-area:ord;display:flex;gap:4px;align-items:center}
         .adm-ico{grid-area:ico;display:flex;align-items:center;gap:10px;min-width:0}
@@ -2485,13 +2526,26 @@
         .adm-lbl{font-size:11px;font-weight:700;color:var(--ink-soft);text-transform:uppercase;letter-spacing:.04em;margin-bottom:3px}
         .adm-prev{background:#fff;border:1px solid var(--line);border-radius:16px;padding:14px;align-self:start}
         .adm-prev .form-card{pointer-events:none;margin-bottom:8px}
+        .om-filtro{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px}
+        .om-chip{display:inline-flex;align-items:center;gap:6px;border-radius:999px;padding:7px 12px;font-size:13px;font-weight:700;border:1.5px solid var(--line);background:#fff;color:var(--ink-soft)}
+        .om-chip[aria-pressed="true"]{background:#03204C;border-color:#03204C;color:#fff}
+        .om-dot{width:10px;height:10px;border-radius:50%;border:1px solid rgba(3,32,76,.25);flex:none;display:inline-block}.om-dot.grande{width:16px;height:16px;border-radius:5px}
+        .om-card{background:#fff;border:1px solid var(--line);border-radius:16px;padding:14px;margin-bottom:12px}
+        .om-card .adm-mod{border-color:#E6EBF1;margin-bottom:8px}.om-card .adm-mod:last-child{margin-bottom:0}
+        .om-t{font-size:12px;font-weight:800;letter-spacing:.05em;color:var(--brand-dark)}
+        .om-g{display:flex;align-items:center;gap:10px;border:1px solid #E6EBF1;border-radius:12px;padding:8px 10px;margin-top:6px}
+        .om-gcab{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:10px}
+        .om-vis{font-size:10px;font-weight:700;color:var(--ink-soft);margin-top:2px}
+        .om-pg{display:flex;align-items:center;gap:6px;font-size:11px;font-weight:800;letter-spacing:.04em;text-transform:uppercase;color:var(--ink-soft);margin:12px 0 4px}
+        .om-pi{display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:10px;font-weight:600;font-size:14px;background:#F6F8FB;margin-bottom:4px}
+        .om-pico{display:flex;width:22px;height:22px;color:var(--brand-dark)}.om-pico svg{width:22px;height:22px}
         .adm-bar{position:fixed;left:0;right:0;bottom:0;background:#fff;border-top:1px solid var(--line);padding:12px 16px calc(12px + env(safe-area-inset-bottom,0px));z-index:40}
         .adm-bar-in{max-width:1200px;margin:0 auto;display:flex;gap:10px;align-items:center}
         @media (min-width: 900px){
           .adm-grid{grid-template-columns:minmax(0,1fr) 340px}
           .adm-prev{position:sticky;top:16px}
           .adm-mod{grid-template-columns:108px 170px minmax(0,1fr) minmax(0,1.2fr) 64px;column-gap:14px;row-gap:8px;
-            grid-template-areas:"ord ico tit des act" "ord ico rol rol act";align-items:center;margin-bottom:10px;padding:12px 16px}
+            grid-template-areas:"ord ico tit des act";align-items:center;margin-bottom:10px;padding:12px 16px}
           .adm-act{justify-content:center}
         }
       </style>
@@ -2503,7 +2557,8 @@
       </div></div>
       <div class="adm-wrap">
         <div class="adm-tabs">
-          <button class="adm-tab" data-admtab="modulos" aria-current="${tab === "modulos"}">Módulos del menú</button>
+          <button class="adm-tab" data-admtab="modulos" aria-current="${tab === "modulos"}">Orden del menú lateral</button>
+          <button class="adm-tab" data-admtab="perfiles" aria-current="${tab === "perfiles"}">Privilegios de perfiles</button>
           <button class="adm-tab" data-admtab="charlas" aria-current="${tab === "charlas"}">Charlas de seguridad</button>
           <button class="adm-tab" data-admtab="catalogo" aria-current="${tab === "catalogo"}">Dominios</button>
           <button class="adm-tab" data-admtab="vehiculo" aria-current="${tab === "vehiculo"}">Laboratorio (vehículo)</button>
@@ -2512,41 +2567,62 @@
         </div>
         ${tab === "charlas" ? estilosGis() + estilosCharlas() + htmlAdminCharlas()
           : tab === "usuarios" ? htmlAdminUsuarios()
+          : tab === "perfiles" ? htmlAdminPerfiles()
           : tab === "rdpdf" ? (!state.adminRd ? (cargarAdminRd(), `<div class="text-sm py-6" style="color:var(--ink-soft)">Cargando…</div>`) : state.adminRd.error ? `<div class="card p-4 text-sm" style="color:var(--danger)">${escA(state.adminRd.error)}</div>` : htmlRdSupervisor(state.adminRd))
-          : tab === "catalogo" ? `<div class="text-sm mb-3" style="color:var(--ink-soft)">Dominios: listas de valores que los trabajadores eligen en la app. Agrega, edita, activa/desactiva o elimina valores y luego presiona «Guardar cambios». Los registros anteriores conservan su texto.</div>` + htmlAdminCatalogo()
+          : tab === "catalogo" ? `<div class="text-sm mb-3" style="color:var(--ink-soft)">Dominios: catálogos de valores que los trabajadores eligen en la app. Toca ✏️ en un catálogo para agregar, editar, activar/desactivar o eliminar sus valores y luego presiona «Guardar cambios». Los registros anteriores conservan su texto.</div>` + estilosCq() + htmlAdminCatalogo()
           : tab === "vehiculo" ? `<div class="text-sm mb-3" style="color:var(--ink-soft)">Ficha del vehículo laboratorio que ven todos en «Laboratorio ECRF». Las fechas de SOAT, revisión técnica y mantenimiento generan las alertas de vencimiento.</div>` + estilosGis() + htmlAdminVehiculo() : `
-        <div class="text-sm mb-3" style="color:var(--ink-soft)">Activa o desactiva cada módulo, cambia su orden y su nombre, y elige qué roles lo ven en el menú. Los cambios llegan a todos los celulares la próxima vez que abran la app con internet.</div>
+        <div class="text-sm mb-3" style="color:var(--ink-soft)">Ordena las secciones del menú lateral y los módulos de cada sección; cambia su nombre y descripción, y elige si se ven. Qué perfil ve cada módulo se decide en «Privilegios de perfiles». Los cambios llegan a todos los celulares la próxima vez que abran la app con internet.</div>
         <div class="adm-grid">
           <div>
-            ${mods.map((m, i) => {
-              const def = MODULOS_APP[m.id];
-              return `
-              <div class="adm-mod ${m.activo === false ? "off" : ""}">
-                <div class="adm-ord">
-                  <button class="adm-flecha adm-sube" data-i="${i}" aria-label="Subir" ${i === 0 ? "disabled" : ""}>↑</button>
-                  <button class="adm-flecha adm-baja" data-i="${i}" aria-label="Bajar" ${i === mods.length - 1 ? "disabled" : ""}>↓</button>
-                  <span class="adm-num">${i + 1}</span>
-                </div>
-                <div class="adm-ico">
-                  ${def ? `<span class="form-ico" ${def.tipo !== "form" ? 'style="display:flex;align-items:center;justify-content:center;color:var(--brand-dark)"' : ""}>${def.ico()}</span>` : `<span class="form-ico" style="display:flex;align-items:center;justify-content:center">🧩</span>`}
-                  <div class="min-w-0"><div class="text-xs font-bold" style="color:var(--brand)">${escA(m.id)}</div>
-                    <div class="text-xs" style="color:var(--ink-soft)">${def ? (def.tipo === "form" ? "Formulario" : def.tipo === "vista" ? "Módulo" : "Herramienta") : "Versión futura"}</div></div>
-                </div>
-                <div class="adm-act"><button class="adm-sw" role="switch" data-i="${i}" aria-checked="${m.activo !== false}" aria-label="Activo"></button></div>
-                <div class="adm-tit"><div class="adm-lbl">Nombre en el menú</div>
-                  <input class="input adm-in" data-i="${i}" data-k="titulo" maxlength="60" value="${escA(m.titulo || "")}"></div>
-                <div class="adm-des"><div class="adm-lbl">Descripción</div>
-                  <input class="input adm-in" data-i="${i}" data-k="descripcion" maxlength="120" value="${escA(m.descripcion || "")}"></div>
-                <div class="adm-roles"><span class="adm-lbl" style="align-self:center;margin:0 4px 0 0">Lo ven:</span>${ROLES.map(r => chipRol(m, r, i)).join("")}</div>
+            <div class="om-filtro" role="group" aria-label="Filtrar por sección">
+              <button class="om-chip omF" data-g="TODAS" aria-pressed="${omFiltro === "TODAS"}">Todas las secciones</button>
+              ${grupos.map(g => `<button class="om-chip omF" data-g="${g.id}" aria-pressed="${omFiltro === g.id}"><span class="om-dot" style="background:${g.color}"></span>${escA(g.nombre)}</button>`).join("")}
+            </div>
+            <div class="om-card">
+              <div class="om-t">ORDEN DE LAS SECCIONES</div>
+              <div class="text-xs mb-2" style="color:var(--ink-soft)">Así aparecen, de arriba hacia abajo, en el menú lateral.</div>
+              ${grupos.map((g, gi) => { const n = mods.filter(m => grupoDe(m) === g.id).length; return `
+              <div class="om-g">
+                <span class="adm-num">${gi + 1}</span><span class="om-dot grande" style="background:${g.color}"></span>
+                <div class="min-w-0 flex-1"><b>${escA(g.nombre)}</b><div class="text-xs" style="color:var(--ink-soft)">${n} módulo${n === 1 ? "" : "s"}</div></div>
+                <button class="adm-flecha omGs" data-gi="${gi}" data-d="-1" aria-label="Subir sección ${escA(g.nombre)}" ${gi === 0 ? "disabled" : ""}>↑</button>
+                <button class="adm-flecha omGs" data-gi="${gi}" data-d="1" aria-label="Bajar sección ${escA(g.nombre)}" ${gi === grupos.length - 1 ? "disabled" : ""}>↓</button>
               </div>`; }).join("")}
+            </div>
+            ${grupos.filter(g => omFiltro === "TODAS" || g.id === omFiltro).map(g => {
+              const idx = mods.map((m, i) => i).filter(i => grupoDe(mods[i]) === g.id);
+              return `<div class="om-card">
+                <div class="om-gcab"><span class="om-dot grande" style="background:${g.color}"></span><b>${escA(g.nombre)}</b><span class="text-xs" style="color:var(--ink-soft)">· ${idx.length} módulo${idx.length === 1 ? "" : "s"} · ${idx.filter(i => mods[i].activo !== false).length} visibles</span></div>
+                ${idx.length ? idx.map((i, k) => { const m = mods[i], def = MODULOS_APP[m.id]; return `
+                <div class="adm-mod ${m.activo === false ? "off" : ""}">
+                  <div class="adm-ord">
+                    <button class="adm-flecha omMs" data-i="${i}" data-d="-1" aria-label="Subir ${escA(m.titulo || m.id)}" ${k === 0 ? "disabled" : ""}>↑</button>
+                    <button class="adm-flecha omMs" data-i="${i}" data-d="1" aria-label="Bajar ${escA(m.titulo || m.id)}" ${k === idx.length - 1 ? "disabled" : ""}>↓</button>
+                    <span class="adm-num">${k + 1}</span>
+                  </div>
+                  <div class="adm-ico">
+                    ${def ? `<span class="form-ico" ${def.tipo !== "form" ? 'style="display:flex;align-items:center;justify-content:center;color:var(--brand-dark)"' : ""}>${def.ico()}</span>` : `<span class="form-ico" style="display:flex;align-items:center;justify-content:center">🧩</span>`}
+                    <div class="min-w-0"><div class="text-xs font-bold" style="color:var(--brand)">${escA(m.id)}</div>
+                      <div class="text-xs" style="color:var(--ink-soft)">${def ? (def.tipo === "form" ? "Formulario" : def.tipo === "vista" ? "Módulo" : "Herramienta") : "Versión futura"}</div></div>
+                  </div>
+                  <div class="adm-act"><div class="text-center"><button class="adm-sw" role="switch" data-i="${i}" aria-checked="${m.activo !== false}" aria-label="Visible: ${escA(m.titulo || m.id)}"></button><div class="om-vis">${m.activo === false ? "Oculto" : "Visible"}</div></div></div>
+                  <div class="adm-tit"><div class="adm-lbl">Nombre en el menú</div>
+                    <input class="input adm-in" data-i="${i}" data-k="titulo" maxlength="60" value="${escA(m.titulo || "")}"></div>
+                  <div class="adm-des"><div class="adm-lbl">Descripción</div>
+                    <input class="input adm-in" data-i="${i}" data-k="descripcion" maxlength="120" value="${escA(m.descripcion || "")}"></div>
+                </div>`; }).join("") : `<div class="text-sm" style="color:var(--ink-soft)">Sin módulos en esta sección.</div>`}
+              </div>`; }).join("")}
+            <button id="omReset" class="btn-ghost" style="width:auto;padding:10px 16px">↺ Restablecer orden predeterminado</button>
           </div>
           <div class="adm-prev">
-            <div class="font-bold mb-1">Vista previa del menú</div>
-            <div class="text-xs mb-2" style="color:var(--ink-soft)">Así lo verá cada rol:</div>
+            <div class="font-bold mb-1">Vista previa del menú lateral</div>
+            <div class="text-xs mb-2" style="color:var(--ink-soft)">Así lo verá cada perfil:</div>
             <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px">
-              ${ROLES.map(r => `<button type="button" class="adm-rol adm-ver" data-r="${r}" aria-pressed="${r === rolVista}">${ROL_TXT[r]}</button>`).join("")}
+              ${perfilesVista.map(p => `<button type="button" class="adm-rol adm-ver" data-r="${escA(p.id)}" aria-pressed="${p.id === pVista}">${escA(p.nombre)}</button>`).join("")}
             </div>
-            ${vista.length ? vista.map(m => tarjetaModulo(m)).join("") : `<div class="text-sm p-3 rounded-lg" style="background:#FFF1C7;color:#6B4A00">Este rol no verá ningún módulo.</div>`}
+            ${(() => { const gs = grupos.map(g => ({ g, it: mods.filter(m => MODULOS_APP[m.id] && grupoDe(m) === g.id && m.activo !== false && (m.roles || []).includes(pVista)) })).filter(x => x.it.length);
+              return gs.length ? gs.map(x => `<div class="om-pg"><span class="om-dot" style="background:${x.g.color}"></span>${escA(x.g.nombre)}</div>` + x.it.map(m => `<div class="om-pi"><span class="om-pico">${(ICO_LAT[m.id] || MODULOS_APP[m.id].ico())}</span>${escA(m.titulo || m.id)}</div>`).join("")).join("")
+                : `<div class="text-sm p-3 rounded-lg" style="background:#FFF1C7;color:#6B4A00">Este perfil no verá ningún módulo.</div>`; })()}
           </div>
         </div>`}
       </div>
@@ -2557,25 +2633,33 @@
       </div></div>`}`;
     app.querySelectorAll("[data-admtab]").forEach(b => b.onclick = () => {
       if (state.adminTab === b.dataset.admtab) return;
-      if (b.dataset.admtab !== "modulos" && state.adminDirty) { toast("Guarda o deshaz los cambios de módulos primero", true); return; }
-      state.adminTab = b.dataset.admtab; if (state.adminTab !== "modulos") state.adminRd = null; state.usLista = null;
+      if (b.dataset.admtab !== "modulos" && state.adminDirty) { toast("Guarda o deshaz los cambios del orden del menú primero", true); return; }
+      state.adminTab = b.dataset.admtab; if (state.adminTab !== "modulos") state.adminRd = null; state.usLista = null; state.pf = null;
       if (state.adminTab === "vehiculo") { state.labDatos = null; state.adminVeh = null; }
       renderAdmin(); window.scrollTo(0, 0);
     });
     if (tab === "vehiculo") { document.getElementById("admVolver").onclick = salirAdmin; activarAdminVehiculo(app); return; }
     if (tab === "usuarios") { document.getElementById("admVolver").onclick = salirAdmin; activarAdminUsuarios(app); return; }
+    if (tab === "perfiles") { document.getElementById("admVolver").onclick = salirAdmin; activarAdminPerfiles(app); return; }
     if (tab === "rdpdf") { document.getElementById("admVolver").onclick = salirAdmin; if (state.adminRd && !state.adminRd.error) activarRdSupervisor(state.adminRd, () => { const y = window.scrollY; renderAdmin(); window.scrollTo(0, y); }); return; }
     if (tab !== "modulos") { activarAdminRd(app); return; }
 
     const cambio = () => { state.adminDirty = true; const y = window.scrollY; renderAdmin(); window.scrollTo(0, y); };
     document.getElementById("admVolver").onclick = salirAdmin;
-    app.querySelectorAll(".adm-sube").forEach(b => b.onclick = () => { const i = +b.dataset.i; [mods[i - 1], mods[i]] = [mods[i], mods[i - 1]]; cambio(); });
-    app.querySelectorAll(".adm-baja").forEach(b => b.onclick = () => { const i = +b.dataset.i; [mods[i + 1], mods[i]] = [mods[i], mods[i + 1]]; cambio(); });
-    app.querySelectorAll(".adm-sw").forEach(b => b.onclick = () => { const m = mods[+b.dataset.i]; m.activo = m.activo === false; cambio(); });
-    app.querySelectorAll(".adm-rol[data-i]").forEach(b => b.onclick = () => {
-      const m = mods[+b.dataset.i], r = b.dataset.r; m.roles = m.roles || [];
-      m.roles = m.roles.includes(r) ? m.roles.filter(x => x !== r) : m.roles.concat(r); cambio();
+    app.querySelectorAll(".omGs").forEach(b => b.onclick = () => {
+      const o = grupos.map(g => g.id), i = +b.dataset.gi, j = i + +b.dataset.d; [o[i], o[j]] = [o[j], o[i]]; state.adminGrupos = o; cambio();
     });
+    app.querySelectorAll(".omMs").forEach(b => b.onclick = () => {   // dentro de su sección: cambia de lugar con el vecino de la misma sección
+      const i = +b.dataset.i, g = grupoDe(mods[i]), idx = mods.map((m, k) => k).filter(k => grupoDe(mods[k]) === g), p = idx.indexOf(i), j = idx[p + +b.dataset.d];
+      if (j == null) return; [mods[i], mods[j]] = [mods[j], mods[i]]; cambio();
+    });
+    app.querySelectorAll(".adm-sw").forEach(b => b.onclick = () => { const m = mods[+b.dataset.i]; m.activo = m.activo === false; cambio(); });
+    app.querySelectorAll(".omF").forEach(b => b.onclick = () => { state.omFiltro = b.dataset.g; const y = window.scrollY; renderAdmin(); window.scrollTo(0, y); });
+    document.getElementById("omReset").onclick = () => {
+      const orden = Object.keys(MODULOS_APP);
+      mods.sort((a, b) => (orden.indexOf(a.id) < 0 ? 99 : orden.indexOf(a.id)) - (orden.indexOf(b.id) < 0 ? 99 : orden.indexOf(b.id)));
+      state.adminGrupos = GRUPOS_BASE.map(g => g.id); state.omFiltro = "TODAS"; cambio(); toast("Orden predeterminado: presiona «Guardar cambios» para aplicarlo");
+    };
     app.querySelectorAll(".adm-ver").forEach(b => b.onclick = () => { state.adminVista = b.dataset.r; const y = window.scrollY; renderAdmin(); window.scrollTo(0, y); });
     app.querySelectorAll(".adm-in").forEach(inp => inp.oninput = () => {
       mods[+inp.dataset.i][inp.dataset.k] = inp.value;
@@ -2628,13 +2712,15 @@
   async function guardarModulosAdmin() {
     if (!apiListo() || !enLinea()) { toast("Necesitas internet para guardar", true); return; }
     const mods = state.adminMods;
-    if (!mods.some(m => MODULOS_APP[m.id] && m.activo !== false && (m.roles || []).includes("OPERARIO")))
-      if (!confirmarSuave("Deja al menos un módulo activo para los operarios")) return;
+    if (!mods.some(m => MODULOS_APP[m.id] && m.activo !== false)) { toast("Deja al menos un módulo visible", true); return; }
     const cred = await pedirClave(); if (!cred) return;
     const btn = document.getElementById("admGuardar"); if (btn) { btn.disabled = true; btn.textContent = "Guardando…"; }
     try {
-      const r = await apiPost({ tipo: "modulos", clave: cred.clave, modulos: mods.map((m, i) => ({ id: m.id, titulo: m.titulo, descripcion: m.descripcion, activo: m.activo !== false, orden: i + 1, roles: m.roles || [] })) });
+      // los roles no se envían: el servidor conserva los de «Privilegios de perfiles»
+      const r = await apiPost({ tipo: "modulos", clave: cred.clave, grupos: state.adminGrupos || gruposNav().map(g => g.id), modulos: mods.map((m, i) => ({ id: m.id, titulo: m.titulo, descripcion: m.descripcion, activo: m.activo !== false, orden: i + 1 })) });
       localStorage.setItem("ecrf_modulos", JSON.stringify(r.modulos));
+      if (Array.isArray(r.grupos)) localStorage.setItem("ecrf_grupos", JSON.stringify(r.grupos));
+      pintarLateral();
       state.adminMods = null; state.adminDirty = false;
       toast("Módulos guardados ✅ Los celulares los verán al abrir la app con internet");
     } catch (e) {
@@ -3617,10 +3703,12 @@
     </style>`;
   }
   const DOMINIOS_APP = [
-    { k: "actividades", n: "Actividades planificadas (Contratista)", d: "Ítem 2 del Reporte diario de actividades", ej: "Ej.: Detección acústica de fugas" },
-    { k: "actividades_ecrf", n: "Actividades planificadas (ECRF)", d: "Ítem 3 del Reporte diario de actividades", ej: "Ej.: Supervisión de contratista" },
-    { k: "motivos", n: "Motivos de salida del vehículo", d: "Campo «Motivo de salida» del Laboratorio ECRF (recorridos)", ej: "Ej.: Traslado de equipos" }
+    { k: "actividades", n: "Actividades planificadas (Contratista)", d: "Actividades que la contratista planifica cada día", enl: ["Reporte diario de actividades · ítem 2"], ej: "Ej.: Detección acústica de fugas" },
+    { k: "actividades_ecrf", n: "Actividades planificadas (ECRF)", d: "Actividades del personal ECRF planificadas cada día", enl: ["Reporte diario de actividades · ítem 3"], ej: "Ej.: Supervisión de contratista" },
+    { k: "motivos", n: "Motivos de salida del vehículo", d: "Motivos por los que sale el vehículo laboratorio", enl: ["Laboratorio ECRF · «Motivo de salida» (recorridos)"], ej: "Ej.: Traslado de equipos" }
   ];
+  // Catálogos del sistema + los que creó el administrador («Nuevo catálogo»; por ahora no se usan en ningún campo: independientes)
+  const dominiosLista = d => DOMINIOS_APP.concat(((d && d.catalogosExtra) || []).map(c => ({ k: c.k, n: c.nombre, d: c.descripcion || "", enl: [], extra: true, activo: c.activo !== false, ej: "Ej.: nuevo valor" })));
   // Cambios pendientes de un dominio (se aplican todos juntos con «Guardar cambios»)
   const domPend = k => { state.domPend = state.domPend || {}; return state.domPend[k] = state.domPend[k] || { nuevos: [], cambios: {} }; };
   const nPend = k => { const p = state.domPend && state.domPend[k]; return p ? p.nuevos.length + Object.keys(p.cambios).length : 0; };
@@ -3640,14 +3728,28 @@
     const d = state.adminRd;
     if (!d) { cargarAdminRd(); return `<div class="text-sm py-6" style="color:var(--ink-soft)">Cargando…</div>`; }
     if (d.error) return `<div class="card p-4 text-sm" style="color:var(--danger)">${escA(d.error)}</div>`;
-    const dom = DOMINIOS_APP.find(x => x.k === state.domSel) || DOMINIOS_APP[0];
+    const lista = dominiosLista(d), dom = lista.find(x => x.k === state.domSel) || lista[0];
     const valores = valoresDominio(dom.k), pend = nPend(dom.k), ed = state.domEdit;
     return `
-      <div class="dom-lista">${DOMINIOS_APP.map(x => { const n = ((d.dominios && d.dominios[x.k]) || (x.k === "actividades" ? d.catalogo : []) || []), np = nPend(x.k);
-        return `<button class="dom-item domSel" data-k="${x.k}" aria-pressed="${x.k === dom.k}"><b>${x.n}</b><small>${x.d}</small><span>${n.filter(v => v.activo).length} activos de ${n.length}${np ? ` · <em style="color:#B45309;font-style:normal">${np} sin guardar</em>` : ""}</span></button>`; }).join("")}</div>
-      <div class="card p-4 mb-3 mt-3" style="max-width:760px">
-        <div class="font-bold" style="color:var(--brand-dark)">${dom.n}</div>
-        <div class="text-xs mb-3" style="color:var(--ink-soft)">${dom.d}</div>
+      <div class="dom-cab2"><div><div class="font-extrabold" style="color:var(--brand-dark);letter-spacing:.02em">CATÁLOGOS</div>
+        <div class="text-xs" style="color:var(--ink-soft)">${lista.length} catálogos · ${lista.filter(x => x.activo !== false).length} activos</div></div>
+        <button id="caNuevoCat" class="btn-primary" style="width:auto;padding:10px 16px;white-space:nowrap">＋ Nuevo catálogo</button></div>
+      <div class="dom-lista">${lista.map(x => { const n = ((d.dominios && d.dominios[x.k]) || (x.k === "actividades" ? d.catalogo : []) || []), np = nPend(x.k), act = x.activo !== false;
+        return `<div class="dom-item ${x.k === dom.k ? "on" : ""} ${act ? "" : "off"}">
+          <div class="dc-top"><b>${escA(x.n)}</b><span class="dom-est ${act ? "si" : "no"}">${act ? "Activo" : "Inactivo"}</span></div>
+          ${x.d ? `<small>${escA(x.d)}</small>` : ""}
+          <div class="dc-enl">${x.enl.length ? `<span class="dc-l">Campos enlazados</span>${x.enl.map(e => `<span class="dc-chip">🔗 ${escA(e)}</span>`).join("")}` : `<span class="dc-chip ind">Independiente</span>`}</div>
+          <div class="dc-pie"><span class="dc-n">${n.filter(v => v.activo).length} activos / ${n.length} total${np ? ` · <em style="color:#B45309;font-style:normal">${np} sin guardar</em>` : ""}</span>
+            <span class="flex gap-1">
+              <button class="dom-b domSel" data-k="${escA(x.k)}" aria-pressed="${x.k === dom.k}" title="Editar valores" aria-label="Editar los valores de ${escA(x.n)}">${ICO_LAPIZ}</button>
+              ${x.extra ? `<button class="dom-b caCatEd" data-k="${escA(x.k)}" title="Nombre y estado" aria-label="Cambiar nombre o estado de ${escA(x.n)}">⚙️</button>
+                <button class="dom-b del caCatDel" data-k="${escA(x.k)}" title="Eliminar catálogo" aria-label="Eliminar el catálogo ${escA(x.n)}">${ICO_BOTE}</button>` : ""}
+            </span></div>
+        </div>`; }).join("")}</div>
+      <div id="domEditor" class="card p-4 mb-3 mt-3" style="max-width:760px">
+        <div class="dom-sub" style="color:var(--ink-soft);margin-bottom:2px">Editando valores de</div>
+        <div class="font-bold" style="color:var(--brand-dark)">${escA(dom.n)}</div>
+        <div class="text-xs mb-3" style="color:var(--ink-soft)">${escA(dom.d)}${dom.enl.length ? " · Se usa en: " + escA(dom.enl.join(", ")) : " · Independiente (no se usa en ningún campo)"}</div>
         <div class="dom-sub">Agregar nuevo</div>
         <input id="caNueva" class="input" maxlength="300" placeholder="${dom.ej}" value="${escA(state.caNueva || "")}" aria-label="Nuevo valor">
         <button id="caAgregar" class="btn-primary w-full mt-2">＋ Agregar</button>
@@ -3677,10 +3779,17 @@
         </div>
         <div id="caErr2" class="rd-err"></div>
       </div>
-      <style>.dom-lista{display:grid;gap:10px;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));max-width:760px}
-        .dom-item{text-align:left;border:1.5px solid var(--line);background:#fff;border-radius:14px;padding:12px 14px;display:grid;gap:2px}
-        .dom-item[aria-pressed="true"]{border-color:#0B5FA5;background:#F4F8FC;box-shadow:inset 0 0 0 1px #0B5FA5}
-        .dom-item b{color:var(--brand-dark)}.dom-item small{font-size:12px;color:var(--ink-soft)}.dom-item span{font-size:12px;font-weight:700;color:#0B5FA5;margin-top:4px}
+      <style>.dom-lista{display:grid;gap:12px;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));max-width:1100px}
+        .dom-cab2{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap;margin-bottom:12px;max-width:1100px}
+        .dom-item{text-align:left;border:1.5px solid var(--line);background:#fff;border-radius:16px;padding:14px;display:flex;flex-direction:column;gap:6px}
+        .dom-item.on{border-color:#0B5FA5;background:#F4F8FC;box-shadow:inset 0 0 0 1px #0B5FA5}.dom-item.off{background:#F8FAFC}.dom-item.off b{color:#64748B}
+        .dom-item b{color:var(--brand-dark)}.dom-item small{font-size:12px;color:var(--ink-soft)}
+        .dc-top{display:flex;justify-content:space-between;align-items:flex-start;gap:8px}
+        .dc-enl{display:flex;flex-wrap:wrap;gap:4px;align-items:center}.dc-l{width:100%;font-size:10px;font-weight:800;letter-spacing:.05em;text-transform:uppercase;color:var(--ink-soft)}
+        .dc-chip{font-size:11px;font-weight:600;border-radius:8px;padding:3px 8px;background:#E1F3FB;color:#0B4A6B}.dc-chip.ind{background:#EEF1F4;color:#475569}
+        .dc-pie{display:flex;justify-content:space-between;align-items:center;gap:8px;margin-top:auto;padding-top:8px;border-top:1px solid #E6EBF1}
+        .dc-n{font-size:12px;font-weight:700;color:#0B5FA5}
+        .dom-b[aria-pressed="true"]{border-color:#0B5FA5;color:#0B5FA5;background:#E8F1FB}
         .dom-sub{font-size:12px;font-weight:800;letter-spacing:.05em;text-transform:uppercase;color:var(--brand-dark);margin-bottom:8px}
         .dom-cab{display:grid;gap:4px;margin-bottom:12px}
         .dom-fila{display:flex;align-items:center;gap:8px;border:1.5px solid var(--line);border-radius:14px;padding:10px 10px;margin-bottom:10px;background:#fff;min-width:0}
@@ -3767,7 +3876,7 @@
       app.querySelectorAll(".chDelSi").forEach(b => b.onclick = () => { state.chBorrar = null; llamar("rd_admin_charla_borrar", { id: b.dataset.id }); });
     }
     if (state.adminTab === "catalogo") {
-      const dom = (DOMINIOS_APP.find(x => x.k === state.domSel) || DOMINIOS_APP[0]).k, p = domPend(dom);
+      const listaD = dominiosLista(d), dom = (listaD.find(x => x.k === state.domSel) || listaD[0]).k, p = domPend(dom);
       const repintar = () => { const y = window.scrollY; renderAdmin(); window.scrollTo(0, y); };
       const original = id => (((d.dominios && d.dominios[dom]) || (dom === "actividades" ? d.catalogo : []) || []).find(v => v.id === id));
       // guarda el cambio de un valor existente; si vuelve a quedar como estaba, deja de ser cambio
@@ -3778,7 +3887,41 @@
         else p.cambios[id] = c;
       };
       const guardarEdicion = () => { const inp = app.querySelector(".caDesc"); if (inp) { const v = inp.value.trim(); if (v) cambiar(inp.dataset.id, { descripcion: v }); } state.domEdit = null; };
-      app.querySelectorAll(".domSel").forEach(b => b.onclick = () => { guardarEdicion(); state.domSel = b.dataset.k; state.caNueva = ""; renderAdmin(); });
+      app.querySelectorAll(".domSel").forEach(b => b.onclick = () => { guardarEdicion(); state.domSel = b.dataset.k; state.caNueva = ""; renderAdmin(); const e = document.getElementById("domEditor"); if (e && window.innerWidth < 900) e.scrollIntoView({ behavior: "smooth", block: "start" }); });
+      // catálogos creados por el administrador: nombre, descripción, estado y eliminar
+      const formCat = c => {
+        const n = !c, x = c || { n: "", d: "", activo: true };
+        const el = modalCq(`<div class="cq-mcab"><b>🗂️ ${n ? "Nuevo catálogo" : "Editar catálogo"}</b><button class="cq-x oscuro cqCerrar" aria-label="Cerrar">✕</button></div>
+          <div class="p-5 cq-form">
+            <label class="cq-lbl" for="ctNo">Nombre del catálogo *</label><input id="ctNo" class="input mb-3" maxlength="80" value="${escA(x.n)}" autocomplete="off" placeholder="Ej.: Tipos de material">
+            <label class="cq-lbl" for="ctDe">Descripción</label><input id="ctDe" class="input mb-3" maxlength="200" value="${escA(x.d)}" autocomplete="off" placeholder="Para qué sirve esta lista">
+            ${n ? "" : `<label class="flex items-center gap-2 text-sm font-semibold"><input id="ctAc" type="checkbox" ${x.activo ? "checked" : ""} style="width:20px;height:20px"> Catálogo activo</label>`}
+            <div class="text-xs mt-2" style="color:var(--ink-soft)">Los catálogos nuevos quedan como «Independiente»: guardan su lista de valores, aún sin un campo de la app que los use.</div>
+            <div id="ctErr" class="rd-err mt-2"></div>
+            <div class="flex gap-2 justify-end mt-3"><button class="btn-ghost cqCerrar2" style="width:auto;padding:10px 16px">Cancelar</button><button id="ctGu" class="btn-primary" style="width:auto;padding:10px 18px">💾 ${n ? "Crear catálogo" : "Guardar"}</button></div>
+          </div>`);
+        el.querySelector(".cqCerrar2").onclick = cerrarModalCq;
+        el.querySelector("#ctGu").onclick = async e => {
+          const nombre = el.querySelector("#ctNo").value.trim(), err = el.querySelector("#ctErr"), b = e.currentTarget;
+          if (!nombre) { err.textContent = "Escribe el nombre del catálogo"; return; }
+          b.disabled = true; b.textContent = "Guardando…";
+          try {
+            const antes = new Set(((state.adminRd && state.adminRd.catalogosExtra) || []).map(z => z.k));
+            state.adminRd = await rdApi("rd_admin_catalogo_extra", { catalogo: { k: c ? c.k : "", nombre, descripcion: el.querySelector("#ctDe").value.trim(), activo: n ? true : el.querySelector("#ctAc").checked } });
+            if (n) { const nuevo = (state.adminRd.catalogosExtra || []).find(z => !antes.has(z.k)); if (nuevo) state.domSel = nuevo.k; }
+            cerrarModalCq(); toast(n ? "Catálogo creado ✅ Agrega sus valores" : "Catálogo guardado ✅"); repintar();
+          } catch (x2) { b.disabled = false; b.textContent = "💾 " + (n ? "Crear catálogo" : "Guardar"); err.textContent = msgError(x2); }
+        };
+        el.querySelector("#ctNo").focus();
+      };
+      document.getElementById("caNuevoCat").onclick = () => formCat(null);
+      app.querySelectorAll(".caCatEd").forEach(b => b.onclick = () => formCat(listaD.find(x => x.k === b.dataset.k)));
+      app.querySelectorAll(".caCatDel").forEach(b => b.onclick = async () => {
+        const c = listaD.find(x => x.k === b.dataset.k), n = ((d.dominios && d.dominios[c.k]) || []).length;
+        if (!confirm("¿Eliminar el catálogo «" + c.n + "»" + (n ? " y sus " + n + " valores" : "") + "?")) return;
+        try { state.adminRd = await rdApi("rd_admin_catalogo_extra", { eliminar: true, catalogo: { k: c.k } }); if (state.domSel === c.k) state.domSel = null; if (state.domPend) delete state.domPend[c.k]; toast("Catálogo eliminado"); repintar(); }
+        catch (e) { toast(msgError(e), true); }
+      });
       const n = document.getElementById("caNueva");
       n.oninput = () => { state.caNueva = n.value; };
       document.getElementById("caAgregar").onclick = () => {
@@ -3822,14 +3965,42 @@
   const FORM_CORTO = { GPFO0381: "0381 Presiones", GPFO0405: "0405 Reparación", GPFO0416: "0416 Muestreo" };
   const PARADAS_TRAMO = 10;                       // Google Maps en el celular: destino + 9 paradas intermedias
   let mapaL = null;
+  // Una sola carga aunque se pida varias veces a la vez (si no, un mapa podía crearse antes de que llegue el complemento de giro)
+  let leafletCargando = null;
   function cargarLeaflet() {
-    if (window.L) return Promise.resolve();
-    return new Promise((ok, mal) => {
+    if (leafletCargando) return leafletCargando;
+    if (window.L) return (leafletCargando = window.L.Map.prototype.setBearing ? Promise.resolve() : new Promise(ok => {
+      const r = document.createElement("script"); r.src = "https://cdn.jsdelivr.net/npm/leaflet-rotate@0.2.8/dist/leaflet-rotate.js";
+      r.onload = ok; r.onerror = () => ok(); document.head.appendChild(r);
+    }));
+    return (leafletCargando = new Promise((ok, mal) => {
       const css = document.createElement("link"); css.rel = "stylesheet";
       css.href = "https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css"; document.head.appendChild(css);
       const js = document.createElement("script"); js.src = "https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js";
-      js.onload = ok; js.onerror = mal; document.head.appendChild(js);
-    });
+      js.onload = () => {        // complemento para girar el mapa con dos dedos (si no carga, el mapa funciona igual, sin girar)
+        const r = document.createElement("script"); r.src = "https://cdn.jsdelivr.net/npm/leaflet-rotate@0.2.8/dist/leaflet-rotate.js";
+        r.onload = ok; r.onerror = () => ok(); document.head.appendChild(r);
+      };
+      js.onerror = () => { leafletCargando = null; mal(); }; document.head.appendChild(js);
+    }));
+  }
+  // Mapa que se puede girar (como Google Maps): dos dedos en el celular, Shift + rueda del mouse en la PC. «clave» guarda el giro.
+  const opcionesGiro = (clave, extra) => Object.assign({ rotate: true, touchRotate: true, shiftKeyRotate: true, rotateControl: false, bearing: state[clave] || 0 }, extra || {});
+  // Brújula debajo del botón GPS: la aguja apunta al norte; al tocarla el mapa vuelve al norte arriba
+  function agregarBrujula(mapa, clave) {
+    if (typeof mapa.setBearing !== "function") return;
+    const Br = L.Control.extend({ options: { position: "topleft" }, onAdd() {
+      const box = L.DomUtil.create("div", "leaflet-bar leaflet-control brujula");
+      box.innerHTML = `<a href="#" role="button" class="brujula-btn" title="Volver el mapa al norte" aria-label="Volver el mapa al norte">
+        <svg class="brujula-aguja" width="22" height="22" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.5 15.5 12h-7z" fill="#E5484D"/><path d="M12 21.5 8.5 12h7z" fill="#94A3B8"/><circle cx="12" cy="12" r="1.6" fill="#0F1B2D"/></svg></a>`;
+      L.DomEvent.disableClickPropagation(box);
+      box.firstElementChild.onclick = e => { e.preventDefault(); mapa.setBearing(0); };
+      return box;
+    } });
+    const ctl = new Br().addTo(mapa), aguja = ctl.getContainer().querySelector(".brujula-aguja");
+    const pintar = () => { const b = mapa.getBearing ? mapa.getBearing() : 0; state[clave] = b; aguja.style.transform = `rotate(${-b}deg)`;
+      ctl.getContainer().classList.toggle("girado", Math.abs(b) > 0.5); };
+    mapa.on("rotate", pintar); pintar();
   }
   const distKm = (a, b) => {
     const R = 6371, r = x => x * Math.PI / 180;
@@ -3975,7 +4146,7 @@
     CUADRILLAS: ICS(`<rect x="1" y="7" width="15" height="10" rx="2"/><path d="M16 10h4l3 3v4h-7"/><circle cx="6" cy="18" r="2"/><circle cx="18" cy="18" r="2"/><path d="M5 11h3M10 11h2"/>`)
   };
   const ICO_SGIO = ICO_LAT.SGIO, ICO_CC = ICO_LAT.CENTRO_CONTROL;
-  const GRUPOS_NAV = [
+  const GRUPOS_BASE = [
     { id: "OPER", nombre: "Operaciones diarias", color: "#EAF6EE" },
     { id: "FORM", nombre: "Formularios ECRF", color: "#E1F3FB" },
     { id: "GIS", nombre: "GIS & Logística", color: "#E6F6EF" },
@@ -3983,10 +4154,16 @@
   ];
   const GRUPO_DE = { REPORTE_DIARIO: "OPER", GPFO0381: "FORM", GPFO0405: "FORM", GPFO0416: "FORM", PDF: "FORM",
                      PLANO_GIS: "GIS", PLANIFICADOR_RUTAS: "GIS", LABORATORIO_ECRF: "GIS", SGIO: "GESTION", CENTRO_CONTROL: "GESTION", CUADRILLAS: "GESTION" };
+  // Grupos del menú en el orden que eligió el administrador (Panel → Orden del menú lateral)
+  function gruposNav(orden) {
+    let o = orden; if (!o) try { o = JSON.parse(localStorage.getItem("ecrf_grupos") || "[]"); } catch (e) { o = []; }
+    const pos = id => { const i = (o || []).indexOf(id); return i < 0 ? 99 : i; };
+    return GRUPOS_BASE.map((g, i) => ({ g, i })).sort((a, b) => pos(a.g.id) - pos(b.g.id) || a.i - b.i).map(x => x.g);
+  }
   // Los elementos que se ven en el menú, agrupados (respeta lo que configuró el administrador)
   function navAgrupado() {
     const mods = modulosMenu();
-    const grupos = GRUPOS_NAV.map(g => ({ ...g, items: mods.filter(m => (GRUPO_DE[m.id] || "FORM") === g.id) }));
+    const grupos = gruposNav().map(g => ({ ...g, items: mods.filter(m => (GRUPO_DE[m.id] || "FORM") === g.id) }));
     if (esAdmin()) grupos.find(g => g.id === "GESTION").items.push({ id: "ADMIN", titulo: "Panel de administración", descripcion: "Módulos, charlas, dominios y vehículo" });
     return grupos.filter(g => g.items.length);
   }
@@ -4015,18 +4192,27 @@
   }
 
   function pintarLateral() {
+    pintarCampana();
     let el = document.getElementById("lateral");
-    if (!state.operario || !esAdmin() || state.gpsEstado !== "ok") { if (el) el.remove(); document.body.classList.remove("con-lat"); return; }   // barra lateral: solo administradores
-    document.body.classList.add("con-lat");
+    const btn0 = document.getElementById("btnMenuLat");
+    if (!state.operario || state.gpsEstado !== "ok") { if (el) el.remove(); if (btn0) btn0.remove(); document.body.classList.remove("con-lat", "con-burger", "lat-abierto"); return; }
+    // PC: barra lateral fija solo para administradores. Celular (y PC de los demás): menú lateral con el botón ☰ para todos
+    document.body.classList.toggle("con-lat", esAdmin()); document.body.classList.add("con-burger");
+    if (!btn0) {
+      const b = document.createElement("button"); b.id = "btnMenuLat"; b.className = "burger"; b.setAttribute("aria-label", "Abrir menú"); b.setAttribute("aria-controls", "lateral");
+      b.innerHTML = `<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16"/></svg>`;
+      b.onclick = () => abrirMenuLat(true); document.body.appendChild(b);
+    }
     if (!el) { el = document.createElement("aside"); el.id = "lateral"; el.className = "lat"; el.setAttribute("aria-label", "Menú principal"); document.body.appendChild(el); }
     const act = navActual();
     el.innerHTML = `
       <div class="lat-marca">
         <span class="logo-chip"><img src="${LOGO_SEDAPAL}" alt="SEDAPAL"></span>
-        <div class="min-w-0"><b>ECRF Campo</b><small>Control y reducción de fugas</small></div>
+        <div class="min-w-0 flex-1"><b>ECRF Campo</b><small>Control y reducción de fugas</small></div>
+        <button class="lat-cerrar" id="latCerrar" aria-label="Cerrar menú">✕</button>
       </div>
       <button class="lat-inicio" data-nav="" aria-current="${act === ""}">
-        <span>${escA(state.operario)}</span><small>${ROL_TXT[rolDe(state.operario)] || ""} · Inicio</small>
+        <span>${escA(state.operario)}</span><small>${escA(nombrePerfil(perfilDe(state.operario)))} · Inicio</small>
       </button>
       <nav class="lat-grupos">
         ${navAgrupado().map(g => `
@@ -4041,12 +4227,135 @@
           </div>`).join("")}
       </nav>
       <div class="lat-pie"><span>SEDAPAL · ECRF</span><button id="latSalir">Salir</button></div>`;
-    el.querySelectorAll("[data-nav]").forEach(b => b.onclick = () => b.dataset.nav ? abrirModulo(b.dataset.nav) : abrirModulo(""));
-    el.querySelector("#latSalir").onclick = () => {
+    el.querySelectorAll("[data-nav]").forEach(b => b.onclick = () => { abrirMenuLat(false); b.dataset.nav ? abrirModulo(b.dataset.nav) : abrirModulo(""); });
+    el.querySelector("#latCerrar").onclick = () => abrirMenuLat(false);
+    el.querySelector("#latSalir").onclick = () => { abrirMenuLat(false);
       localStorage.removeItem("gpfo_operario"); localStorage.removeItem("ecrf_sesion"); sessionStorage.removeItem("ecrf_form"); alertaLabPedida = false;
       salirVistaGis(false); state.operario = null; state.form = null; state.rd = false; state.admin = false; state.vista = null; state.pinBuffer = ""; render();
     };
   }
+
+  function abrirMenuLat(abrir) {
+    document.body.classList.toggle("lat-abierto", !!abrir);
+    let f = document.getElementById("latFondo");
+    if (abrir && !f) { f = document.createElement("div"); f.id = "latFondo"; f.className = "lat-fondo"; f.onclick = () => abrirMenuLat(false); document.body.appendChild(f); }
+    if (!abrir && f) f.remove();
+    const b = document.getElementById("btnMenuLat"); if (b) b.setAttribute("aria-expanded", String(!!abrir));
+    if (abrir) { const el = document.getElementById("lateral"), a = el && el.querySelector('[aria-current="true"]'); if (a) a.scrollIntoView({ block: "nearest" }); (el && el.querySelector("#latCerrar") || {}).focus && el.querySelector("#latCerrar").focus(); }
+  }
+  document.addEventListener("keydown", e => { if (e.key === "Escape" && document.body.classList.contains("lat-abierto")) abrirMenuLat(false); });
+
+  /* ---------------- Alertas de nuevas emergencias del SGIO (campana arriba a la derecha) ----------------
+     Para quien tiene acceso al Centro de Control (o es administrador). Con la app abierta se revisa cada 3 minutos; con la
+     app cerrada llegan por Firebase Cloud Messaging (si el servidor lo tiene configurado y el usuario activó los avisos). */
+  const NT_FIREBASE = "https://cdn.jsdelivr.net/npm/firebase@10.14.1/";
+  let ntReloj = null, ntRevisando = false;
+  const ntLeer = k => { try { return JSON.parse(localStorage.getItem(k) || "null"); } catch (e) { return null; } };
+  const ntGuardar = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} };
+  const puedeAlertas = () => !!state.operario && state.gpsEstado === "ok" && (esAdmin() || modulosMenu().some(m => m.id === "CENTRO_CONTROL"));
+  const ntSinVer = () => { const a = state.alertas, v = ntLeer("ecrf_alertas_vistas") || []; return a && a.lista ? a.lista.filter(f => v.indexOf(f.cod) < 0) : []; };
+  function pintarCampana() {
+    let b = document.getElementById("btnAlertas");
+    if (!puedeAlertas()) { if (b) b.remove(); document.body.classList.remove("con-campana"); cerrarAlertas(); if (ntReloj) { clearInterval(ntReloj); ntReloj = null; } return; }
+    document.body.classList.add("con-campana");
+    if (!b) {
+      b = document.createElement("button"); b.id = "btnAlertas"; b.className = "campana"; b.onclick = () => document.getElementById("ntPanel") ? cerrarAlertas() : abrirAlertas();
+      document.body.appendChild(b);
+    }
+    const n = ntSinVer().length;
+    b.setAttribute("aria-label", n ? n + " emergencia(s) nueva(s) del SGIO" : "Alertas del SGIO");
+    b.innerHTML = `<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/></svg>${n ? `<span class="campana-n">${n > 99 ? "99+" : n}</span>` : ""}`;
+    b.classList.toggle("sonando", n > 0);
+    if (!ntReloj) { ntReloj = setInterval(revisarAlertas, 3 * 60000); revisarAlertas(); }
+  }
+  async function revisarAlertas() {
+    if (ntRevisando || !puedeAlertas() || !apiListo() || !enLinea()) return;
+    const s = sesionGuardada(); if (!s) return;                  // sin sesión no se pregunta la contraseña en segundo plano
+    ntRevisando = true;
+    try {
+      const r = await apiPost({ tipo: "nt_alertas", sesion: s });
+      if (r.permitido === false) { state.alertas = { lista: [] }; return; }
+      state.alertas = r;
+      const cods = (r.lista || []).map(f => f.cod), conocidas = ntLeer("ecrf_alertas_conocidas");
+      const nuevas = Array.isArray(conocidas) ? (r.lista || []).filter(f => conocidas.indexOf(f.cod) < 0) : [];
+      ntGuardar("ecrf_alertas_conocidas", cods.concat(conocidas || []).filter((x, i, a) => a.indexOf(x) === i).slice(0, 500));
+      if (nuevas.length) avisarEmergencias(nuevas);
+      if (window.Notification && Notification.permission === "granted" && localStorage.getItem("ecrf_push_on") && r.fcm && !localStorage.getItem("ecrf_push_token")) registrarPush(r.fcm).catch(() => {});
+    } catch (e) {} finally {
+      ntRevisando = false;
+      pintarCampana(); if (document.getElementById("ntPanel")) abrirAlertas();
+    }
+  }
+  // Aviso con la app abierta (o en segundo plano): notificación del celular + mensaje en pantalla
+  async function avisarEmergencias(nuevas) {
+    const f0 = nuevas[0], titulo = nuevas.length === 1 ? "🚨 Nueva emergencia " + f0.cod : "🚨 " + nuevas.length + " nuevas emergencias en el SGIO";
+    const cuerpo = nuevas.length === 1 ? [f0.dir, f0.dist].filter(Boolean).join(" · ") : nuevas.slice(0, 4).map(f => f.cod + " · " + (f.dist || f.dir || "")).join("\n");
+    if (!document.hidden) toast(titulo);
+    try {
+      if (window.Notification && Notification.permission === "granted" && "serviceWorker" in navigator) {
+        const reg = await navigator.serviceWorker.getRegistration();
+        if (reg) reg.showNotification(titulo, { body: cuerpo, tag: "sgio-emergencias", renotify: true, icon: "icon-192.png", badge: "icon-192.png", data: { url: "./?alertas=1" } });
+      }
+    } catch (e) {}
+  }
+  function cargarJs(src) {
+    return new Promise((ok, mal) => { if (document.querySelector(`script[src="${src}"]`)) return ok(); const s = document.createElement("script"); s.src = src; s.onload = ok; s.onerror = mal; document.head.appendChild(s); });
+  }
+  async function registrarPush(fcm) {
+    await cargarJs(NT_FIREBASE + "firebase-app-compat.js"); await cargarJs(NT_FIREBASE + "firebase-messaging-compat.js");
+    const { vapidKey, ...conf } = fcm;
+    if (!firebase.apps.length) firebase.initializeApp(conf);
+    const reg = await navigator.serviceWorker.ready;
+    const token = await firebase.messaging().getToken({ vapidKey, serviceWorkerRegistration: reg });
+    if (!token) throw new Error("sin token");
+    await rdApi("nt_registrar", { fcmToken: token, dispositivo: (navigator.userAgentData && navigator.userAgentData.platform || "") + " " + navigator.userAgent.slice(0, 100) });
+    localStorage.setItem("ecrf_push_token", token);
+    return token;
+  }
+  async function activarAvisos(btn) {
+    if (!("Notification" in window) || !("serviceWorker" in navigator)) { toast("Este navegador no permite notificaciones. Instala la app o usa Chrome.", true); return; }
+    btn.disabled = true; btn.textContent = "Activando…";
+    try {
+      const p = await Notification.requestPermission();
+      if (p !== "granted") { toast("Las notificaciones están bloqueadas: actívalas en los permisos del navegador para esta app", true); return; }
+      localStorage.setItem("ecrf_push_on", "1");
+      const fcm = state.alertas && state.alertas.fcm;
+      if (fcm) { localStorage.removeItem("ecrf_push_token"); await registrarPush(fcm); toast("Avisos activados ✅ Te llegarán aunque la app esté cerrada"); }
+      else toast("Avisos activados con la app abierta. Para recibirlos con la app cerrada falta configurar Firebase en el servidor.");
+    } catch (e) { toast("No se pudo activar en este celular: " + ((e && e.message) || "inténtalo otra vez"), true); }
+    finally { abrirAlertas(); }
+  }
+  function cerrarAlertas() { const p = document.getElementById("ntPanel"); if (p) p.remove(); }
+  function abrirAlertas() {
+    const a = state.alertas || {}, lista = a.lista || [], vistas = ntLeer("ecrf_alertas_vistas") || [];
+    let p = document.getElementById("ntPanel");
+    if (!p) { p = document.createElement("div"); p.id = "ntPanel"; p.className = "nt-panel"; p.setAttribute("role", "dialog"); p.setAttribute("aria-label", "Alertas del SGIO"); document.body.appendChild(p); }
+    const avisosOn = window.Notification && Notification.permission === "granted" && localStorage.getItem("ecrf_push_on");
+    const cerrado = avisosOn && localStorage.getItem("ecrf_push_token");
+    p.innerHTML = `<div class="nt-cab"><b>🚨 Emergencias pendientes del SGIO</b><button class="nt-x" id="ntCerrar" aria-label="Cerrar">✕</button></div>
+      <div class="nt-sub">${a.en ? "Última carga del SGIO: " + escA(a.en) : state.alertas ? "Aún no hay cargas del SGIO" : "Revisando…"} · ${lista.length} pendiente(s)</div>
+      <div class="nt-lista">${lista.length ? lista.map(f => `<button class="nt-item ntFuga ${vistas.indexOf(f.cod) < 0 ? "nueva" : ""}" data-c="${escA(f.cod)}">
+          <span class="nt-cod">${escA(f.cod)}</span>${vistas.indexOf(f.cod) < 0 ? `<span class="nt-nueva">NUEVA</span>` : ""}
+          <span class="nt-dir">${escA(f.dir || "Sin dirección")}</span><span class="nt-meta">${escA([f.dist, f.nis ? "NIS " + f.nis : "", f.registro].filter(Boolean).join(" · "))}</span></button>`).join("")
+        : `<div class="text-sm p-3" style="color:var(--ink-soft)">No hay emergencias pendientes.</div>`}</div>
+      <div class="nt-pie">
+        ${modulosMenu().some(m => m.id === "CENTRO_CONTROL") ? `<button class="btn-primary" id="ntCC" style="padding:10px 14px">Ver en Centro de Control</button>` : ""}
+        ${cerrado ? `<div class="text-xs" style="color:#12613B;font-weight:700">✓ Avisos activados en este celular (también con la app cerrada)</div>`
+          : avisosOn && !a.fcm ? `<div class="text-xs" style="color:#12613B;font-weight:700">✓ Avisos activados con la app abierta</div>`
+          : `<button class="btn-ghost" id="ntActivar" style="padding:10px 14px">🔔 Activar notificaciones en este celular</button>`}
+        ${esAdmin() && a.fcm ? `<button class="btn-ghost" id="ntPrueba" style="padding:8px 12px;font-size:13px">Enviar notificación de prueba</button>` : ""}
+      </div>`;
+    ntGuardar("ecrf_alertas_vistas", vistas.concat(lista.map(f => f.cod)).filter((x, i, arr) => arr.indexOf(x) === i).slice(-500));
+    const b = document.getElementById("btnAlertas"); if (b) { b.classList.remove("sonando"); const n = b.querySelector(".campana-n"); if (n) n.remove(); }
+    p.querySelector("#ntCerrar").onclick = cerrarAlertas;
+    p.querySelectorAll(".ntFuga").forEach(x => x.onclick = () => { cerrarAlertas(); abrirFichaFuga(x.dataset.c); });
+    const cc = p.querySelector("#ntCC"); if (cc) cc.onclick = () => { cerrarAlertas(); abrirMenuLat(false); abrirModulo("CENTRO_CONTROL"); };
+    const ac = p.querySelector("#ntActivar"); if (ac) ac.onclick = () => activarAvisos(ac);
+    const pr = p.querySelector("#ntPrueba"); if (pr) pr.onclick = async () => { pr.disabled = true; try { const r = await rdApi("nt_prueba"); toast(r.enviados ? "Prueba enviada a " + r.enviados + " celular(es)" : "No hay celulares con los avisos activados", !r.enviados); } catch (e) { toast(msgError(e), true); } pr.disabled = false; };
+  }
+  document.addEventListener("visibilitychange", () => { if (!document.hidden && ntReloj) revisarAlertas(); });
+  document.addEventListener("click", e => { const p = document.getElementById("ntPanel"); if (p && !p.contains(e.target) && !e.target.closest("#btnAlertas")) cerrarAlertas(); });
+  if ("serviceWorker" in navigator) navigator.serviceWorker.addEventListener("message", e => { if (e.data && e.data.tipo === "abrir-alertas" && puedeAlertas()) { revisarAlertas(); setTimeout(abrirAlertas, 300); } });
 
   // Encabezado común de las vistas GIS (mismo estilo que el Reporte diario)
   function cabeceraGis(titulo, sub, ico, grupo) {
@@ -4438,7 +4747,7 @@
     const d = state.rgDatos || {};
     const vista = replicaL && !d.encuadrar ? { c: replicaL.getCenter(), z: replicaL.getZoom() } : null;
     if (replicaL) { replicaL.remove(); replicaL = null; }
-    replicaL = L.map("rgMapa", { zoomControl: true, maxZoom: 20 }); capaBase(replicaL);
+    replicaL = L.map("rgMapa", opcionesGiro("rgGiro", { zoomControl: true, maxZoom: 20 })); capaBase(replicaL);
     replicaFondo = new (CapaRedes())({ pane: "overlayPane" }).addTo(replicaL);
     if (d.centro) L.circle(d.centro, { radius: d.r, color: "#0B5FA5", weight: 2, dashArray: "6 6", fill: false, interactive: false }).addTo(replicaL);
     if (d.centro && d.origen === "mapa") L.circleMarker(d.centro, { radius: 5, color: "#fff", weight: 2, fillColor: "#0B5FA5", fillOpacity: 1, interactive: false }).addTo(replicaL);
@@ -4472,6 +4781,7 @@
       return box;
     } });
     new Botones().addTo(replicaL);
+    agregarBrujula(replicaL, "rgGiro");
     // tocar el mapa: un NIS abre su ventana; fuera del círculo ofrece cargar el plano en ese punto; lo demás es solo para ver
     replicaL.on("click", ev => {
       const x = nisTocado(ev.latlng);
@@ -5118,7 +5428,7 @@
     const fila = u => `<tr class="${u.activo ? "" : "us-off"}">
         <td class="us-ficha">${escA(u.ficha)}</td>
         <td><b>${escA(u.nombre)}</b>${u.correo ? `<small>${escA(u.correo)}</small>` : ""}</td>
-        <td data-l="Rol"><span class="us-rol ${u.rol}">${US_ROL_TXT[u.rol]}</span></td>
+        <td data-l="Perfil"><span class="us-rol ${u.rol}">${escA(((d.perfiles || []).find(p => p.id === u.perfil) || {}).nombre || US_ROL_TXT[u.rol])}</span></td>
         <td data-l="Celular">${u.telefono ? `<a class="us-tel" href="https://wa.me/51${escA(u.telefono)}" target="_blank" rel="noopener">${ICO_WA} +51 ${escA(u.telefono)}</a>` : `<span class="us-falta">Sin celular</span>`}</td>
         <td class="us-clave" data-l="Contraseña"><span>${u.clave ? (ver[u.ficha] ? escA(u.clave) : "••••••••") : `<i>igual a la ficha</i>`}</span>${u.clave ? `<button class="us-ojo usOjo" data-f="${escA(u.ficha)}" aria-label="${ver[u.ficha] ? "Ocultar" : "Mostrar"} contraseña de ${escA(u.nombre)}">${ver[u.ficha] ? OJO_CERRADO : OJO_ABIERTO}</button>` : ""}</td>
         <td data-l="Estado"><button class="us-est usEst ${u.activo ? "si" : "no"}" data-f="${escA(u.ficha)}" title="Clic para ${u.activo ? "deshabilitar" : "habilitar"}">${u.activo ? "✓ Habilitado" : "✕ Inactivo"}</button></td>
@@ -5126,10 +5436,10 @@
       </tr>`;
     return `${estilosCq()}<div class="card p-4" style="max-width:1100px">
       <div class="us-cab"><div><div class="font-extrabold" style="color:var(--brand-dark);letter-spacing:.02em">GESTIÓN DE USUARIOS</div>
-          <div class="text-xs" style="color:var(--ink-soft)">Usuarios de la app (hoja USUARIOS): ficha, rol, celular, contraseña y estado. Para habilitar o deshabilitar, haz clic en «Habilitado» o «Inactivo».</div></div>
+          <div class="text-xs" style="color:var(--ink-soft)">Usuarios de la app (hoja USUARIOS): ficha, perfil, celular, contraseña y estado. Para habilitar o deshabilitar, haz clic en «Habilitado» o «Inactivo».</div></div>
         <div class="us-acciones"><input id="usBuscar" class="input" placeholder="Buscar ficha, nombre o teléfono…" value="${escA(state.usBuscar || "")}" aria-label="Buscar usuario">
           <button id="usNuevo" class="btn-primary" style="width:auto;padding:10px 16px;white-space:nowrap">＋ Nuevo usuario</button></div></div>
-      <div class="us-tabla-w"><table class="us-tabla"><thead><tr><th>Ficha</th><th>Nombre completo</th><th>Rol</th><th>Celular (WhatsApp)</th><th>Contraseña</th><th>Estado</th><th>Acciones</th></tr></thead>
+      <div class="us-tabla-w"><table class="us-tabla"><thead><tr><th>Ficha</th><th>Nombre completo</th><th>Perfil</th><th>Celular (WhatsApp)</th><th>Contraseña</th><th>Estado</th><th>Acciones</th></tr></thead>
         <tbody>${lista.map(fila).join("") || `<tr><td colspan="7" class="text-sm" style="color:var(--ink-soft);padding:16px">No hay usuarios que coincidan.</td></tr>`}</tbody></table></div>
       <div id="usMsg" class="text-xs mt-2" style="color:var(--ink-soft)">${d.usuarios.filter(u => u.activo).length} habilitados de ${d.usuarios.length}. Los cambios valen desde que cada uno vuelve a abrir la app con internet.</div>
     </div>
@@ -5141,7 +5451,7 @@
       .us-tabla td{padding:12px;border-top:1px solid var(--line);vertical-align:middle}.us-tabla td small{display:block;font-size:11px;color:var(--ink-soft)}
       .us-tabla tr.us-off td{background:#FCFCFD}.us-tabla tr.us-off td b{color:#64748B}
       .us-ficha{font:700 14px ui-monospace,Menlo,Consolas,monospace}
-      .us-rol{font-size:12px;font-weight:700;border-radius:8px;padding:4px 10px;border:1px solid}.us-rol.OPERARIO{background:#E7F7EE;color:#12613B;border-color:#A7DDBE}
+      .us-rol{font-size:12px;font-weight:700;border-radius:8px;padding:4px 10px;border:1px solid;text-transform:uppercase;white-space:nowrap}.us-rol.OPERARIO{background:#E7F7EE;color:#12613B;border-color:#A7DDBE}
       .us-rol.SUPERVISOR{background:#E6F0FB;color:#1F4E9C;border-color:#B5CDF0}.us-rol.ADMINISTRADOR{background:#FFF3D6;color:#8A5A00;border-color:#F2D08A}
       .us-tel{display:inline-flex;align-items:center;gap:6px;font:600 13px ui-monospace,Menlo,Consolas,monospace;color:#0E6B3B;background:#EAF8F0;border:1px solid #A7DDBE;border-radius:8px;padding:5px 10px;white-space:nowrap}
       .us-falta{font-size:12px;color:#B45309;font-weight:600}
@@ -5177,7 +5487,7 @@
     app.querySelectorAll(".usEd").forEach(b => b.onclick = () => formUsuario(d.usuarios.find(x => x.ficha === b.dataset.f)));
     document.getElementById("usNuevo").onclick = () => formUsuario(null);
     function formUsuario(u) {
-      const n = !u, x = u || { rol: "OPERARIO" };
+      const n = !u, x = u || { rol: "OPERARIO", perfil: "OPERARIO" }, pfs = (d.perfiles || []).filter(p => p.activo || p.id === x.perfil);
       const el = modalCq(`<div class="cq-mcab"><b>👥 ${n ? "Nuevo usuario" : "Editar usuario"}</b><button class="cq-x oscuro cqCerrar" aria-label="Cerrar">✕</button></div>
         <div class="p-5 cq-form"><div class="cq-f2">
           <div><label class="cq-lbl" for="usFi">Número de ficha * <span style="float:right;font-weight:600;color:#94A3B8">5 dígitos</span></label><input id="usFi" class="input" inputmode="numeric" maxlength="5" value="${escA(x.ficha || "")}" autocomplete="off"></div>
@@ -5185,7 +5495,7 @@
           <div style="grid-column:1/-1"><label class="cq-lbl" for="usNo">Nombre y apellidos completos *</label><input id="usNo" class="input" maxlength="120" value="${escA(x.nombre || "")}" autocomplete="off"></div>
           <div style="grid-column:1/-1"><label class="cq-lbl" for="usTe">Celular (WhatsApp) * <span style="float:right;font-weight:600;color:#12613B">+51 (Perú)</span></label>
             <div style="position:relative"><span style="position:absolute;left:12px;top:50%;transform:translateY(-50%);color:#12613B;font-weight:700">+51</span><input id="usTe" class="input" inputmode="tel" maxlength="9" value="${escA(x.telefono || "")}" style="padding-left:48px" autocomplete="off" placeholder="9XXXXXXXX"></div></div>
-          <div><label class="cq-lbl" for="usRo">Rol *</label><select id="usRo" class="input">${["OPERARIO", "SUPERVISOR", "ADMINISTRADOR"].map(r => `<option value="${r}" ${x.rol === r ? "selected" : ""}>${ROL_TXT[r]}</option>`).join("")}</select></div>
+          <div><label class="cq-lbl" for="usRo">Perfil *</label><select id="usRo" class="input">${(pfs.length ? pfs : perfilesGuardados()).map(p => `<option value="${escA(p.id)}" ${(x.perfil || x.rol) === p.id ? "selected" : ""}>${escA(p.nombre)}${p.activo === false ? " (desactivado)" : ""}</option>`).join("")}</select></div>
           <div><label class="cq-lbl" for="usCo">Correo institucional</label><input id="usCo" class="input" type="email" maxlength="120" value="${escA(x.correo || "")}" autocomplete="off" placeholder="usuario@sedapal.com.pe"></div>
         </div>
         ${!n && x.nombre ? `<div class="text-xs mt-2" style="color:var(--ink-soft)">Si cambias el nombre, sus registros guardados pasan al nombre nuevo. Ese usuario tendrá que volver a ingresar.</div>` : ""}
@@ -5202,12 +5512,164 @@
         if (v("usCl") && !/^\d{4,12}$/.test(v("usCl"))) { err.textContent = "La contraseña es numérica, de 4 a 12 dígitos"; return; }
         b.disabled = true; b.textContent = "Guardando…";
         try {
-          state.usLista = await rdApi("us_guardar", { usuario: { fichaOriginal: u ? u.ficha : "", ficha: v("usFi"), nombre: v("usNo"), telefono: v("usTe"), clave: v("usCl"), rol: v("usRo"), correo: v("usCo") } });
+          state.usLista = await rdApi("us_guardar", { usuario: { fichaOriginal: u ? u.ficha : "", ficha: v("usFi"), nombre: v("usNo"), telefono: v("usTe"), clave: v("usCl"), perfil: v("usRo"), correo: v("usCo") } });
           cerrarModalCq(); toast(n ? "Usuario creado ✅" : state.usLista.renombrados ? "Guardado ✅ · sus registros pasaron al nombre nuevo" : "Guardado ✅");
           cargarConfigServidor(); repintar();
         } catch (x2) { b.disabled = false; b.textContent = "💾 " + (n ? "Crear usuario" : "Guardar cambios"); err.textContent = msgError(x2); }
       };
       el.querySelector("#usFi").focus();
+    }
+  }
+
+  /* ---------------- Panel de administración: Privilegios de perfiles (hojas PERFILES y MODULOS) ----------------
+     Cada perfil tiene un comportamiento base (Operativo, Supervisor o Administrador) y acceso a cada módulo del menú. */
+  const PF_BASE_TXT = { OPERARIO: "Operativo", SUPERVISOR: "Supervisor", ADMINISTRADOR: "Administrador" };
+  const PF_BASE_AYUDA = {
+    OPERARIO: "Se comporta como Operativo: registra sus formularios, su charla y su reporte diario. No entra al Panel de administración.",
+    SUPERVISOR: "Se comporta como Supervisor: consolida la información de campo. No entra al Panel de administración.",
+    ADMINISTRADOR: "Se comporta como Administrador: además entra al Panel de administración (catálogos, usuarios, perfiles y configuración)."
+  };
+  async function cargarPerfilesAdmin() {
+    try { aplicarPf(await rdApi("pf_datos")); } catch (e) { state.pf = { error: msgError(e) }; }
+    if (state.admin && state.adminTab === "perfiles") { const y = window.scrollY; renderAdmin(); window.scrollTo(0, y); }
+  }
+  // Lo que devuelve el servidor también actualiza el menú de este equipo (módulos con sus perfiles y la lista de perfiles)
+  function aplicarPf(r) {
+    state.pf = r; state.adminMods = null;
+    try {
+      const actual = JSON.parse(localStorage.getItem("ecrf_modulos") || "[]"), porId = Object.fromEntries((r.modulos || []).map(m => [m.id, m]));
+      if (Array.isArray(actual) && actual.length) localStorage.setItem("ecrf_modulos", JSON.stringify(actual.map(m => porId[m.id] ? { ...m, roles: porId[m.id].roles } : m)));
+      localStorage.setItem("ecrf_perfiles", JSON.stringify((r.perfiles || []).map(p => ({ id: p.id, nombre: p.nombre, descripcion: p.descripcion, base: p.base, activo: p.activo, sistema: p.sistema }))));
+    } catch (e) {}
+  }
+  function htmlAdminPerfiles() {
+    const d = state.pf;
+    if (!d) { cargarPerfilesAdmin(); return `<div class="text-sm py-6" style="color:var(--ink-soft)">Cargando perfiles…</div>`; }
+    if (d.error) return `<div class="card p-4 text-sm" style="color:var(--danger)">${escA(d.error)}</div>`;
+    if (!d.perfiles.some(p => p.id === state.pfSel)) state.pfSel = d.perfiles[0].id;
+    const sel = d.perfiles.find(p => p.id === state.pfSel), mods = d.modulos.filter(m => MODULOS_APP[m.id]);
+    const nMods = p => mods.filter(m => m.roles.includes(p.id)).length;
+    const tarjeta = p => `<div class="pf-card ${p.id === state.pfSel ? "on" : ""} ${p.activo ? "" : "off"}">
+        <button class="pf-sel pfSel" data-id="${escA(p.id)}" aria-pressed="${p.id === state.pfSel}">
+          <div class="flex items-center gap-2" style="flex-wrap:wrap"><b class="pf-nom">${escA(p.nombre)}</b>
+            ${p.nombre.toLowerCase() === PF_BASE_TXT[p.base].toLowerCase() ? "" : `<span class="us-rol ${p.base}" title="Se comporta como">${PF_BASE_TXT[p.base]}</span>`}${p.sistema ? `<span class="pf-sis">Sistema</span>` : ""}${p.activo ? "" : `<span class="pf-sis rojo">Desactivado</span>`}</div>
+          ${p.descripcion ? `<div class="pf-des">${escA(p.descripcion)}</div>` : ""}
+          <div class="pf-meta">👥 ${p.usuarios} usuario${p.usuarios === 1 ? "" : "s"} · 🧩 ${nMods(p)} de ${mods.length} módulos</div>
+        </button>
+        <div class="pf-acc">
+          <button class="pf-pow pfPow ${p.activo ? "si" : ""}" data-id="${escA(p.id)}" title="${p.activo ? "Desactivar" : "Activar"} perfil" aria-label="${p.activo ? "Desactivar" : "Activar"} el perfil ${escA(p.nombre)}" ${p.id === "ADMINISTRADOR" ? "disabled" : ""}>⏻</button>
+          <button class="us-btn pfEd" data-id="${escA(p.id)}" aria-label="Editar el perfil ${escA(p.nombre)}">✏️</button>
+          ${p.sistema ? "" : `<button class="us-btn rojo pfDel" data-id="${escA(p.id)}" aria-label="Eliminar el perfil ${escA(p.nombre)}">🗑</button>`}
+        </div>
+      </div>`;
+    const accesos = () => gruposNav().map(g => {
+      const it = mods.filter(m => (GRUPO_DE[m.id] || "FORM") === g.id); if (!it.length) return "";
+      return `<div class="om-gcab" style="margin:14px 0 6px"><span class="om-dot grande" style="background:${g.color}"></span><b>${escA(g.nombre)}</b></div>` + it.map(m => {
+        const on = m.roles.includes(sel.id);
+        return `<div class="pf-mod ${on ? "" : "no"}"><span class="om-pico">${ICO_LAT[m.id] || MODULOS_APP[m.id].ico()}</span>
+          <div class="min-w-0 flex-1"><b>${escA(m.titulo || m.id)}</b><div class="text-xs" style="color:var(--ink-soft)">${escA(m.descripcion || "")}${m.activo ? "" : ` · <span style="color:#B45309;font-weight:700">oculto en el menú para todos</span>`}</div></div>
+          <span class="pf-est">${on ? "Con acceso" : "Sin acceso"}</span>
+          <button class="adm-sw pfMod" role="switch" data-m="${escA(m.id)}" aria-checked="${on}" aria-label="Acceso de ${escA(sel.nombre)} a ${escA(m.titulo || m.id)}"></button></div>`;
+      }).join("");
+    }).join("");
+    const matriz = () => `<div class="pf-mtz-w"><table class="pf-mtz"><thead><tr><th>Módulo</th>${d.perfiles.map(p => `<th class="${p.activo ? "" : "off"}">${escA(p.nombre)}</th>`).join("")}</tr></thead>
+      <tbody>${mods.map(m => `<tr><td>${escA(m.titulo || m.id)}</td>${d.perfiles.map(p => { const on = m.roles.includes(p.id);
+        return `<td><button class="pf-cel pfCel ${on ? "si" : ""}" data-p="${escA(p.id)}" data-m="${escA(m.id)}" aria-pressed="${on}" aria-label="${escA(p.nombre)} · ${escA(m.titulo || m.id)}">${on ? "✓" : "—"}</button></td>`; }).join("")}</tr>`).join("")}</tbody></table></div>`;
+    return `${estilosCq()}<div class="pf-wrap">
+      <div class="card p-4">
+        <div class="us-cab"><div><div class="font-extrabold" style="color:var(--brand-dark);letter-spacing:.02em">PERFILES</div>
+          <div class="text-xs" style="color:var(--ink-soft)">${d.perfiles.length} perfiles · ${d.perfiles.filter(p => p.activo).length} activos</div></div>
+          <button id="pfNuevo" class="btn-primary" style="width:auto;padding:10px 16px;white-space:nowrap">＋ Nuevo perfil</button></div>
+        ${d.perfiles.map(tarjeta).join("")}
+        <div class="text-xs mt-2" style="color:var(--ink-soft)">Un perfil desactivado deja a sus usuarios sin poder entrar a la app. Los perfiles del sistema no se eliminan.</div>
+      </div>
+      <div class="card p-4">
+        <div class="us-cab" style="margin-bottom:6px"><div class="min-w-0"><div class="font-extrabold" style="color:var(--brand-dark);letter-spacing:.02em">${state.pfMatriz ? "TODOS LOS PERFILES" : "ACCESOS DE «" + escA(sel.nombre.toUpperCase()) + "»"}</div>
+          <div class="text-xs" style="color:var(--ink-soft)">${state.pfMatriz ? "Toca una casilla para dar o quitar el acceso." : escA(PF_BASE_AYUDA[sel.base])}</div></div>
+          <div class="us-acciones">
+            ${state.pfMatriz ? "" : `<button class="btn-ghost pfTodos" data-v="1" style="width:auto;padding:8px 12px">Activar todos</button><button class="btn-ghost pfTodos" data-v="0" style="width:auto;padding:8px 12px">Desactivar todos</button>`}
+            <button id="pfVista" class="btn-ghost" style="width:auto;padding:8px 12px">${state.pfMatriz ? "Ver por perfil" : "▦ Vista matriz"}</button></div></div>
+        ${state.pfMatriz ? matriz() : accesos()}
+        <div id="pfMsg" class="text-xs mt-3" style="color:var(--ink-soft)">Los cambios se guardan al instante y llegan a los celulares la próxima vez que abran la app con internet.</div>
+      </div>
+    </div>
+    <style>
+      .pf-wrap{display:grid;gap:16px;max-width:1200px}@media (min-width:900px){.pf-wrap{grid-template-columns:400px minmax(0,1fr);align-items:start}}
+      .pf-card{display:flex;gap:8px;align-items:flex-start;border:1.5px solid var(--line);border-radius:14px;padding:10px 10px 10px 12px;margin-bottom:8px;background:#fff}
+      .pf-card.on{border-color:#03204C;box-shadow:0 0 0 2px rgba(3,32,76,.08)}.pf-card.off{background:#F8FAFC}.pf-card.off .pf-nom{color:#64748B}
+      .pf-sel{flex:1;min-width:0;text-align:left;background:none;border:0;padding:0}.pf-nom{font-size:15px}
+      .pf-des{font-size:12px;color:var(--ink-soft);margin-top:3px}.pf-meta{font-size:12px;color:#475569;margin-top:6px;font-weight:600}
+      .pf-sis{font-size:11px;font-weight:700;border-radius:6px;padding:2px 8px;background:#EEF1F4;color:#475569}.pf-sis.rojo{background:#FDE8E7;color:#B42318}
+      .pf-acc{display:flex;align-items:center;gap:2px;flex:none}
+      .pf-pow{width:34px;height:34px;border-radius:50%;border:1.5px solid #CBD5E1;background:#F1F5F9;color:#94A3B8;font-size:16px;font-weight:800}
+      .pf-pow.si{background:#E7F7EE;border-color:#A7DDBE;color:#12613B}.pf-pow:disabled{opacity:.45}
+      .pf-mod{display:flex;align-items:center;gap:10px;border:1px solid #E6EBF1;border-radius:12px;padding:10px 12px;margin-bottom:6px}
+      .pf-mod.no{background:#F8FAFC}.pf-mod.no b{color:#64748B}
+      .pf-est{font-size:11px;font-weight:700;color:var(--ink-soft);white-space:nowrap}.pf-mod:not(.no) .pf-est{color:#12613B}
+      .pf-mtz-w{overflow:auto;border:1px solid var(--line);border-radius:12px}
+      .pf-mtz{border-collapse:collapse;font-size:13px;width:100%}.pf-mtz th{background:#F6F8FB;font-size:12px;padding:8px;white-space:nowrap;text-align:center}.pf-mtz th:first-child,.pf-mtz td:first-child{text-align:left;position:sticky;left:0;background:#fff}
+      .pf-mtz th:first-child{background:#F6F8FB}.pf-mtz th.off{color:#94A3B8}.pf-mtz td{border-top:1px solid var(--line);padding:6px 8px;text-align:center}
+      .pf-cel{width:34px;height:30px;border-radius:8px;border:1.5px solid var(--line);background:#fff;color:#94A3B8;font-weight:800}.pf-cel.si{background:#E7F7EE;border-color:#A7DDBE;color:#12613B}
+    </style>`;
+  }
+  function activarAdminPerfiles(app) {
+    const d = state.pf; if (!d || d.error) return;
+    const repintar = () => { const y = window.scrollY; renderAdmin(); window.scrollTo(0, y); };
+    const llamar = async (tipo, datos, ok) => {
+      try { aplicarPf(await rdApi(tipo, datos)); repintar(); if (ok) toast(ok); return true; }
+      catch (e) { const m = document.getElementById("pfMsg"); if (m) { m.textContent = msgError(e); m.style.color = "var(--danger)"; } toast(msgError(e), true); return false; }
+    };
+    const pf = id => d.perfiles.find(p => p.id === id);
+    app.querySelectorAll(".pfSel").forEach(b => b.onclick = () => { state.pfSel = b.dataset.id; state.pfMatriz = false; repintar(); });
+    app.querySelectorAll(".pfPow").forEach(b => b.onclick = () => {
+      const p = pf(b.dataset.id);
+      if (p.activo && p.usuarios && !confirm("¿Desactivar el perfil «" + p.nombre + "»?\nSus " + p.usuarios + " usuario(s) no podrán entrar a la app mientras esté desactivado.")) return;
+      b.disabled = true; llamar("pf_estado", { id: p.id, activo: !p.activo }, (p.activo ? "Perfil desactivado: " : "Perfil activado: ") + p.nombre);
+    });
+    app.querySelectorAll(".pfDel").forEach(b => b.onclick = () => {
+      const p = pf(b.dataset.id);
+      if (p.usuarios) { toast("Hay " + p.usuarios + " usuario(s) con este perfil: cámbiales el perfil en «Gestión de usuarios» antes de eliminarlo", true); return; }
+      if (!confirm("¿Eliminar el perfil «" + p.nombre + "»?")) return;
+      llamar("pf_eliminar", { id: p.id }, "Perfil eliminado");
+    });
+    app.querySelectorAll(".pfEd").forEach(b => b.onclick = () => formPerfil(pf(b.dataset.id)));
+    document.getElementById("pfNuevo").onclick = () => formPerfil(null);
+    document.getElementById("pfVista").onclick = () => { state.pfMatriz = !state.pfMatriz; repintar(); };
+    app.querySelectorAll(".pfMod").forEach(b => b.onclick = () => { const on = b.getAttribute("aria-checked") === "true"; b.disabled = true; llamar("pf_acceso", { id: state.pfSel, modulos: [b.dataset.m], permitido: !on }); });
+    app.querySelectorAll(".pfCel").forEach(b => b.onclick = () => { const on = b.getAttribute("aria-pressed") === "true"; b.disabled = true; llamar("pf_acceso", { id: b.dataset.p, modulos: [b.dataset.m], permitido: !on }); });
+    app.querySelectorAll(".pfTodos").forEach(b => b.onclick = () => {
+      const si = b.dataset.v === "1", ids = d.modulos.filter(m => MODULOS_APP[m.id]).map(m => m.id);
+      if (!si && state.pfSel === perfilDe(state.operario) && !confirm("Vas a quitar todos los módulos a tu propio perfil. ¿Seguir?")) return;
+      llamar("pf_acceso", { id: state.pfSel, modulos: ids, permitido: si }, si ? "Acceso a todos los módulos ✅" : "Sin acceso a los módulos");
+    });
+    function formPerfil(p) {
+      const n = !p, x = p || { nombre: "", descripcion: "", base: "OPERARIO" };
+      const el = modalCq(`<div class="cq-mcab"><b>🛡️ ${n ? "Nuevo perfil" : "Editar perfil"}</b><button class="cq-x oscuro cqCerrar" aria-label="Cerrar">✕</button></div>
+        <div class="p-5 cq-form">
+          <label class="cq-lbl" for="pfNo">Nombre del perfil *</label><input id="pfNo" class="input mb-3" maxlength="60" value="${escA(x.nombre)}" autocomplete="off" placeholder="Ej.: Jefe de grupo">
+          <label class="cq-lbl" for="pfDe">Descripción</label><input id="pfDe" class="input mb-3" maxlength="200" value="${escA(x.descripcion || "")}" autocomplete="off" placeholder="Qué hace este perfil">
+          <label class="cq-lbl" for="pfBa">Se comporta como *</label>
+          <select id="pfBa" class="input" ${x.sistema ? "disabled" : ""}>${["OPERARIO", "SUPERVISOR", "ADMINISTRADOR"].map(r => `<option value="${r}" ${x.base === r ? "selected" : ""}>${PF_BASE_TXT[r]}</option>`).join("")}</select>
+          <div id="pfAy" class="text-xs mt-2" style="color:var(--ink-soft)">${escA(PF_BASE_AYUDA[x.base])}${n ? " Empieza con los mismos módulos que ese perfil; luego puedes cambiarlos." : ""}</div>
+          ${x.sistema ? `<div class="text-xs mt-1" style="color:#B45309">Es un perfil del sistema: su comportamiento no cambia.</div>` : ""}
+          <div id="pfErr" class="rd-err mt-2"></div>
+          <div class="flex gap-2 justify-end mt-3"><button class="btn-ghost cqCerrar2" style="width:auto;padding:10px 16px">Cancelar</button><button id="pfGu" class="btn-primary" style="width:auto;padding:10px 18px">💾 ${n ? "Crear perfil" : "Guardar cambios"}</button></div>
+        </div>`);
+      el.querySelector(".cqCerrar2").onclick = cerrarModalCq;
+      const ba = el.querySelector("#pfBa");
+      ba.onchange = () => { el.querySelector("#pfAy").textContent = PF_BASE_AYUDA[ba.value] + (n ? " Empieza con los mismos módulos que ese perfil; luego puedes cambiarlos." : ""); };
+      el.querySelector("#pfGu").onclick = async e => {
+        const nombre = el.querySelector("#pfNo").value.trim(), err = el.querySelector("#pfErr"), b = e.currentTarget;
+        if (!nombre) { err.textContent = "Escribe el nombre del perfil"; return; }
+        b.disabled = true; b.textContent = "Guardando…";
+        try {
+          const r = await rdApi("pf_guardar", { perfil: { id: p ? p.id : "", nombre, descripcion: el.querySelector("#pfDe").value.trim(), base: ba.value } });
+          aplicarPf(r); cerrarModalCq();
+          if (n) { const nuevo = r.perfiles.find(q => q.nombre.toLowerCase() === nombre.toLowerCase()); if (nuevo) state.pfSel = nuevo.id; }
+          toast(n ? "Perfil creado ✅ Ahora elige sus módulos" : "Perfil guardado ✅"); repintar();
+        } catch (x2) { b.disabled = false; b.textContent = "💾 " + (n ? "Crear perfil" : "Guardar cambios"); err.textContent = msgError(x2); }
+      };
+      el.querySelector("#pfNo").focus();
     }
   }
 
@@ -5290,6 +5752,10 @@
         : d.error ? `<div class="card p-4 text-sm" style="color:var(--danger)">${escA(d.error)}</div>`
         : `<div class="cq-grid ${verDetalle ? "solo-det" : ""}">
           <aside class="cq-lista">
+            <div class="cq-contr"><div class="min-w-0 cq-contr-d">
+                <div><div class="cq-contr-t">CONSORCIO</div><b>${escA(d.consorcio || "Sin definir")}</b><div class="cq-contr-s">Sale en «CONTRATISTA:» de la GPFO0416</div></div>
+                <div><div class="cq-contr-t">EMPRESA</div><b>${escA(d.empresa || "Sin definir")}</b><div class="cq-contr-s">La misma para todas las cuadrillas</div></div></div>
+              ${d.puedeEditar ? `<button class="cq-ver cqContr" aria-label="Cambiar consorcio y empresa">✏️ Cambiar</button>` : ""}</div>
             <div class="cq-lista-cab"><b>UNIDADES OPERATIVAS (${vis.length})</b>
               <div class="cq-filtros">${[["TODAS", "Todas"], ["LABORATORIO", "Labs"], ["CAMIONETA", "4x4"]].map(([k, t]) => `<button class="cqFil" data-k="${k}" aria-pressed="${filtro === k}">${t}</button>`).join("")}</div></div>
             ${d.puedeEditar ? `<button class="btn-ghost w-full mb-3 cqNueva">＋ Nueva unidad</button>` : ""}
@@ -5307,6 +5773,31 @@
     const h = app.querySelector(".cq-hist"); if (h) h.ontoggle = () => { state.cqHistAb = h.open; };
     if (!d || !d.cuadrillas) return;
     const nu = app.querySelector(".cqNueva"); if (nu) nu.onclick = () => formUnidadCq(null);
+    const ct = app.querySelector(".cqContr"); if (ct) ct.onclick = () => {
+      const el = modalCq(`<div class="cq-mcab"><b>🏢 Contratista</b><button class="cq-x oscuro cqCerrar" aria-label="Cerrar">✕</button></div>
+        <div class="p-5 cq-form">
+          <label class="cq-lbl" for="cqCtNo">Consorcio *</label>
+          <input id="cqCtNo" class="input" maxlength="80" value="${escA(d.consorcio || "")}" autocomplete="off" placeholder="Ej.: Consorcio Tegal">
+          <div class="text-xs mt-1 mb-3" style="color:var(--ink-soft)">Sale en el encabezado «CONTRATISTA:» del PDF de la GPFO0416 (verificación por muestreo).</div>
+          <label class="cq-lbl" for="cqCtEm">Empresa *</label>
+          <input id="cqCtEm" class="input" maxlength="80" value="${escA(d.empresa || "")}" list="cqCtLista" autocomplete="off" placeholder="Ej.: AGAL">
+          <datalist id="cqCtLista">${(d.empresas || []).map(e => `<option value="${escA(e)}">`).join("")}</datalist>
+          <div class="text-xs mt-1" style="color:var(--ink-soft)">Se aplica a todos los laboratorios. No sale en los formularios.</div>
+          <div class="text-xs mt-2" style="color:var(--ink-soft)">Los PDF que ya se generaron no cambian; vuelve a generarlos si lo necesitas.</div>
+          <div id="cqCtErr" class="rd-err mt-2"></div>
+          <div class="flex gap-2 justify-end mt-3"><button class="btn-ghost cqCerrar2" style="width:auto;padding:10px 16px">Cancelar</button><button id="cqCtGu" class="btn-primary" style="width:auto;padding:10px 18px">💾 Guardar</button></div>
+        </div>`);
+      el.querySelector(".cqCerrar2").onclick = cerrarModalCq;
+      el.querySelector("#cqCtGu").onclick = async e => {
+        const co = el.querySelector("#cqCtNo").value.trim(), em = el.querySelector("#cqCtEm").value.trim(), b = e.currentTarget, err = el.querySelector("#cqCtErr");
+        if (!co) { err.textContent = "Escribe el nombre del consorcio"; return; }
+        if (!em) { err.textContent = "Escribe el nombre de la empresa"; return; }
+        b.disabled = true; b.textContent = "Guardando…";
+        try { state.cq = await rdApi("cq_contratista", { consorcio: co, empresa: em }); cerrarModalCq(); toast("Guardado ✅ Consorcio: " + co + " · Empresa: " + em); renderCuadrillas(); }
+        catch (x) { b.disabled = false; b.textContent = "💾 Guardar"; err.textContent = msgError(x); }
+      };
+      el.querySelector("#cqCtNo").focus();
+    };
     const ed = app.querySelector(".cqEditar"); if (ed) ed.onclick = () => formUnidadCq(sel);
     const np = app.querySelector(".cqNuevaPer"); if (np) np.onclick = () => formPersonaCq(null, sel);
   }
@@ -5419,6 +5910,9 @@
     return `<style>
       .cq-grid{display:grid;grid-template-columns:320px minmax(0,1fr);gap:18px;align-items:start}
       @media (max-width:899px){.cq-grid{grid-template-columns:minmax(0,1fr)}.cq-grid .cq-detcol{display:none}.cq-grid.solo-det .cq-lista{display:none}.cq-grid.solo-det .cq-detcol{display:block}}
+      .cq-contr{display:flex;align-items:center;justify-content:space-between;gap:10px;background:#03204C;color:#fff;border-radius:14px;padding:12px 14px;margin-bottom:12px}
+      .cq-contr-d{display:grid;gap:8px}.cq-contr b{font-size:16px}.cq-contr-t{font-size:10px;font-weight:800;letter-spacing:.06em;color:#8FD3F0}.cq-contr-s{font-size:11px;color:#C9D8EA}
+      .cq-contr .cq-ver{background:#fff;color:#03204C;white-space:nowrap}
       .cq-lista-cab{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:10px;font-size:13px;color:var(--brand-dark)}
       .cq-filtros{display:flex;gap:4px;background:#EEF2F6;border-radius:10px;padding:3px}.cq-filtros button{border:0;background:none;font-size:12px;font-weight:700;padding:5px 9px;border-radius:8px;color:#5B6B7F}
       .cq-filtros button[aria-pressed="true"]{background:#fff;color:#0F1B2D;box-shadow:0 1px 3px rgba(0,0,0,.12)}
@@ -5489,9 +5983,12 @@
     if (!ccMismoMinuto(registro, revision)) return null;
     const f = ccFecha(registro); return f ? Math.max(0, (Date.now() - f.getTime()) / 3.6e6) : null;
   }
+  // La asignación de laboratorio vale solo el día en que se hizo (también si la app quedó abierta pasada la medianoche)
+  const asignadoHoy = f => { if (!f.asignado) return false; const d = new Date(), h = String(d.getDate()).padStart(2, "0") + "/" + String(d.getMonth() + 1).padStart(2, "0") + "/" + d.getFullYear();
+    if (String(f.asignado.en || "").slice(0, 10) === h) return true; f.asignado = null; return false; };
   function claseCC(f) {
     if (f.tipo !== "pendiente") return "atendida";
-    if (f.asignado) return "asignada";
+    if (asignadoHoy(f)) return "asignada";
     const h = horasSinAtencion(f.registro, f.revision);
     return h != null && h >= 24 ? "vencida" : "pendiente";
   }
@@ -5624,7 +6121,7 @@
     try { await cargarLeaflet(); } catch (e) { const m = document.getElementById("ccMapa"); if (m) m.innerHTML = `<div class="gis-sinmapa">No se pudo cargar el mapa. Revisa tu internet.</div>`; return; }
     if (turno !== turnoMapa || !document.getElementById("ccMapa")) return;
     if (ccL) { ccL.remove(); ccL = null; }
-    ccL = L.map("ccMapa", { zoomControl: true, maxZoom: 20 }); capaBase(ccL);
+    ccL = L.map("ccMapa", opcionesGiro("ccGiro", { zoomControl: true, maxZoom: 20 })); capaBase(ccL);
     // botón GPS debajo del + y −: actualiza «Aquí estás» sin acercar el mapa
     const Gps = L.Control.extend({ options: { position: "topleft" }, onAdd() {
       const d = L.DomUtil.create("div", "leaflet-bar leaflet-control");
@@ -5633,6 +6130,7 @@
       d.firstChild.onclick = e => { e.preventDefault(); ccUbicarme(true); };
       return d; } });
     new Gps().addTo(ccL);
+    agregarBrujula(ccL, "ccGiro");
     ccCapa = L.layerGroup().addTo(ccL); ccYoM = null;
     ccL.setView([-12.06, -77.04], 11);
     pintarMarcasCC(false);
@@ -6184,7 +6682,7 @@
   }
 
   function estilosGis() {
-    return `<style>
+    return `<style>.brujula-btn{display:flex!important;align-items:center;justify-content:center;width:34px!important;height:34px!important}.brujula-aguja{transition:transform .15s}.brujula.girado .brujula-btn{background:#EAF2FF}
       .gis-wrap{max-width:1240px;margin:0 auto;width:100%}
       .gis-split{display:grid;gap:14px}
       .gis-mapa{height:58vh;min-height:320px;border-radius:16px;overflow:hidden;border:1px solid var(--line);background:#dfe7ee;order:-1}
@@ -6358,15 +6856,17 @@
 
   /* ---------------- Generar PDF (cada operario el suyo; el supervisor, el de cualquiera) ---------------- */
   const MESES_APP = ["enero","febrero","marzo","abril","mayo","junio","julio","agosto","setiembre","octubre","noviembre","diciembre"];
+  // «Generar mis formularios»: el operario elige el mes y la app arma los 3 formularios (GPFO0381 en 1 hoja, GPFO0405 hasta 60,
+  // GPFO0416 hasta 44 en 2 hojas) y los envía a su correo en un solo mensaje. Los formularios sin registros no se envían.
   function abrirPanelPdf() {
-    const hoy = new Date();
-    const meses = [];
+    const hoy = new Date(), meses = [];
     for (let i = 0; i < 6; i++) {
       const d = new Date(hoy.getFullYear(), hoy.getMonth() - i, 1);
       meses.push({ v: d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0"), t: MESES_APP[d.getMonth()] + " " + d.getFullYear() });
     }
-    const p = state.pdf = state.pdf || { form: "GPFO0381", mes: meses[0].v, quincena: hoy.getDate() <= 15 ? 1 : 2, para: state.operario };
-    if (!esSupervisor()) p.para = state.operario;
+    const p = state.pdf = state.pdf || { mes: meses[0].v };
+    p.para = state.operario;
+    if (!meses.some(m => m.v === p.mes)) p.mes = meses[0].v;
     let el = document.getElementById("panelPdf");
     if (!el) {
       el = document.createElement("div"); el.id = "panelPdf";
@@ -6374,76 +6874,51 @@
       document.body.appendChild(el);
       el.addEventListener("click", e => { if (e.target === el) cerrarPanelPdf(); });
     }
-    const chip = (grupo, v, t, activo) => `<button data-${grupo}="${v}" style="min-height:46px;border-radius:12px;font-weight:700;font-size:15px;border:${activo ? "2px solid var(--brand-dark);background:var(--brand-dark);color:#fff" : "1.5px solid #CFD8E3;background:#fff;color:var(--ink)"}">${t}</button>`;
-    const nombres = OPERARIOS.map(o => o.name);   // el supervisor puede generar el suyo o el de cualquier operario
     el.innerHTML = `
       <div style="background:#F2F5F8;width:100%;max-width:520px;border-radius:20px 20px 0 0;padding:18px 16px calc(18px + env(safe-area-inset-bottom,0px));max-height:92vh;overflow:auto">
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
-          <b style="font-size:20px;color:var(--brand-dark)">Generar PDF</b>
+          <b style="font-size:20px;color:var(--brand-dark)">Generar mis formularios</b>
           <button id="pdfCerrar" aria-label="Cerrar" style="font-size:24px;line-height:1;background:none;border:0;color:var(--ink-soft);width:40px;height:40px">✕</button>
         </div>
-        <label class="text-sm font-semibold block mb-1" style="color:var(--ink-soft)">Operario</label>
-        ${esSupervisor()
-          ? `<select id="pdfPara" class="w-full mb-3" style="height:50px;border:1.5px solid #CFD8E3;border-radius:12px;background:#fff;padding:0 12px;font-size:16px;font-weight:600">
-               ${nombres.map(n => `<option ${n === p.para ? "selected" : ""}>${escA(n)}</option>`).join("")}</select>`
-          : `<div class="mb-3" style="height:50px;display:flex;align-items:center;border-radius:12px;background:#fff;border:1.5px solid #CFD8E3;padding:0 12px;font-size:16px;font-weight:600">${escA(state.operario)}</div>`}
-        <label class="text-sm font-semibold block mb-1" style="color:var(--ink-soft)">Formulario</label>
-        <div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px" class="mb-3">
-          ${chip("f", "GPFO0381", "0381<br><small style='font-weight:500'>Presiones</small>", p.form === "GPFO0381")}
-          ${chip("f", "GPFO0405", "0405<br><small style='font-weight:500'>Reparación</small>", p.form === "GPFO0405")}
-          ${chip("f", "GPFO0416", "0416<br><small style='font-weight:500'>Muestreo</small>", p.form === "GPFO0416")}
-        </div>
-        <label class="text-sm font-semibold block mb-1" style="color:var(--ink-soft)">Mes</label>
+        <div class="mb-3" style="min-height:50px;display:flex;align-items:center;border-radius:12px;background:#fff;border:1.5px solid #CFD8E3;padding:0 12px;font-size:16px;font-weight:600">${escA(state.operario)}</div>
+        <label for="pdfMes" class="text-sm font-semibold block mb-1" style="color:var(--ink-soft)">Mes de los formularios</label>
         <select id="pdfMes" class="w-full mb-3" style="height:50px;border:1.5px solid #CFD8E3;border-radius:12px;background:#fff;padding:0 12px;font-size:16px;font-weight:600">
           ${meses.map(m => `<option value="${m.v}" ${m.v === p.mes ? "selected" : ""}>${m.t}</option>`).join("")}
         </select>
-        ${p.form === "GPFO0416" ? `
-          <label class="text-sm font-semibold block mb-1" style="color:var(--ink-soft)">Quincena</label>
-          <div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px" class="mb-3">
-            ${chip("q", 1, "1ra · del 1 al 15", p.quincena === 1)}
-            ${chip("q", 2, "2da · del 16 al fin", p.quincena === 2)}
-          </div>` : ""}
+        <div class="text-xs mb-3" style="color:var(--ink-soft);line-height:1.5">Se arman y se envían a tu correo, en un solo mensaje:<br>
+          • <b>GPFO0381</b> Toma de presiones · en 1 hoja<br>• <b>GPFO0405</b> Verificación de reparación · hasta 60 (los de mayor caudal)<br>
+          • <b>GPFO0416</b> Verificación por muestreo · todo el mes, hasta 44 (los de mayor caudal SEDAPAL)<br>El que no tenga registros ese mes no se envía.</div>
         <div id="pdfEstado" class="text-sm mb-3" style="color:var(--ink-soft)"></div>
-        <button id="pdfGenerar" class="btn-primary w-full">Generar PDF</button>
+        <button id="pdfGenerar" class="btn-primary w-full">Generar mis formularios</button>
       </div>`;
     el.querySelector("#pdfCerrar").onclick = cerrarPanelPdf;
-    el.querySelectorAll("[data-f]").forEach(b => b.onclick = () => { p.form = b.dataset.f; abrirPanelPdf(); });
-    el.querySelectorAll("[data-q]").forEach(b => b.onclick = () => { p.quincena = Number(b.dataset.q); abrirPanelPdf(); });
-    el.querySelector("#pdfMes").onchange = e => { p.mes = e.target.value; };
-    const sel = el.querySelector("#pdfPara"); if (sel) sel.onchange = e => { p.para = e.target.value; };
-    el.querySelector("#pdfGenerar").onclick = generarPdf;
+    el.querySelector("#pdfMes").onchange = e => { p.mes = e.target.value; el.querySelector("#pdfEstado").innerHTML = ""; };
+    el.querySelector("#pdfGenerar").onclick = generarFormularios;
   }
   function cerrarPanelPdf() { const el = document.getElementById("panelPdf"); if (el) el.remove(); }
-
-  async function generarPdf() {
+  async function generarFormularios() {
     const p = state.pdf, est = document.getElementById("pdfEstado"), btn = document.getElementById("pdfGenerar");
     const aviso = (t, color) => { est.style.color = color || "var(--ink-soft)"; est.innerHTML = t; };
-    if (!apiListo() || !enLinea()) { aviso("Necesitas internet para generar el PDF.", "#8E2019"); return; }
+    if (!apiListo() || !enLinea()) { aviso("Necesitas internet para generar tus formularios.", "#8E2019"); return; }
     btn.disabled = true; btn.textContent = "Generando…";
     try {
-      if (p.para === state.operario && await porSubir()) {          // primero se suben los registros pendientes del celular
-        aviso("Subiendo tus registros pendientes…");
-        await sincronizar();
-      }
-      const quedan = p.para === state.operario ? await porSubir() : 0;
-      aviso("Armando el PDF, espera unos segundos…");
-      const r = await apiPost({ tipo: "pdf", para: p.para, form: p.form, mes: p.mes, quincena: p.quincena });
+      if (await porSubir()) { aviso("Subiendo tus registros pendientes…"); await sincronizar(); }
+      const quedan = await porSubir();
+      aviso("Armando tus formularios, puede tardar hasta un minuto…");
+      const r = await apiPost({ tipo: "pdf_mes_correo", para: state.operario, mes: p.mes });
       aviso(`<div style="background:#DDF3E7;color:#12613B;border-radius:12px;padding:12px">
-          <b>Listo:</b> ${r.n} registro(s) · ${escA(r.periodo)}<br><span style="font-size:12px;word-break:break-all">${escA(r.nombre)}</span>
-          ${quedan ? `<br><span style="color:#6B4A00">Ojo: ${quedan} registro(s) aún no se subieron y no salen en el PDF.</span>` : ""}
+          <b>${r.enviado ? "Enviado ✅ a " + escA(r.correo) : "Formularios listos ✅"}</b>
+          ${r.enviado ? "" : `<div style="color:#6B4A00;margin-top:4px">No tienes correo registrado: pide a un administrador que lo agregue en «Gestión de usuarios». Mientras, descárgalos aquí.</div>`}
+          <div style="font-size:13px;margin-top:6px">${(r.resumen || []).map(escA).join("<br>")}</div>
+          ${quedan ? `<div style="color:#6B4A00;margin-top:4px">Ojo: ${quedan} registro(s) aún no se subieron y no salen en los formularios.</div>` : ""}
         </div>
-        <div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin-top:10px">
-          <a href="${r.url}" target="_blank" rel="noopener" class="btn-ghost" style="display:flex;align-items:center;justify-content:center;text-decoration:none">Ver PDF</a>
-          <a href="${r.descarga}" target="_blank" rel="noopener" class="btn-primary" style="display:flex;align-items:center;justify-content:center;text-decoration:none">Descargar</a>
-        </div>`);
+        <div style="display:grid;gap:6px;margin-top:10px">${(r.archivos || []).map(a => `<div style="display:flex;align-items:center;gap:8px;background:#fff;border:1px solid #CFD8E3;border-radius:12px;padding:8px 10px">
+          <b style="flex:1;font-size:13px">${escA(a.form)} <span style="font-weight:500;color:var(--ink-soft)">· ${a.n} reg.</span></b>
+          <a href="${a.url}" target="_blank" rel="noopener" style="font-weight:700;color:var(--brand);font-size:13px">Ver</a>
+          <a href="${a.descarga}" target="_blank" rel="noopener" style="font-weight:700;color:var(--brand);font-size:13px">Descargar</a></div>`).join("")}</div>`);
     } catch (e) {
-      const msg = e && e.code === "sin_registros" ? e.message
-        : e && e.code === "permiso" ? e.message
-        : "No se pudo generar el PDF. Revisa tu internet e inténtalo otra vez.";
-      aviso(escA(msg || ""), "#8E2019");
-    } finally {
-      btn.disabled = false; btn.textContent = "Generar PDF";
-    }
+      aviso(escA(e && (e.code === "sin_registros" || e.code === "permiso") ? e.message : "No se pudo generar. Revisa tu internet e inténtalo otra vez."), "#8E2019");
+    } finally { btn.disabled = false; btn.textContent = "Generar mis formularios"; }
   }
 
   /* ---------------- App instalable / actualizaciones ---------------- */
@@ -6472,6 +6947,10 @@
 
   /* ---------------- Init ---------------- */
   render(); // paint immediately (login or shell), capabilities resolve async
+  if (/[?&]alertas=1/.test(location.search)) {          // se abrió desde una notificación: muestra las alertas
+    try { history.replaceState(null, "", location.pathname); } catch (e) {}
+    setTimeout(() => { if (puedeAlertas()) { revisarAlertas(); abrirAlertas(); } }, 2500);
+  }
   mostrarIntro();
   initCapabilities();
 })();
