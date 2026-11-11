@@ -4179,46 +4179,51 @@
 
   // Avisa al servidor para que la PC del SGIO actualice ahora (una vez por «sesión de app»). No espera respuesta.
   function pedirActualizarSgio() {
-    try { rdApi("sgio_pedir", { sesionApp: state.sesionApp }).catch(() => {}); } catch (e) {}
-    try { avisoSgio("⏳ Actualizando datos del SGIO… (puede tardar ~1 min)"); } catch (e) {}
+    try { rdApi("sgio_pedir", { sesionApp: state.sesionApp, forzar: true }).catch(() => {}); } catch (e) {}
+    try { avisoSgio("⏳ Actualizando SGIO…", true); } catch (e) {}   // fijo: se queda hasta que el script termine
     try { vigilarSgio(); } catch (e) {}
   }
 
-  // Avisito flotante (para confirmar que el SGIO se actualizó solo)
-  function avisoSgio(txt) {
+  // Avisito flotante. persistente=true -> se queda fijo hasta que lo oculten (mientras corre el script).
+  function avisoSgio(txt, persistente) {
     try {
       let t = document.getElementById("avisoSgio");
       if (!t) {
         t = document.createElement("div"); t.id = "avisoSgio";
-        t.style.cssText = "position:fixed;left:50%;bottom:84px;transform:translateX(-50%);z-index:9999;background:#03204C;color:#fff;padding:10px 16px;border-radius:12px;font-weight:700;font-size:13px;box-shadow:0 6px 20px rgba(0,0,0,.3);max-width:90vw;text-align:center";
+        t.style.cssText = "position:fixed;left:50%;bottom:84px;transform:translateX(-50%);z-index:9999;background:#03204C;color:#fff;padding:8px 14px;border-radius:20px;font-weight:700;font-size:12.5px;box-shadow:0 6px 20px rgba(0,0,0,.3);max-width:90vw;text-align:center";
         document.body.appendChild(t);
       }
       t.textContent = txt; t.style.display = "block";
-      clearTimeout(t._tmr); t._tmr = setTimeout(() => { t.style.display = "none"; }, 4000);
+      clearTimeout(t._tmr);
+      if (!persistente) t._tmr = setTimeout(() => { t.style.display = "none"; }, 4000);
     } catch (e) {}
   }
+  function ocultarAvisoSgio() {
+    try { const t = document.getElementById("avisoSgio"); if (t) { clearTimeout(t._tmr); t.style.display = "none"; } } catch (e) {}
+  }
 
-  // Recarga la vista actual (Centro de Control o Incidencias) sin que el usuario toque «Actualizar»
+  // Recarga la vista actual (Centro de Control o Incidencias) con los datos nuevos del SGIO
   function recargarVistaSgio() {
     if (state.vista === "CENTRO_CONTROL") { cargarCentroControl(true); avisoSgio("Datos del SGIO actualizados ✓"); }
     else if (state.vista === "SGIO" && state.sgR && state.sgR.filas) { buscarSgioRango(); avisoSgio("Datos del SGIO actualizados ✓"); }
+    else ocultarAvisoSgio();
   }
 
-  // Tras entrar a Control/Incidencias: vigila ~95 s y, apenas la PC suba datos nuevos, refresca la vista sola.
-  // Si el dato ya estaba fresco (no hubo nueva subida), no hace nada: se apaga callado.
+  // Tras pulsar Actualizar/Buscar: vigila hasta ~2.5 min y, apenas la PC suba datos nuevos, refresca la vista sola.
+  // Mantiene el aviso «Actualizando SGIO…» fijo hasta que termine (o hasta agotar el tiempo).
   let sgioVigTimer = null;
   async function vigilarSgio() {
     clearInterval(sgioVigTimer);
     let base = 0;
     try { const m = await rdApi("sgio_marca"); base = Number(m.ms) || 0; } catch (e) {}
-    const hasta = Date.now() + 95000;
+    const hasta = Date.now() + 150000;
     sgioVigTimer = setInterval(async () => {
-      if (Date.now() > hasta || (state.vista !== "CENTRO_CONTROL" && state.vista !== "SGIO")) { clearInterval(sgioVigTimer); return; }
+      if (Date.now() > hasta || (state.vista !== "CENTRO_CONTROL" && state.vista !== "SGIO")) { clearInterval(sgioVigTimer); ocultarAvisoSgio(); return; }
       try {
         const m = await rdApi("sgio_marca");
         if (Number(m.ms) > base) { clearInterval(sgioVigTimer); recargarVistaSgio(); }
       } catch (e) {}
-    }, 5000);
+    }, 4000);
   }
 
   // Abre cualquier módulo desde la barra lateral o el menú de inicio
