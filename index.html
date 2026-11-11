@@ -4180,6 +4180,7 @@
   // Avisa al servidor para que la PC del SGIO actualice ahora (una vez por «sesión de app»). No espera respuesta.
   function pedirActualizarSgio() {
     try { rdApi("sgio_pedir", { sesionApp: state.sesionApp }).catch(() => {}); } catch (e) {}
+    try { avisoSgio("⏳ Actualizando datos del SGIO… (puede tardar ~1 min)"); } catch (e) {}
     try { vigilarSgio(); } catch (e) {}
   }
 
@@ -4236,7 +4237,7 @@
     } else if (["PLANO_GIS", "PLANIFICADOR_RUTAS", "LABORATORIO_ECRF", "SGIO", "CENTRO_CONTROL", "CUADRILLAS", "SUPERVISION"].includes(id)) {
       state.vista = id; state.labTab = "vehiculo";
       if (id === "CENTRO_CONTROL") { state.ccDatos = null; state.ccEncuadrado = false; }
-      if (id === "SGIO" || id === "CENTRO_CONTROL") pedirActualizarSgio();   // al entrar, pide que la PC actualice el SGIO
+      // La actualización del SGIO NO se dispara al entrar: solo al pulsar «Actualizar» (Centro de Control) o «Buscar» (Incidencias).
       if (id === "CUADRILLAS") { state.cq = null; state.cqVerDetalle = false; }   // al entrar, siempre lo último   // al entrar, siempre lo último del SGIO
       if (id === "PLANO_GIS") { state.rgRadio = state.rgRadio || RG_RADIO_DEF; state.rgDatos = null; state.rgAuto = true; }   // al entrar: el plano alrededor de donde estás
     }
@@ -5395,7 +5396,7 @@
     document.getElementById("gisVolver").onclick = () => salirVistaGis();
     const fd = document.getElementById("sgDesde"), fh = document.getElementById("sgHasta");
     fd.onchange = () => { state.sgDesde = fd.value; }; fh.onchange = () => { state.sgHasta = fh.value; };
-    document.getElementById("sgRForm").onsubmit = ev => { ev.preventDefault(); state.sgDesde = fd.value; state.sgHasta = fh.value; buscarSgioRango(); };
+    document.getElementById("sgRForm").onsubmit = ev => { ev.preventDefault(); state.sgDesde = fd.value; state.sgHasta = fh.value; pedirActualizarSgio(); buscarSgioRango(); };   // «Buscar»: recién aquí corre el script del SGIO
     const fc = document.getElementById("sgFCampo"), fv = document.getElementById("sgFValor");
     fc.onchange = () => { state.sgFCampo = fc.value; if (!fc.value) state.sgFValor = ""; renderSgio(); const n = document.getElementById("sgFValor"); if (n && !n.disabled) n.focus(); };
     let espera = null;
@@ -6419,7 +6420,7 @@
       ${listo ? `<div class="card p-4 mt-3"><div class="gis-lbl">${ver === "todas" ? "Fugas en el mapa" : CC_CLASES[ver].n} (${lista.length})</div>
         ${lista.length ? `<div class="cc-lista">${lista.map(item).join("")}</div>` : `<div class="text-sm" style="color:var(--ink-soft)">No hay fugas en esta clasificación.</div>`}</div>` : ""}`;
     el.querySelectorAll(".ccVer").forEach(b => b.onclick = () => { state.ccVer = b.dataset.v === state.ccVer && b.dataset.v !== "todas" ? "todas" : b.dataset.v; pintarPanelCC(); pintarMarcasCC(true); });
-    el.querySelector("#ccAct").onclick = () => cargarCentroControl();
+    el.querySelector("#ccAct").onclick = () => { pedirActualizarSgio(); cargarCentroControl(); };   // «Actualizar»: recién aquí corre el script del SGIO
     el.querySelectorAll(".ccIr").forEach(b => b.onclick = () => {
       const f = fugas.find(x => x.cod === b.dataset.cod); if (!f) return;
       if (f.lat != null) return ccAbrir(f.cod);
