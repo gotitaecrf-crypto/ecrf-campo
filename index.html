@@ -449,6 +449,7 @@
       const c = await apiGet({ action: "config" });
       if (c.usuarios && c.usuarios.length) localStorage.setItem("ecrf_usuarios", JSON.stringify(c.usuarios.map(u => ({ name: u.nombre, hash: u.hash, rol: u.rol, perfil: u.perfil || u.rol }))));
       if (Array.isArray(c.perfiles)) localStorage.setItem("ecrf_perfiles", JSON.stringify(c.perfiles));
+      if (c.marcaAgua && typeof c.marcaAgua === "object") { state.maCfg = c.marcaAgua; try { localStorage.setItem("ecrf_ma", JSON.stringify(c.marcaAgua)); } catch (e) {} }
       if (Array.isArray(c.grupos)) { const ga = localStorage.getItem("ecrf_grupos"), gb = JSON.stringify(c.grupos); localStorage.setItem("ecrf_grupos", gb); if (ga !== gb && state.operario && !state.form && !state.admin) render(); }
       guardarTecnicos(c.tecnicos); guardarLabs(c.laboratorios);
       if (Array.isArray(c.modulos) && c.modulos.length) {
@@ -858,6 +859,106 @@
     return file.lastModified ? new Date(file.lastModified) : new Date();
   }
 
+  /* ---------- Config de marca de agua (Panel → Marca de agua fotos) ----------
+     Catálogo de campos disponibles. El valor de cada uno se resuelve en watermarkPhoto según los
+     datos de la foto. Si no hay config guardada, la marca de agua sale igual que siempre. */
+  const MA_CAMPOS = [
+    { id: "fechahora", nombre: "Fecha y hora" },
+    { id: "detalles",  nombre: "Detalles del formulario" },     // líneas propias de cada formulario (las que antes iban como «extra»)
+    { id: "direccion", nombre: "Dirección" },
+    { id: "urb",       nombre: "Urbanización" },
+    { id: "distrito",  nombre: "Distrito" },
+    { id: "provincia", nombre: "Provincia" },
+    { id: "altitud",   nombre: "Altitud (msnm)" },
+    { id: "nis",       nombre: "NIS" },
+    { id: "gps",       nombre: "Coordenadas GPS" },
+    { id: "usuario",   nombre: "Usuario (técnico)" },
+    { id: "formato",   nombre: "Formato (código del formulario)" }
+  ];
+  const MA_ORDEN_DEF = ["fechahora", "detalles", "direccion", "urb", "distrito", "provincia", "altitud", "nis"];  // orden de la marca de agua actual
+  const MA_FUENTES = {
+    "Roboto": 'Roboto, "Segoe UI", Arial, sans-serif',
+    "Sans-serif": 'Arial, "Helvetica Neue", sans-serif',
+    "Serif": 'Georgia, "Times New Roman", serif',
+    "Monospace": '"Roboto Mono", ui-monospace, Menlo, monospace',
+    "Condensada": '"Arial Narrow", "Roboto Condensed", sans-serif'
+  };
+  function maBloqueDefecto() {
+    const campos = MA_CAMPOS.map(c => ({ id: c.id, prefijo: "", nuevaLinea: true, visible: MA_ORDEN_DEF.includes(c.id) }));
+    campos.sort((a, b) => { const ia = MA_ORDEN_DEF.indexOf(a.id), ib = MA_ORDEN_DEF.indexOf(b.id); return (ia < 0 ? 99 : ia) - (ib < 0 ? 99 : ib); });
+    return { campos, color: "#FFFFFF", fuente: "Roboto", escala: 1, mapa: { activo: false, tamano: 0.26 } };
+  }
+  function maCfgActual() {
+    if (state.maCfg) return state.maCfg;
+    try { const g = JSON.parse(localStorage.getItem("ecrf_ma") || "null"); if (g) state.maCfg = g; } catch (e) {}
+    return state.maCfg || null;
+  }
+  // Bloque efectivo para un formulario: su propia config, o la general, o null (→ marca de agua de siempre)
+  function maBloque(formKey) {
+    const cfg = maCfgActual(); if (!cfg) return null;
+    const esp = cfg.forms && cfg.forms[formKey];
+    if (esp && !esp.usarGeneral) return esp;
+    return cfg.general || null;
+  }
+  async function cargarMarcaAgua() {
+    try { const r = await rdApi("ma_cargar"); if (r && r.config) { state.maCfg = r.config; localStorage.setItem("ecrf_ma", JSON.stringify(r.config)); } } catch (e) {}
+  }
+  // Dibuja un mini-mapa de OpenStreetMap centrado en el punto, abajo a la izquierda (como timestamp camera).
+  // Usa crossOrigin anónimo: si los tiles no cargan (sin CORS/sin señal), NO dibuja nada y la foto sale igual.
+  function dibujarMiniMapaWM(ctx, w, h, lat, lon, bloque) {
+    return new Promise(resolve => {
+      try {
+        const frac = Math.max(0.15, Math.min(0.4, (bloque.mapa && bloque.mapa.tamano) || 0.26));
+        const box = Math.round(Math.min(w, h) * frac);
+        const margin = Math.round(w * 0.022), bx = margin, by = h - margin - box;
+        const z = 16, n = Math.pow(2, z);
+        const xt = (lon + 180) / 360 * n;
+        const yt = (1 - Math.log(Math.tan(lat * Math.PI / 180) + 1 / Math.cos(lat * Math.PI / 180)) / Math.PI) / 2 * n;
+        const cpx = xt * 256, cpy = yt * 256;                       // píxel mundial del punto
+        const x0 = cpx - box / 2, y0 = cpy - box / 2;               // esquina sup-izq de la ventana del mapa
+        const tx0 = Math.floor(x0 / 256), ty0 = Math.floor(y0 / 256);
+        const tx1 = Math.floor((x0 + box) / 256), ty1 = Math.floor((y0 + box) / 256);
+        const tiles = [];
+        for (let tx = tx0; tx <= tx1; tx++) for (let ty = ty0; ty <= ty1; ty++) if (tx >= 0 && ty >= 0 && tx < n && ty < n) tiles.push({ tx, ty });
+        const off = document.createElement("canvas"); off.width = box; off.height = box;
+        const octx = off.getContext("2d");
+        const cargar = t => new Promise(ok => {
+          const im = new Image(); im.crossOrigin = "anonymous";
+          im.onload = () => { try { octx.drawImage(im, t.tx * 256 - x0, t.ty * 256 - y0); } catch (e) {} ok(true); };
+          im.onerror = () => ok(false);
+          im.src = `https://tile.openstreetmap.org/${z}/${t.tx}/${t.ty}.png`;
+        });
+        const guard = setTimeout(() => resolve(false), 6000);
+        Promise.all(tiles.map(cargar)).then(res => {
+          clearTimeout(guard);
+          if (!res.every(Boolean)) return resolve(false);           // algún tile falló → no dibujar mapa
+          try {
+            const r = Math.round(box * 0.07);                        // marco redondeado
+            ctx.save();
+            ctx.beginPath();
+            ctx.moveTo(bx + r, by); ctx.arcTo(bx + box, by, bx + box, by + box, r); ctx.arcTo(bx + box, by + box, bx, by + box, r);
+            ctx.arcTo(bx, by + box, bx, by, r); ctx.arcTo(bx, by, bx + box, by, r); ctx.closePath();
+            ctx.clip();
+            ctx.drawImage(off, bx, by);
+            ctx.restore();
+            // borde
+            ctx.save(); ctx.lineWidth = Math.max(2, box * 0.02); ctx.strokeStyle = "rgba(255,255,255,0.9)";
+            ctx.beginPath();
+            ctx.moveTo(bx + r, by); ctx.arcTo(bx + box, by, bx + box, by + box, r); ctx.arcTo(bx + box, by + box, bx, by + box, r);
+            ctx.arcTo(bx, by + box, bx, by, r); ctx.arcTo(bx, by, bx + box, by, r); ctx.closePath(); ctx.stroke(); ctx.restore();
+            // marcador en el centro (posición real del punto dentro de la ventana)
+            const mxp = bx + (cpx - x0), myp = by + (cpy - y0);
+            ctx.save();
+            ctx.fillStyle = "#E5484D"; ctx.strokeStyle = "#fff"; ctx.lineWidth = Math.max(1.5, box * 0.015);
+            ctx.beginPath(); ctx.arc(mxp, myp, Math.max(4, box * 0.05), 0, 2 * Math.PI); ctx.fill(); ctx.stroke();
+            ctx.restore();
+          } catch (e) {}
+          resolve(true);
+        }).catch(() => { clearTimeout(guard); resolve(false); });
+      } catch (e) { resolve(false); }
+    });
+  }
+
   // info === false: sin datos de NIS (p. ej. la foto de EPPs); «extra»: líneas adicionales debajo de la fecha y hora
   function watermarkPhoto(file, info, fecha, real, extra) {
     const dato = info === false ? null : (info || state.nisSel);
@@ -874,48 +975,71 @@
         const ctx = canvas.getContext("2d");
         ctx.drawImage(img, 0, 0, w, h);
 
-        const lines = [];
+        // ----- Valores disponibles para la marca de agua, por id de campo -----
         const cuando = fecha || new Date();
-        lines.push(fmtCaptureStamp(cuando));
-        (extra || []).forEach(l => l && lines.push(l));
-        if (dato) {
-          if (String(dato.direccion || "").trim()) lines.push(tituloWM(dato.direccion));
-          if (String(dato.urb || "").trim()) lines.push(tituloWM(dato.urb));
-          if (String(dato.distrito || "").trim()) lines.push(tituloWM(dato.distrito));
-        }
-        lines.push(PROVINCIA);
         const c = state.coords || {};
-        // la altitud es la del celular en este momento: solo se pone si la foto es de la última hora
-        if (typeof c.alt === "number" && Math.abs(Date.now() - (real || cuando)) < 3600000) lines.push(`Altitud:${c.alt.toFixed(1)}msnm`);
-        if (dato) lines.push(`NIS:${dato.nis}`);
+        const val = {};
+        val.fechahora = fmtCaptureStamp(cuando);
+        val.detalles = (extra || []).filter(Boolean);                 // puede ser varias líneas (propias de cada formulario)
+        if (dato) {
+          if (String(dato.direccion || "").trim()) val.direccion = tituloWM(dato.direccion);
+          if (String(dato.urb || "").trim()) val.urb = tituloWM(dato.urb);
+          if (String(dato.distrito || "").trim()) val.distrito = tituloWM(dato.distrito);
+          if (dato.nis) val.nis = `NIS:${dato.nis}`;
+        }
+        val.provincia = PROVINCIA;
+        // la altitud es la del celular en este momento: solo si la foto es de la última hora
+        if (typeof c.alt === "number" && Math.abs(Date.now() - (real || cuando)) < 3600000) val.altitud = `Altitud:${c.alt.toFixed(1)}msnm`;
+        if (typeof c.lat === "number" && typeof c.lon === "number") val.gps = `${c.lat.toFixed(6)}, ${c.lon.toFixed(6)}`;
+        val.usuario = state.operario ? String(state.operario.nombre || state.operario) : "";
+        val.formato = state.form || "";
 
-        // Estilo como la cámara de referencia: abajo a la derecha, letra blanca con sombra, sin franja
-        const fontSize = Math.max(14, Math.round(Math.min(w, h) * 0.042));
+        // ----- ¿Hay config del panel para este formulario? Si no, marca de agua de siempre -----
+        const bloque = maBloque(state.form);
+        const orden = bloque && Array.isArray(bloque.campos) ? bloque.campos.filter(k => k.visible) : MA_ORDEN_DEF.map(id => ({ id, prefijo: "", nuevaLinea: true }));
+        const color = (bloque && bloque.color) || "#ffffff";
+        const fuenteCss = MA_FUENTES[(bloque && bloque.fuente)] || MA_FUENTES.Roboto;
+        const escala = Math.max(0.6, Math.min(1.8, (bloque && bloque.escala) || 1));
+
+        const lines = [];
+        orden.forEach(k => {
+          const v = val[k.id];
+          if (v == null || v === "") return;
+          (Array.isArray(v) ? v : [v]).forEach(t => { if (t == null || t === "") return; lines.push((k.prefijo ? k.prefijo + " " : "") + t); });
+        });
+        if (!lines.length) lines.push(fmtCaptureStamp(cuando));
+
+        // ----- Mini-mapa OpenStreetMap (opcional), abajo a la izquierda. Si no cargan los tiles, no dibuja nada -----
+        if (bloque && bloque.mapa && bloque.mapa.activo && typeof c.lat === "number" && typeof c.lon === "number"
+            && Math.abs(Date.now() - (real || cuando)) < 3600000) {
+          try { await dibujarMiniMapaWM(ctx, w, h, c.lat, c.lon, bloque); } catch (e) {}
+        }
+
+        // ----- Texto: abajo a la derecha, con contorno y sombra para leerse sobre cualquier fondo -----
+        const fontSize = Math.max(14, Math.round(Math.min(w, h) * 0.042 * escala));
         const lineGap = Math.round(fontSize * 1.2);
         const marginX = Math.round(w * 0.025);
         const marginBottom = Math.round(h * 0.018);
         const x = w - marginX;
 
-        ctx.font = `400 ${fontSize}px Roboto, "Segoe UI", Arial, sans-serif`;
+        ctx.font = `400 ${fontSize}px ${fuenteCss}`;
         ctx.textAlign = "right";
         ctx.textBaseline = "alphabetic";
         ctx.lineJoin = "round";
 
         let y = h - marginBottom - (lines.length - 1) * lineGap;
         lines.forEach(line => {
-          // contorno fino para que se lea sobre fondos claros
           ctx.save();
           ctx.lineWidth = Math.max(1.5, fontSize * 0.08);
           ctx.strokeStyle = "rgba(0,0,0,0.45)";
           ctx.strokeText(line, x, y);
           ctx.restore();
-          // texto blanco con sombra suave
           ctx.save();
           ctx.shadowColor = "rgba(0,0,0,0.8)";
           ctx.shadowBlur = Math.max(2, fontSize * 0.22);
           ctx.shadowOffsetX = Math.max(1, Math.round(fontSize * 0.05));
           ctx.shadowOffsetY = Math.max(1, Math.round(fontSize * 0.05));
-          ctx.fillStyle = "#ffffff";
+          ctx.fillStyle = color;
           ctx.fillText(line, x, y);
           ctx.restore();
           y += lineGap;
@@ -2569,11 +2693,13 @@
           <button class="adm-tab" data-admtab="rdpdf" aria-current="${tab === "rdpdf"}">Supervisor del PDF</button>
           <button class="adm-tab" data-admtab="usuarios" aria-current="${tab === "usuarios"}">Gestión de usuarios</button>
           <button class="adm-tab" data-admtab="whatsapp" aria-current="${tab === "whatsapp"}">Plantilla WhatsApp</button>
+          <button class="adm-tab" data-admtab="marca" aria-current="${tab === "marca"}">Marca de agua fotos</button>
         </div>
         ${tab === "charlas" ? estilosGis() + estilosCharlas() + htmlAdminCharlas()
           : tab === "usuarios" ? htmlAdminUsuarios()
           : tab === "perfiles" ? htmlAdminPerfiles()
           : tab === "whatsapp" ? htmlAdminWhatsapp()
+          : tab === "marca" ? htmlAdminMarca()
           : tab === "rdpdf" ? (!state.adminRd ? (cargarAdminRd(), `<div class="text-sm py-6" style="color:var(--ink-soft)">Cargando…</div>`) : state.adminRd.error ? `<div class="card p-4 text-sm" style="color:var(--danger)">${escA(state.adminRd.error)}</div>` : htmlRdSupervisor(state.adminRd))
           : tab === "catalogo" ? `<div class="text-sm mb-3" style="color:var(--ink-soft)">Dominios: catálogos de valores que los trabajadores eligen en la app. Toca ✏️ en un catálogo para agregar, editar, activar/desactivar o eliminar sus valores y luego presiona «Guardar cambios». Los registros anteriores conservan su texto.</div>` + estilosCq() + htmlAdminCatalogo()
           : tab === "vehiculo" ? `<div class="text-sm mb-3" style="color:var(--ink-soft)">Ficha del vehículo laboratorio que ven todos en «Laboratorio ECRF». Las fechas de SOAT, revisión técnica y mantenimiento generan las alertas de vencimiento.</div>` + estilosGis() + htmlAdminVehiculo() : `
@@ -2640,7 +2766,7 @@
     app.querySelectorAll("[data-admtab]").forEach(b => b.onclick = () => {
       if (state.adminTab === b.dataset.admtab) return;
       if (b.dataset.admtab !== "modulos" && state.adminDirty) { toast("Guarda o deshaz los cambios del orden del menú primero", true); return; }
-      state.adminTab = b.dataset.admtab; if (state.adminTab !== "modulos") state.adminRd = null; state.usLista = null; state.pf = null; state.waAdmin = null;
+      state.adminTab = b.dataset.admtab; if (state.adminTab !== "modulos") state.adminRd = null; state.usLista = null; state.pf = null; state.waAdmin = null; state.maEdit = null;
       if (state.adminTab === "vehiculo") { state.labDatos = null; state.adminVeh = null; }
       renderAdmin(); window.scrollTo(0, 0);
     });
@@ -2648,6 +2774,7 @@
     if (tab === "usuarios") { document.getElementById("admVolver").onclick = salirAdmin; activarAdminUsuarios(app); return; }
     if (tab === "perfiles") { document.getElementById("admVolver").onclick = salirAdmin; activarAdminPerfiles(app); return; }
     if (tab === "whatsapp") { document.getElementById("admVolver").onclick = salirAdmin; activarAdminWhatsapp(app); return; }
+    if (tab === "marca") { document.getElementById("admVolver").onclick = salirAdmin; activarAdminMarca(app); return; }
     if (tab === "rdpdf") { document.getElementById("admVolver").onclick = salirAdmin; if (state.adminRd && !state.adminRd.error) activarRdSupervisor(state.adminRd, () => { const y = window.scrollY; renderAdmin(); window.scrollTo(0, y); }); return; }
     if (tab !== "modulos") { activarAdminRd(app); return; }
 
@@ -3972,13 +4099,49 @@
   const FORM_CORTO = { GPFO0381: "0381 Presiones", GPFO0405: "0405 Reparación", GPFO0416: "0416 Muestreo" };
   const PARADAS_TRAMO = 10;                       // Google Maps en el celular: destino + 9 paradas intermedias
   let mapaL = null;
+  // Umbral de rotación táctil (estilo Google Maps): el pellizco de dos dedos solo hace ZOOM;
+  // el mapa no empieza a girar hasta que los dedos giran claramente (más de UMBRAL grados).
+  // Así se evita que el mapa rote sin querer mientras se hace zoom. Al enganchar se re-ancla el
+  // giro para que no pegue un salto. Parchea el handler del plugin leaflet-rotate una sola vez.
+  let giroTactilParcheado = false;
+  function parchearGiroTactil() {
+    if (giroTactilParcheado) return;
+    if (!window.L || !L.Map || !L.Map.TouchGestures) return;
+    giroTactilParcheado = true;
+    const UMBRAL = 12;                       // grados de giro necesarios para "enganchar" la rotación
+    const TG = L.Map.TouchGestures.prototype;
+    const _start = TG._onTouchStart;
+    TG._onTouchStart = function (e) { this._giroEnganchado = false; return _start.call(this, e); };
+    const _move = TG._onTouchMove;
+    TG._onTouchMove = function (e) {
+      // Solo intervenimos mientras la rotación aún no se "engancha"
+      if (!this._rotating || this._giroEnganchado || !e.touches || e.touches.length !== 2) return _move.call(this, e);
+      const map = this._map;
+      const p1 = map.mouseEventToContainerPoint(e.touches[0]);
+      const p2 = map.mouseEventToContainerPoint(e.touches[1]);
+      const vector = p1.subtract(p2);
+      let bd = (Math.atan(vector.x / vector.y) - this._startTheta) * L.DomUtil.RAD_TO_DEG;
+      if (vector.y < 0) bd += 180;
+      while (bd > 180) bd -= 360; while (bd < -180) bd += 360;
+      if (Math.abs(bd) < UMBRAL) {           // zona muerta: este cuadro solo hace zoom, sin rotar
+        const antes = this._rotating; this._rotating = false;
+        const r = _move.call(this, e); this._rotating = antes; return r;
+      }
+      // enganche de la rotación: re-anclamos (igual que en _onTouchStart) para que no pegue un salto
+      this._giroEnganchado = true;
+      this._startTheta = Math.atan(vector.x / vector.y);
+      this._startBearing = map.getBearing();
+      if (vector.y < 0) this._startBearing += 180;
+      return _move.call(this, e);
+    };
+  }
   // Una sola carga aunque se pida varias veces a la vez (si no, un mapa podía crearse antes de que llegue el complemento de giro)
   let leafletCargando = null;
   function cargarLeaflet() {
     if (leafletCargando) return leafletCargando;
-    if (window.L) return (leafletCargando = window.L.Map.prototype.setBearing ? Promise.resolve() : new Promise(ok => {
+    if (window.L) return (leafletCargando = window.L.Map.prototype.setBearing ? (parchearGiroTactil(), Promise.resolve()) : new Promise(ok => {
       const r = document.createElement("script"); r.src = "https://cdn.jsdelivr.net/npm/leaflet-rotate@0.2.8/dist/leaflet-rotate.js";
-      r.onload = ok; r.onerror = () => ok(); document.head.appendChild(r);
+      r.onload = () => { parchearGiroTactil(); ok(); }; r.onerror = () => ok(); document.head.appendChild(r);
     }));
     return (leafletCargando = new Promise((ok, mal) => {
       const css = document.createElement("link"); css.rel = "stylesheet";
@@ -3986,7 +4149,7 @@
       const js = document.createElement("script"); js.src = "https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js";
       js.onload = () => {        // complemento para girar el mapa con dos dedos (si no carga, el mapa funciona igual, sin girar)
         const r = document.createElement("script"); r.src = "https://cdn.jsdelivr.net/npm/leaflet-rotate@0.2.8/dist/leaflet-rotate.js";
-        r.onload = ok; r.onerror = () => ok(); document.head.appendChild(r);
+        r.onload = () => { parchearGiroTactil(); ok(); }; r.onerror = () => ok(); document.head.appendChild(r);
       };
       js.onerror = () => { leafletCargando = null; mal(); }; document.head.appendChild(js);
     }));
@@ -6003,6 +6166,173 @@
       };
     });
   }
+  /* ---------------- Panel de administración: Marca de agua de fotos ---------------- */
+  const MA_FORMS = [
+    { k: "general", nombre: "General (Base)" },
+    { k: "GPFO0381", nombre: "GPFO0381 · Presiones" },
+    { k: "GPFO0405", nombre: "GPFO0405 · Verif. reparación" },
+    { k: "GPFO0416", nombre: "GPFO0416 · Muestreo" }
+  ];
+  const MA_MUESTRA = {
+    fechahora: "11-11-2026 14:23:05", detalles: ["ÁREA DE TRABAJO ECRF - INSPECCIÓN"], direccion: "Av. Javier Prado Este 4200",
+    urb: "Santa Catalina", distrito: "La Victoria", provincia: PROVINCIA, altitud: "Altitud:154.0msnm",
+    nis: "NIS:2349081", gps: "-12.086431, -77.012349", usuario: "Carlos Mendoza Chávez", formato: "GPFO0405"
+  };
+  // Normaliza un bloque: respeta el orden guardado y completa lo que falte con el bloque por defecto
+  function maNormBloque(b) {
+    const d = maBloqueDefecto();
+    if (!b || typeof b !== "object") return d;
+    const porId = Object.fromEntries((Array.isArray(b.campos) ? b.campos : []).map(c => [c.id, c]));
+    const orden = (Array.isArray(b.campos) ? b.campos.map(c => c.id) : []).filter(id => MA_CAMPOS.some(c => c.id === id));
+    MA_CAMPOS.forEach(c => { if (!orden.includes(c.id)) orden.push(c.id); });
+    const campos = orden.map(id => { const g = porId[id] || {}, dd = d.campos.find(x => x.id === id) || {};
+      return { id, prefijo: typeof g.prefijo === "string" ? g.prefijo : (dd.prefijo || ""), nuevaLinea: true, visible: g.visible != null ? !!g.visible : !!dd.visible }; });
+    return { usarGeneral: !!b.usarGeneral, campos, color: b.color || d.color, fuente: MA_FUENTES[b.fuente] ? b.fuente : d.fuente,
+      escala: typeof b.escala === "number" ? b.escala : d.escala, mapa: { activo: !!(b.mapa && b.mapa.activo), tamano: (b.mapa && b.mapa.tamano) || 0.26 } };
+  }
+  function maEditActual() {
+    if (!state.maEdit) {
+      const cfg = maCfgActual() || { general: null, forms: {} }, forms = {};
+      MA_FORMS.filter(f => f.k !== "general").forEach(f => { const g = cfg.forms && cfg.forms[f.k];
+        forms[f.k] = g ? maNormBloque(g) : Object.assign(maNormBloque(null), { usarGeneral: true }); });
+      state.maEdit = { general: maNormBloque(cfg.general), forms };
+      state.maForm = state.maForm || "general"; state.maDirty = false;
+    }
+    return state.maEdit;
+  }
+  function maBloqueEnEdicion() { const e = maEditActual(); return state.maForm === "general" ? e.general : e.forms[state.maForm]; }
+  function htmlAdminMarca() {
+    const e = maEditActual(), fk = state.maForm || "general", bl = maBloqueEnEdicion();
+    const esForm = fk !== "general", usaGeneral = esForm && bl.usarGeneral;
+    const campoNom = id => (MA_CAMPOS.find(c => c.id === id) || {}).nombre || id;
+    const filas = bl.campos.map((c, i) => `
+      <div class="ma-campo ${c.visible ? "" : "off"}">
+        <button class="adm-flecha maMov" data-i="${i}" data-d="-1" ${i === 0 ? "disabled" : ""} aria-label="Subir">↑</button>
+        <button class="adm-flecha maMov" data-i="${i}" data-d="1" ${i === bl.campos.length - 1 ? "disabled" : ""} aria-label="Bajar">↓</button>
+        <button class="adm-sw" role="switch" data-i="${i}" aria-checked="${c.visible}" aria-label="Mostrar ${escA(campoNom(c.id))}"></button>
+        <div class="min-w-0 flex-1"><b class="text-sm">${escA(campoNom(c.id))}</b>
+          <input class="input ma-pref" data-i="${i}" maxlength="24" placeholder="Prefijo (ej. NIS:)" value="${escA(c.prefijo)}"></div>
+      </div>`).join("");
+    return `${estilosCq()}
+      <style>
+        .ma-wrap{display:grid;gap:18px;max-width:1150px}
+        @media(min-width:900px){.ma-wrap{grid-template-columns:minmax(0,1fr) 360px}.ma-prev-box{position:sticky;top:16px}}
+        .ma-forms{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:14px}
+        .ma-fchip{border-radius:999px;padding:7px 14px;font-weight:700;font-size:13px;border:1.5px solid var(--line);background:#fff;color:var(--ink)}
+        .ma-fchip[aria-pressed="true"]{background:var(--brand-dark);border-color:var(--brand-dark);color:#fff}
+        .ma-card{background:#fff;border:1px solid var(--line);border-radius:16px;padding:14px;margin-bottom:12px}
+        .ma-campo{display:flex;align-items:center;gap:8px;border:1px solid #E6EBF1;border-radius:12px;padding:8px;margin-bottom:6px}
+        .ma-campo.off{background:#F6F8FA;opacity:.72}
+        .ma-pref{margin-top:4px;padding:6px 8px;font-size:13px}
+        .ma-row{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:8px 0}
+        .ma-swatch{width:30px;height:30px;border-radius:8px;border:1.5px solid var(--line);cursor:pointer;padding:0}
+        .ma-prev-box{background:#fff;border:1px solid var(--line);border-radius:16px;padding:14px;align-self:start}
+        .ma-canvas{width:100%;border-radius:12px;border:1px solid var(--line);display:block;background:#1f2937}
+        .ma-off-note{background:#FFF1C7;color:#6B4A00;border-radius:12px;padding:10px 12px;font-size:13px;margin-bottom:10px}
+      </style>
+      <div class="text-sm mb-3" style="color:var(--ink-soft)">Configura la marca de agua que la app estampa en las fotos. Hay una configuración <b>General (Base)</b> y una por formulario; cada formulario puede usar la general o la suya. Si no guardas nada, la marca de agua sale como siempre.</div>
+      <div class="ma-forms">${MA_FORMS.map(f => `<button class="ma-fchip maForm" data-k="${f.k}" aria-pressed="${f.k === fk}">${escA(f.nombre)}</button>`).join("")}</div>
+      <div class="ma-wrap">
+        <div>
+          ${esForm ? `<div class="ma-card"><label style="display:flex;align-items:center;gap:10px;cursor:pointer">
+            <button class="adm-sw" role="switch" id="maUsaGen" aria-checked="${usaGeneral}" aria-label="Usar configuración general"></button>
+            <div><b>Usar la configuración General (Base)</b><div class="text-xs" style="color:var(--ink-soft)">Si está activo, este formulario usa la marca de agua general. Desactívalo para darle una propia.</div></div></label></div>` : ""}
+          ${usaGeneral ? `<div class="ma-off-note">Este formulario está usando la configuración <b>General</b>. Desactiva la casilla de arriba para personalizarlo.</div>` : `
+          <div class="ma-card"><div class="om-t">CAMPOS Y ORDEN</div>
+            <div class="text-xs mb-2" style="color:var(--ink-soft)">Activa los campos a mostrar y ordénalos con ↑↓. El prefijo es un texto que va antes del dato.</div>
+            ${filas}</div>
+          <div class="ma-card"><div class="om-t">TEXTO</div>
+            <div class="ma-row"><span class="text-sm font-semibold">Color:</span>
+              <input type="color" id="maColor" class="ma-swatch" value="${/^#[0-9a-fA-F]{6}$/.test(bl.color) ? bl.color : "#ffffff"}">
+              ${["#ffffff", "#FFE500", "#00E5A0", "#59A5FF", "#FF5A5A", "#000000"].map(col => `<button class="ma-swatch maCol" data-c="${col}" style="background:${col}" aria-label="Color ${col}"></button>`).join("")}</div>
+            <div class="ma-row"><span class="text-sm font-semibold">Tipografía:</span>
+              <select id="maFuente" class="input" style="width:auto;min-width:160px">${Object.keys(MA_FUENTES).map(f => `<option value="${f}" ${bl.fuente === f ? "selected" : ""}>${f}</option>`).join("")}</select></div>
+            <div class="ma-row"><span class="text-sm font-semibold">Tamaño:</span>
+              <input type="range" id="maEscala" min="0.7" max="1.6" step="0.05" value="${bl.escala}" style="flex:1;max-width:240px">
+              <span id="maEscalaTxt" class="text-sm">${Math.round(bl.escala * 100)}%</span></div>
+          </div>
+          <div class="ma-card"><div class="om-t">MINI-MAPA (OpenStreetMap)</div>
+            <label class="ma-row" style="cursor:pointer"><button class="adm-sw" role="switch" id="maMapa" aria-checked="${bl.mapa.activo}" aria-label="Mostrar mini-mapa"></button>
+              <span class="text-sm">Mostrar un mini-mapa abajo a la izquierda con la ubicación (como Timestamp Camera)</span></label>
+            <div class="ma-row" id="maMapaTam" ${bl.mapa.activo ? "" : 'style="display:none"'}><span class="text-sm font-semibold">Tamaño del mapa:</span>
+              <input type="range" id="maMapaTamR" min="0.16" max="0.38" step="0.02" value="${bl.mapa.tamano}" style="flex:1;max-width:240px">
+              <span id="maMapaTamTxt" class="text-sm">${Math.round(bl.mapa.tamano * 100)}%</span></div>
+            <div class="text-xs" style="color:var(--ink-soft)">Solo aparece si la foto tiene ubicación GPS reciente. Si no hay señal para el mapa, la foto igual se guarda (sin el mapa).</div>
+          </div>`}
+        </div>
+        <div class="ma-prev-box">
+          <div class="font-bold mb-1">👁 Previsualización</div>
+          <div class="text-xs mb-2" style="color:var(--ink-soft)">Ejemplo con datos de muestra${usaGeneral ? " (configuración General)" : ""}:</div>
+          <canvas id="maPrev" class="ma-canvas" width="900" height="675"></canvas>
+          <div class="flex gap-2 justify-end mt-3">
+            <button id="maReset" class="btn-ghost" style="width:auto;padding:9px 14px">↺ Restablecer</button>
+            <button id="maGuardar" class="btn-primary" style="width:auto;padding:9px 18px" ${state.maDirty ? "" : "disabled"}>💾 Guardar</button>
+          </div>
+          <div id="maErr" class="rd-err mt-2"></div>
+        </div>
+      </div>`;
+  }
+  let maPrevSeq = 0;
+  async function maDibujarPreview(canvas, blEf) {
+    const seq = ++maPrevSeq, ctx = canvas.getContext("2d"), w = canvas.width, h = canvas.height;
+    const g = ctx.createLinearGradient(0, 0, 0, h); g.addColorStop(0, "#415A77"); g.addColorStop(1, "#1B2A3A");
+    ctx.fillStyle = g; ctx.fillRect(0, 0, w, h);
+    ctx.fillStyle = "rgba(255,255,255,0.07)"; for (let i = 0; i < 7; i++) ctx.fillRect(w * 0.12 * i, h * 0.1, w * 0.045, h * 0.8);
+    ctx.fillStyle = "rgba(255,255,255,0.10)"; ctx.fillRect(0, h * 0.46, w, h * 0.14);
+    const val = Object.assign({}, MA_MUESTRA, { formato: state.maForm === "general" ? "GPFO0405" : state.maForm });
+    const lines = [];
+    blEf.campos.filter(k => k.visible).forEach(k => { const v = val[k.id]; if (v == null || v === "") return;
+      (Array.isArray(v) ? v : [v]).forEach(t => { if (!t) return; lines.push((k.prefijo ? k.prefijo + " " : "") + t); }); });
+    if (!lines.length) lines.push(val.fechahora);
+    if (blEf.mapa && blEf.mapa.activo) { try { await dibujarMiniMapaWM(ctx, w, h, -12.08643, -77.01235, blEf); } catch (e) {} if (seq !== maPrevSeq) return; }
+    const color = /^#[0-9a-fA-F]{6}$/.test(blEf.color) ? blEf.color : "#ffffff";
+    const fuenteCss = MA_FUENTES[blEf.fuente] || MA_FUENTES.Roboto, escala = Math.max(0.6, Math.min(1.8, blEf.escala || 1));
+    const fontSize = Math.max(13, Math.round(Math.min(w, h) * 0.042 * escala)), lineGap = Math.round(fontSize * 1.2);
+    const marginX = Math.round(w * 0.025), marginBottom = Math.round(h * 0.018), x = w - marginX;
+    ctx.font = `400 ${fontSize}px ${fuenteCss}`; ctx.textAlign = "right"; ctx.textBaseline = "alphabetic"; ctx.lineJoin = "round";
+    let y = h - marginBottom - (lines.length - 1) * lineGap;
+    lines.forEach(line => {
+      ctx.save(); ctx.lineWidth = Math.max(1.5, fontSize * 0.08); ctx.strokeStyle = "rgba(0,0,0,0.45)"; ctx.strokeText(line, x, y); ctx.restore();
+      ctx.save(); ctx.shadowColor = "rgba(0,0,0,0.8)"; ctx.shadowBlur = Math.max(2, fontSize * 0.22);
+      ctx.shadowOffsetX = Math.max(1, Math.round(fontSize * 0.05)); ctx.shadowOffsetY = Math.max(1, Math.round(fontSize * 0.05));
+      ctx.fillStyle = color; ctx.fillText(line, x, y); ctx.restore(); y += lineGap;
+    });
+  }
+  function activarAdminMarca(app) {
+    const e = maEditActual(), fk = state.maForm || "general", bl = maBloqueEnEdicion();
+    const esForm = fk !== "general", blEf = (esForm && bl.usarGeneral) ? e.general : bl;
+    const marcar = () => { state.maDirty = true; };
+    const repintar = () => { const y = window.scrollY; renderAdmin(); window.scrollTo(0, y); };
+    const prev = () => { const cv = document.getElementById("maPrev"); if (cv) maDibujarPreview(cv, blEf); };
+    app.querySelectorAll(".maForm").forEach(b => b.onclick = () => { if (state.maForm === b.dataset.k) return; state.maForm = b.dataset.k; repintar(); });
+    const ug = document.getElementById("maUsaGen");
+    if (ug) ug.onclick = () => { bl.usarGeneral = !(ug.getAttribute("aria-checked") === "true"); marcar(); repintar(); };
+    app.querySelectorAll(".maMov").forEach(b => b.onclick = () => { const i = +b.dataset.i, j = i + (+b.dataset.d);
+      if (j < 0 || j >= bl.campos.length) return; const t = bl.campos[i]; bl.campos[i] = bl.campos[j]; bl.campos[j] = t; marcar(); repintar(); });
+    app.querySelectorAll(".ma-campo .adm-sw").forEach(b => b.onclick = () => { const i = +b.dataset.i; bl.campos[i].visible = !bl.campos[i].visible; marcar(); repintar(); });
+    app.querySelectorAll(".ma-pref").forEach(inp => inp.oninput = () => { bl.campos[+inp.dataset.i].prefijo = inp.value.slice(0, 24); marcar(); prev(); });
+    const col = document.getElementById("maColor"); if (col) col.oninput = () => { bl.color = col.value; marcar(); prev(); };
+    app.querySelectorAll(".maCol").forEach(b => b.onclick = () => { bl.color = b.dataset.c; marcar(); repintar(); });
+    const fu = document.getElementById("maFuente"); if (fu) fu.onchange = () => { bl.fuente = fu.value; marcar(); prev(); };
+    const es = document.getElementById("maEscala"); if (es) es.oninput = () => { bl.escala = +es.value; const t = document.getElementById("maEscalaTxt"); if (t) t.textContent = Math.round(bl.escala * 100) + "%"; marcar(); prev(); };
+    const mp = document.getElementById("maMapa"); if (mp) mp.onclick = () => { bl.mapa.activo = !(mp.getAttribute("aria-checked") === "true"); marcar(); repintar(); };
+    const mpt = document.getElementById("maMapaTamR"); if (mpt) mpt.oninput = () => { bl.mapa.tamano = +mpt.value; const t = document.getElementById("maMapaTamTxt"); if (t) t.textContent = Math.round(bl.mapa.tamano * 100) + "%"; marcar(); prev(); };
+    const rs = document.getElementById("maReset"); if (rs) rs.onclick = () => {
+      if (fk === "general") e.general = maNormBloque(null); else e.forms[fk] = Object.assign(maNormBloque(null), { usarGeneral: true });
+      marcar(); repintar(); };
+    const gu = document.getElementById("maGuardar"); if (gu) gu.onclick = async () => {
+      gu.disabled = true; gu.textContent = "Guardando…"; const err = document.getElementById("maErr"); if (err) err.textContent = "";
+      try {
+        const cfg = { general: e.general, forms: {} };
+        Object.keys(e.forms).forEach(k => { const b = e.forms[k]; cfg.forms[k] = b.usarGeneral ? { usarGeneral: true } : b; });
+        const r = await rdApi("ma_guardar", { config: cfg });
+        if (r && r.config) { state.maCfg = r.config; localStorage.setItem("ecrf_ma", JSON.stringify(r.config)); }
+        state.maDirty = false; toast("Marca de agua guardada ✅"); repintar();
+      } catch (x) { gu.disabled = false; gu.textContent = "💾 Guardar"; if (err) err.textContent = msgError(x); }
+    };
+    prev();
+  }
+
   /* ---------------- CUADRILLAS FUGAS (módulo CUADRILLAS) ----------------
      Laboratorios de la contratista y camionetas 4x4 del personal ECRF: placa, empresa, técnico a cargo y personal
      (nombre, DNI, teléfono, fecha de incorporación y cargo). Todos ven todo; solo los administradores crean y editan.
