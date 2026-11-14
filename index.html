@@ -5037,11 +5037,12 @@
 
   // ---------- dibujo en lienzo (no interactivo) ----------
   const CapaRedes = () => L.GridLayer.extend({
-    options: { updateWhenIdle: false, keepBuffer: 2, maxZoom: 20, zIndex: 450 },
+    options: { updateWhenIdle: true, updateWhenZooming: false, keepBuffer: 2, maxZoom: 20, zIndex: 450 },
     createTile(c) {
       const t = document.createElement("canvas"), dpr = Math.min(2, window.devicePixelRatio || 1);
       t.width = t.height = 256 * dpr; t.style.width = t.style.height = "256px";
       const d = state.rgDatos; if (!d || (!d.lineas && !d.nis)) return t;
+      if (c.z < 13) return t;   // muy alejado: las redes son sub-pixel; no dibujamos nada (evita que el celular se trabe y el mapa se vea en blanco)
       try {
         const x = t.getContext("2d"); x.scale(dpr, dpr);
         const m = this._map, z = c.z, ox = c.x * 256, oy = c.y * 256, vis = rgVisibles();
