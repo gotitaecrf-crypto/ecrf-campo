@@ -447,9 +447,14 @@
     if (!apiListo() || !enLinea()) return;
     try {
       const c = await apiGet({ action: "config" });
-      if (c.usuarios && c.usuarios.length) localStorage.setItem("ecrf_usuarios", JSON.stringify(c.usuarios.map(u => ({ name: u.nombre, hash: u.hash, rol: u.rol, perfil: u.perfil || u.rol }))));
+      if (c.usuarios && c.usuarios.length) localStorage.setItem("ecrf_usuarios", JSON.stringify(c.usuarios.map(u => ({ name: u.nombre, hash: u.hash, rol: u.rol, perfil: u.perfil || u.rol, correo: u.correo || "" }))));
       if (Array.isArray(c.perfiles)) localStorage.setItem("ecrf_perfiles", JSON.stringify(c.perfiles));
       if (c.marcaAgua && typeof c.marcaAgua === "object") { state.maCfg = c.marcaAgua; try { localStorage.setItem("ecrf_ma", JSON.stringify(c.marcaAgua)); } catch (e) {} }
+      if (c.correo && typeof c.correo === "object") { state.correoCfg = c.correo; try { localStorage.setItem("ecrf_correo", JSON.stringify(c.correo)); } catch (e) {} }
+      if (c.logo && typeof c.logo === "object") {
+        if (c.logo.b64) { state.logoApp = c.logo.b64; try { localStorage.setItem("ecrf_logo", c.logo.b64); } catch (e) {} }
+        else { state.logoApp = ""; try { localStorage.removeItem("ecrf_logo"); } catch (e) {} }
+      }
       if (Array.isArray(c.grupos)) { const ga = localStorage.getItem("ecrf_grupos"), gb = JSON.stringify(c.grupos); localStorage.setItem("ecrf_grupos", gb); if (ga !== gb && state.operario && !state.form && !state.admin) render(); }
       guardarTecnicos(c.tecnicos); guardarLabs(c.laboratorios);
       if (Array.isArray(c.modulos) && c.modulos.length) {
@@ -893,6 +898,40 @@
     try { const g = JSON.parse(localStorage.getItem("ecrf_ma") || "null"); if (g) state.maCfg = g; } catch (e) {}
     return state.maCfg || null;
   }
+  // ---- Plantilla de correo de fugas «No Reparada» (config del panel) ----
+  const CORREO_CENTROS = { COMAS: "Comas", ATE: "Ate", CALLAO: "Callao", BRENA: "Breña", SUR: "Surquillo", VES: "Villa El Salvador", SJL: "San Juan de Lurigancho" };
+  function cfgCorreo() {
+    if (!state.correoCfg) { try { state.correoCfg = JSON.parse(localStorage.getItem("ecrf_correo") || "null"); } catch (e) {} }
+    return state.correoCfg || null;
+  }
+  // El ccss ya viene como COMAS/ATE/CALLAO/BRENA/SUR/VES/SJL; se empareja por inclusión por si acaso.
+  const centroCod = ccss => {
+    const n = String(ccss || "").trim().toUpperCase().replace(/\s+/g, " ");
+    if (CORREO_CENTROS[n]) return n;
+    return Object.keys(CORREO_CENTROS).find(k => n && (n.includes(k) || CORREO_CENTROS[k].toUpperCase().includes(n))) || "";
+  };
+  // Destinatarios (Para) según el tipo de fuga: Red → EOMR del centro; Conexión → Comercial del centro
+  function destinatariosFuga(ccss, tipo) {
+    const cfg = cfgCorreo(); const cod = centroCod(ccss);
+    if (!cfg || !cod || !cfg.centros || !cfg.centros[cod]) return { para: [], cc: (cfg && cfg.cc) || [], cod, falta: !cod };
+    const g = cfg.centros[cod];
+    const para = tipo === "Conexión" ? (g.com || []) : (g.eomr || []);
+    return { para: para, cc: cfg.cc || [], cod, falta: false };
+  }
+  // Correo del operario que tiene la sesión (para ponerlo en copia)
+  function correoOperario() {
+    try {
+      const us = JSON.parse(localStorage.getItem("ecrf_usuarios") || "[]");
+      const u = us.find(x => x.name === state.operario);
+      return u && u.correo ? u.correo : "";
+    } catch (e) { return ""; }
+  }
+  // ---- Logo del aplicativo: configurable desde el panel; se actualiza como una actualización (sin reinstalar) ----
+  function logoApp() {
+    if (state.logoApp) return state.logoApp;
+    try { const g = localStorage.getItem("ecrf_logo"); if (g) { state.logoApp = g; return g; } } catch (e) {}
+    return LOGO_SEDAPAL;
+  }
   // Bloque efectivo para un formulario: su propia config, o la general, o null (→ marca de agua de siempre)
   function maBloque(formKey) {
     const cfg = maCfgActual(); if (!cfg) return null;
@@ -1180,7 +1219,7 @@
     return !!(base && state.presion !== "" && state.fecha && state.hora);
   }
 
-  async function guardarRegistro() {
+  async function guardarRegistro(enviarCorreo) {
     if (!validRecord() || state.saving) return;
     state.saving = true; render();
 
@@ -1205,6 +1244,7 @@
       })() : state.form === "GPFO0405" ? {
         codigoSgio: state.codigoSgio, fechaDeteccion: state.fechaDeteccion, ubicacion: state.ubicacion,
         caudal: Number(state.caudal), fechaVerificacion: state.fechaVerif, situacion: state.situacion,
+        tipoFuga: state.situacion === "No Reparada" ? (state.tipoFuga || "") : "",
         fecha: state.fechaVerif, hora: state.horaVerif || nowHM()
       } : {
         presion: Number(state.presion), fecha: state.fecha, hora: state.hora
@@ -1225,6 +1265,7 @@
       if (state.pendienteId) await borrarPendiente(state.pendienteId);
       toast(state.syncMode === "cloud" && !enLinea() ? "Guardado en el celular. Se subirá cuando haya internet" : "Registro guardado ✅");
       resetForm();
+      if (enviarCorreo) { state.correoAuto = reg.id; state.tab = "lista"; }   // ir a «Hechos» a enviar el correo de la fuga no reparada
       await loadRegistros();
       sincronizar();
     } catch (e) {
@@ -1253,7 +1294,7 @@
     state.fecha = todayISO();
     state.hora = nowHM();
     state.codigoSgio = ""; state.fechaDeteccion = ""; state.ubicacion = ""; state.caudal = "";
-    state.fechaVerif = todayISO(); state.horaVerif = nowHM(); state.situacion = "Reparada"; state.horaFijadaPara = null;
+    state.fechaVerif = todayISO(); state.horaVerif = nowHM(); state.situacion = "Reparada"; state.tipoFuga = ""; state.horaFijadaPara = null;
     state.m = { tecnico: "", laboratorio: "", cFecha: "", cUbi: "", cPres: "", cCaudal: "", sFecha: todayISO(), sHora: nowHM(), sUbi: "", sPres: "", sCaudal: "" };
   }
 
@@ -1395,7 +1436,7 @@
     const fichaGuardada = state.loginUsuario != null ? state.loginUsuario : (localStorage.getItem("ecrf_ficha") || "");
     app.innerHTML = `
       <div class="hero px-6 pb-12 text-center" style="padding-top:calc(28px + env(safe-area-inset-top,0px))">
-        <div class="flex justify-center"><span class="logo-chip" style="padding:10px 16px;border-radius:14px"><img src="${LOGO_SEDAPAL}" alt="SEDAPAL" style="height:46px"></span></div>
+        <div class="flex justify-center"><span class="logo-chip" style="padding:10px 16px;border-radius:14px"><img src="${logoApp()}" alt="SEDAPAL" style="height:46px"></span></div>
         <h1 class="mt-4 text-xl font-extrabold leading-snug" style="position:relative;z-index:1">Equipo Control y<br>Reducción de Fugas</h1>
         <p class="text-sm mt-1" style="color:#C9D8EA;position:relative;z-index:1">ECRF Campo · Ingresa con tu usuario y contraseña</p>
       </div>
@@ -1543,7 +1584,7 @@
           <div class="font-extrabold leading-tight">${FORM_INFO[state.form].titulo}</div>
           <div class="text-xs" style="color:#C9D8EA">${escA(state.operario)} · ${state.form}</div>
         </div>
-        <span class="logo-chip"><img src="${LOGO_SEDAPAL}" alt="SEDAPAL"></span>
+        <span class="logo-chip"><img src="${logoApp()}" alt="SEDAPAL"></span>
       </div>
       <div class="px-4 py-2 flex items-center justify-between" style="background:var(--card);border-bottom:1px solid var(--line)">
         ${syncBadge}
@@ -1734,6 +1775,32 @@
         </div>
         ${lbl("Situación *")}
         ${toggleSituacion(state.situacion, "f5Sit")}
+        ${state.situacion === "No Reparada" ? bloqueTipoFuga() : ""}
+      </div>`;
+  }
+  // Bloque bajo «No Reparada»: tipo de fuga (define a quién va el correo) + aviso del destinatario
+  function bloqueTipoFuga() {
+    const ccss = (state.nisSel && state.nisSel.ccss) || "";
+    const cod = centroCod(ccss), t = state.tipoFuga || "";
+    const btn = (val, txt, sub) => `<button type="button" class="f5Tipo" data-t="${val}" aria-pressed="${t === val}"
+        style="flex:1;min-height:54px;border:0;border-radius:10px;font-weight:700;padding:6px;line-height:1.25;
+        background:${t === val ? "#0A4D8C" : "var(--card)"};color:${t === val ? "#fff" : "var(--ink)"};box-shadow:${t === val ? "none" : "inset 0 0 0 1.5px var(--line)"}">
+        ${txt}<br><small style="font-weight:500;opacity:.85">${sub}</small></button>`;
+    let aviso;
+    if (!ccss) aviso = `<div class="text-xs" style="color:#8E2019">Elige el NIS para saber el centro de servicio.</div>`;
+    else if (!cod) aviso = `<div class="text-xs" style="color:#8E2019">El centro «${escA(ccss)}» no está en la lista. Avisa a un administrador.</div>`;
+    else if (!t) aviso = `<div class="text-xs" style="color:var(--ink-soft)">Centro: <b>${escA(CORREO_CENTROS[cod])}</b>. Elige si la fuga es en red o en conexión.</div>`;
+    else {
+      const d = destinatariosFuga(ccss, t);
+      aviso = d.para.length
+        ? `<div class="text-xs" style="color:var(--ink-soft)">Irá a <b>${t === "Conexión" ? "Comercial" : "EOMR"}</b> de <b>${escA(CORREO_CENTROS[cod])}</b>: ${escA(d.para.map(x => x.n || x.c).join(", "))}.</div>`
+        : `<div class="text-xs" style="color:#8E2019">No hay destinatarios de ${t === "Conexión" ? "Comercial" : "EOMR"} para ${escA(CORREO_CENTROS[cod])}. Configúralos en Panel → «Plantilla correo».</div>`;
+    }
+    return `<div style="margin-top:12px;padding:12px;border:1.5px dashed var(--danger);border-radius:12px;background:#FFF6F5">
+        <div class="font-semibold mb-2" style="color:#8E2019">Fuga no reparada — ¿dónde es la fuga?</div>
+        <div style="display:flex;gap:8px">${btn("Red", "🔧 Red", "Avisa al EOMR")}${btn("Conexión", "🏠 Conexión", "Avisa a Comercial")}</div>
+        <div class="mt-2">${aviso}</div>
+        <div class="text-xs mt-2" style="color:var(--ink-soft)">Al guardar se preparará el correo: toca «Enviar correo» en el registro para abrir Outlook con las fotos como enlaces.</div>
       </div>`;
   }
   function eventos0405() {
@@ -1743,7 +1810,34 @@
     document.getElementById("f5FechaDet").onchange = e => { state.fechaDeteccion = e.target.value; ok(); };
     const re = () => { const y = window.scrollY; renderNuevo(); window.scrollTo(0, y); };
     activarUbicacion("f5Ubi", () => state.ubicacion, v => { state.ubicacion = v; }, re);
-    document.querySelectorAll(".f5Sit").forEach(b => b.onclick = () => { state.situacion = b.dataset.s; re(); });
+    document.querySelectorAll(".f5Sit").forEach(b => b.onclick = () => { state.situacion = b.dataset.s; if (b.dataset.s !== "No Reparada") state.tipoFuga = ""; re(); });
+    document.querySelectorAll(".f5Tipo").forEach(b => b.onclick = () => { state.tipoFuga = b.dataset.t; re(); });
+  }
+  // Rellena los {campos} de la plantilla con los datos del registro
+  function correoTxt(txt, d) { return String(txt || "").replace(/\{(\w+)\}/g, (m, k) => (d[k] != null ? String(d[k]) : "")); }
+  // Arma y abre el correo (Outlook) de una fuga No Reparada a partir de un registro YA guardado y subido
+  function correoFuga(reg) {
+    const cfg = cfgCorreo();
+    if (!cfg) { toast("Aún no hay plantilla de correo configurada (Panel → Plantilla correo)", true); return; }
+    const tipo = reg.tipoFuga || "Red";
+    const d = destinatariosFuga(reg.ccss, tipo);
+    const dmyL = f => { const p = String(f || "").split("-"); return p.length === 3 ? p[2] + "/" + p[1] + "/" + p[0] : (f || ""); };
+    const fotos = (reg.fotos || []).map(id => "https://drive.google.com/file/d/" + id + "/view").join("\n") || "(sin fotos)";
+    const datos = {
+      nis: reg.nis || "", codigoSgio: reg.codigoSgio || "", centro: CORREO_CENTROS[d.cod] || reg.ccss || "",
+      direccion: [reg.direccion, reg.urb].filter(Boolean).join(" - "), distrito: reg.distrito || "", sector: reg.sector || "",
+      ubicacion: reg.ubicacion || "", caudal: reg.caudal != null ? reg.caudal : "", fechaDeteccion: dmyL(reg.fechaDeteccion),
+      fechaVerificacion: dmyL(reg.fechaVerificacion || reg.fecha), operario: reg.operario || "",
+      mapa: (reg.latNis && reg.lonNis) ? ("https://www.google.com/maps?q=" + reg.latNis + "," + reg.lonNis)
+          : (reg.lat && reg.lon ? "https://www.google.com/maps?q=" + reg.lat + "," + reg.lon : ""),
+      fotos: fotos
+    };
+    const para = d.para.map(x => x.c).filter(Boolean).join(",");
+    const cc = (d.cc || []).map(x => x.c).filter(Boolean).join(",");
+    const url = "mailto:" + encodeURIComponent(para) + "?" + (cc ? "cc=" + encodeURIComponent(cc) + "&" : "") +
+      "subject=" + encodeURIComponent(correoTxt(cfg.asunto, datos)) + "&body=" + encodeURIComponent(correoTxt(cfg.cuerpo, datos));
+    if (!para) toast("No hay destinatarios para « " + (CORREO_CENTROS[d.cod] || reg.ccss || "ese centro") + " / " + (tipo === "Conexión" ? "Comercial" : "EOMR") + " ». Se abrirá el correo para escribirlos.", true);
+    try { window.location.href = url; } catch (x) { toast("No se pudo abrir la app de correo", true); }
   }
 
   function renderNuevo() {
@@ -1832,7 +1926,7 @@
       </div>
 
       <button id="btnGuardar" class="btn-primary w-full" ${(!validRecord() || state.saving) ? "disabled" : ""}>
-        ${state.saving ? "Guardando..." : "Guardar registro"}
+        ${state.saving ? "Guardando..." : (state.form === "GPFO0405" && state.situacion === "No Reparada" ? "Guardar registro y enviar correo" : "Guardar registro")}
       </button>
     `;
 
@@ -1900,7 +1994,7 @@
     if (btnFoto) btnFoto.onclick = () => { state.camDestino = "registro"; abrirCamara(); };
     const btnGaleria = document.getElementById("btnGaleria");
     if (btnGaleria) btnGaleria.onclick = () => abrirGaleria("registro");
-    document.getElementById("btnGuardar").onclick = guardarRegistro;
+    document.getElementById("btnGuardar").onclick = () => guardarRegistro(state.form === "GPFO0405" && state.situacion === "No Reparada");
   }
 
   function renderRuta() {
@@ -2048,6 +2142,13 @@
     });
   }
 
+  // Botón «Enviar correo» de una fuga No Reparada en la lista Hechos
+  function botonCorreoReg(r) {
+    if (r.local || r.editPendiente) return `<div class="text-xs mt-2 p-2 rounded-lg" style="background:#FFF1C7;color:#6B4A00">✉️ El correo se podrá enviar apenas suban las fotos (ahora están por subir).</div>`;
+    const hi = state.correoAuto === r.id;
+    const equipo = r.tipoFuga === "Conexión" ? "Comercial" : r.tipoFuga === "Red" ? "EOMR" : "";
+    return `<button class="regCorreo btn-primary w-full mt-2" data-id="${escA(r.id)}" style="background:#8E2019${hi ? ";outline:3px solid #F2A900;outline-offset:2px" : ""}">✉️ Enviar correo${equipo ? " (" + equipo + ")" : ""}</button>`;
+  }
   function renderLista() {
     const c = document.getElementById("tabContent");
     c.innerHTML = `
@@ -2092,7 +2193,8 @@
         <div class="text-sm mt-1 flex items-center gap-2" style="color:var(--ink)">
           <span class="badge" style="background:${r.situacion === "Reparada" ? "#DDF3E7;color:#12613B" : "#FBE0DD;color:#8E2019"}">${escA(r.situacion)}</span>
           <span style="color:var(--ink-soft)">Detección ${escA(dmy(r.fechaDeteccion))} · Verificación ${escA(dmy(r.fechaVerificacion))}</span>
-        </div>` : `
+        </div>
+        ${r.situacion === "No Reparada" ? botonCorreoReg(r) : ""}` : `
         <div class="text-sm mt-2" style="color:var(--ink)">Presión: <b>${escA(r.presion)} mca</b> · ${escA(dmy(r.fecha))} ${escA(r.hora)}</div>`}
         ${fotosDe(r).length ? `<div class="flex gap-2 mt-2 overflow-x-auto">${fotosDe(r).map((f, i) => `
           <button class="regFoto shrink-0" data-id="${escA(r.id)}" data-i="${i}" aria-label="Ver foto ${i + 1}"
@@ -2108,6 +2210,10 @@
     `).join("");
     document.querySelectorAll(".regFoto").forEach(b => b.onclick = () => {
       const r = state.registros.find(x => x.id === b.dataset.id); if (r) abrirVisor(fotosDe(r), Number(b.dataset.i));
+    });
+    document.querySelectorAll(".regCorreo").forEach(b => b.onclick = () => {
+      const r = state.registros.find(x => x.id === b.dataset.id); if (!r) return;
+      state.correoAuto = null; correoFuga(r);
     });
     document.querySelectorAll(".regEditar").forEach(b => b.onclick = async () => {
       const r = state.registros.find(x => x.id === b.dataset.id); if (!r) return;
@@ -2399,7 +2505,7 @@
 
   function mostrarIntro() {
     const host = document.createElement("div");
-    host.innerHTML = INTRO_HTML.replace("__LOGO__", LOGO_SEDAPAL).replace("__MANO__", mano(48, true));
+    host.innerHTML = INTRO_HTML.replace("__LOGO__", logoApp()).replace("__MANO__", mano(48, true));
     const el = host.firstElementChild;
     document.body.appendChild(el);
     let fin = false;
@@ -2500,7 +2606,7 @@
           <path d="M288 154 v22 M304 154 v22" stroke="#B9C6D3" stroke-width="2"/>
         </svg>
         <div class="menu-top">
-          <span class="logo-chip"><img src="${LOGO_SEDAPAL}" alt="SEDAPAL"></span>
+          <span class="logo-chip"><img src="${logoApp()}" alt="SEDAPAL"></span>
           <button id="btnSalir" class="menu-salir">Salir</button>
         </div>
         <div class="menu-txt">
@@ -2580,7 +2686,10 @@
            defecto: { titulo: "Centro de Control", descripcion: "Fugas pendientes y atendidas hoy en el mapa" } },
     // Cuadrillas Fugas: laboratorios, camionetas 4x4 y su personal; lo ven todos (solo los administradores editan)
     CUADRILLAS: { tipo: "vista", ico: () => ICO_CQ, abrir: () => abrirModulo("CUADRILLAS"), estilo: "background:#EEF0FD;border-color:#B7BEF2",
-           defecto: { titulo: "Cuadrillas Fugas", descripcion: "Laboratorios, camionetas y su personal" } }
+           defecto: { titulo: "Cuadrillas Fugas", descripcion: "Laboratorios, camionetas y su personal" } },
+    // Verificación de vehículos: checklist de pre-uso (DGMFO0029), firmas, fotos, PDF y correo (al inicio solo administradores)
+    VERIF_VEHICULOS: { tipo: "vista", soloAdmin: true, ico: () => ICO_VEH, abrir: () => abrirModulo("VERIF_VEHICULOS"), estilo: "background:#EAF1F8;border-color:#A9C3E0",
+           defecto: { titulo: "Verificación de vehículos", descripcion: "DGMFO0029 · checklist de pre-uso, PDF y correo" } }
   };
   const MOD_RETIRADOS = ["MAPA_NIS", "REPLICA_GIS"];   // se unieron en PLANO_GIS
   function modulosConfig() {
@@ -2681,7 +2790,7 @@
         <button id="admVolver" aria-label="Volver al menú" style="background:none;border:0;color:#fff;font-size:26px;width:40px;height:40px">‹</button>
         <div style="flex:1;min-width:0"><div style="font-size:12px;color:#8FD3F0;font-weight:700">ECRF CAMPO · ${escA(state.operario)}</div>
           <div style="font-size:22px;font-weight:800;line-height:1.15">Panel de administración</div></div>
-        <span class="logo-chip"><img src="${LOGO_SEDAPAL}" alt="SEDAPAL"></span>
+        <span class="logo-chip"><img src="${logoApp()}" alt="SEDAPAL"></span>
       </div></div>
       <div class="adm-wrap">
         <div class="adm-tabs">
@@ -2694,12 +2803,16 @@
           <button class="adm-tab" data-admtab="usuarios" aria-current="${tab === "usuarios"}">Gestión de usuarios</button>
           <button class="adm-tab" data-admtab="whatsapp" aria-current="${tab === "whatsapp"}">Plantilla WhatsApp</button>
           <button class="adm-tab" data-admtab="marca" aria-current="${tab === "marca"}">Marca de agua fotos</button>
+          <button class="adm-tab" data-admtab="correo" aria-current="${tab === "correo"}">Plantilla correo</button>
+          <button class="adm-tab" data-admtab="logo" aria-current="${tab === "logo"}">Ícono & app móvil</button>
         </div>
         ${tab === "charlas" ? estilosGis() + estilosCharlas() + htmlAdminCharlas()
           : tab === "usuarios" ? htmlAdminUsuarios()
           : tab === "perfiles" ? htmlAdminPerfiles()
           : tab === "whatsapp" ? htmlAdminWhatsapp()
           : tab === "marca" ? htmlAdminMarca()
+          : tab === "correo" ? htmlAdminCorreo()
+          : tab === "logo" ? htmlAdminLogo()
           : tab === "rdpdf" ? (!state.adminRd ? (cargarAdminRd(), `<div class="text-sm py-6" style="color:var(--ink-soft)">Cargando…</div>`) : state.adminRd.error ? `<div class="card p-4 text-sm" style="color:var(--danger)">${escA(state.adminRd.error)}</div>` : htmlRdSupervisor(state.adminRd))
           : tab === "catalogo" ? `<div class="text-sm mb-3" style="color:var(--ink-soft)">Dominios: catálogos de valores que los trabajadores eligen en la app. Toca ✏️ en un catálogo para agregar, editar, activar/desactivar o eliminar sus valores y luego presiona «Guardar cambios». Los registros anteriores conservan su texto.</div>` + estilosCq() + htmlAdminCatalogo()
           : tab === "vehiculo" ? `<div class="text-sm mb-3" style="color:var(--ink-soft)">Ficha del vehículo laboratorio que ven todos en «Laboratorio ECRF». Las fechas de SOAT, revisión técnica y mantenimiento generan las alertas de vencimiento.</div>` + estilosGis() + htmlAdminVehiculo() : `
@@ -2766,7 +2879,7 @@
     app.querySelectorAll("[data-admtab]").forEach(b => b.onclick = () => {
       if (state.adminTab === b.dataset.admtab) return;
       if (b.dataset.admtab !== "modulos" && state.adminDirty) { toast("Guarda o deshaz los cambios del orden del menú primero", true); return; }
-      state.adminTab = b.dataset.admtab; if (state.adminTab !== "modulos") state.adminRd = null; state.usLista = null; state.pf = null; state.waAdmin = null; state.maEdit = null;
+      state.adminTab = b.dataset.admtab; if (state.adminTab !== "modulos") state.adminRd = null; state.usLista = null; state.pf = null; state.waAdmin = null; state.maEdit = null; state.correoEdit = null; state.logoEdit = null;
       if (state.adminTab === "vehiculo") { state.labDatos = null; state.adminVeh = null; }
       renderAdmin(); window.scrollTo(0, 0);
     });
@@ -2775,6 +2888,8 @@
     if (tab === "perfiles") { document.getElementById("admVolver").onclick = salirAdmin; activarAdminPerfiles(app); return; }
     if (tab === "whatsapp") { document.getElementById("admVolver").onclick = salirAdmin; activarAdminWhatsapp(app); return; }
     if (tab === "marca") { document.getElementById("admVolver").onclick = salirAdmin; activarAdminMarca(app); return; }
+    if (tab === "correo") { document.getElementById("admVolver").onclick = salirAdmin; activarAdminCorreo(app); return; }
+    if (tab === "logo") { document.getElementById("admVolver").onclick = salirAdmin; activarAdminLogo(app); return; }
     if (tab === "rdpdf") { document.getElementById("admVolver").onclick = salirAdmin; if (state.adminRd && !state.adminRd.error) activarRdSupervisor(state.adminRd, () => { const y = window.scrollY; renderAdmin(); window.scrollTo(0, y); }); return; }
     if (tab !== "modulos") { activarAdminRd(app); return; }
 
@@ -2806,7 +2921,7 @@
   }
   function salirAdmin() {
     if (state.adminDirty) toast("Se descartaron los cambios sin guardar");
-    state.admin = false; state.adminMods = null; state.adminDirty = false; state.adminTab = "modulos"; state.adminRd = null; state.adminCharlaEd = null;
+    state.admin = false; state.adminMods = null; state.adminDirty = false; state.adminTab = "modulos"; state.adminRd = null; state.adminCharlaEd = null; state.correoEdit = null; state.logoEdit = null;
     document.getElementById("app").classList.add("max-w-md");
     render(); window.scrollTo(0, 0);
   }
@@ -2974,7 +3089,7 @@
         <span class="form-ico" style="display:flex;align-items:center;justify-content:center;background:rgba(255,255,255,.12);color:#fff;width:46px;height:46px">${ICO_RD}</span>
         <div class="flex-1 min-w-0"><div class="font-extrabold leading-tight">Reporte diario de actividades</div>
           <div class="text-xs" style="color:#C9D8EA">${escA(state.operario)}</div></div>
-        <span class="logo-chip"><img src="${LOGO_SEDAPAL}" alt="SEDAPAL"></span>
+        <span class="logo-chip"><img src="${logoApp()}" alt="SEDAPAL"></span>
       </div></div>
       <div style="background:var(--card);border-bottom:1px solid var(--line)"><div class="rd-wrap flex px-4">
         <div class="tab-btn ${state.rdTab === "hoy" ? "active" : ""}" data-rdtab="hoy">Hoy</div>
@@ -4307,6 +4422,7 @@
   const ICO_MAPA = ICS(`<path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z"/><circle cx="12" cy="10" r="3"/>`);
   const ICO_RUTA = ICS(`<circle cx="6" cy="19" r="3"/><path d="M9 19h8.5a3.5 3.5 0 0 0 0-7h-11a3.5 3.5 0 0 1 0-7H15"/><circle cx="18" cy="5" r="3"/>`);
   const ICO_LAB = ICS(`<path d="M14 18V6a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2v11a1 1 0 0 0 1 1h2"/><path d="M15 18H9"/><path d="M19 18h2a1 1 0 0 0 1-1v-3.65a1 1 0 0 0-.22-.62l-3.48-4.35A1 1 0 0 0 17.52 8H14"/><circle cx="17" cy="18" r="2"/><circle cx="7" cy="18" r="2"/>`);
+  const ICO_VEH = ICS(`<path d="M9 5H7a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-2"/><rect x="9" y="3" width="6" height="4" rx="1"/><path d="m9 14 2 2 4-4"/>`);
   const ICO_LAT = {
     GPFO0381: ICS(`<path d="m12 14 4-4"/><path d="M3.34 19a10 10 0 1 1 17.32 0"/>`),
     GPFO0405: ICS(`<path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/>`),
@@ -4402,7 +4518,7 @@
     else if (MODULOS_APP[id] && MODULOS_APP[id].tipo === "form") {
       state.form = id; sessionStorage.setItem("ecrf_form", id); state.tab = "nuevo";
       resetForm(); state.rutaSel = null; state.rutaQuery = "";
-    } else if (["PLANO_GIS", "PLANIFICADOR_RUTAS", "LABORATORIO_ECRF", "SGIO", "CENTRO_CONTROL", "CUADRILLAS", "SUPERVISION"].includes(id)) {
+    } else if (["PLANO_GIS", "PLANIFICADOR_RUTAS", "LABORATORIO_ECRF", "SGIO", "CENTRO_CONTROL", "CUADRILLAS", "SUPERVISION", "VERIF_VEHICULOS"].includes(id)) {
       state.vista = id; state.labTab = "vehiculo";
       if (id === "CENTRO_CONTROL") { state.ccDatos = null; state.ccEncuadrado = false; }
       // La actualización del SGIO NO se dispara al entrar: solo al pulsar «Actualizar» (Centro de Control) o «Buscar» (Incidencias).
@@ -4428,7 +4544,7 @@
     const act = navActual();
     el.innerHTML = `
       <div class="lat-marca">
-        <span class="logo-chip"><img src="${LOGO_SEDAPAL}" alt="SEDAPAL"></span>
+        <span class="logo-chip"><img src="${logoApp()}" alt="SEDAPAL"></span>
         <div class="min-w-0 flex-1"><b>ECRF Campo</b><small>Control y reducción de fugas</small></div>
         <button class="lat-cerrar" id="latCerrar" aria-label="Cerrar menú">✕</button>
       </div>
@@ -4585,7 +4701,7 @@
         <span class="form-ico" style="display:flex;align-items:center;justify-content:center;background:rgba(255,255,255,.12);color:#fff;width:46px;height:46px">${ico}</span>
         <div class="flex-1 min-w-0"><div class="font-extrabold leading-tight">${titulo}</div>
           <div class="text-xs" style="color:#C9D8EA">${escA(grupo || "GIS & Logística")} · ${escA(sub)}</div></div>
-        <span class="logo-chip"><img src="${LOGO_SEDAPAL}" alt="SEDAPAL"></span>
+        <span class="logo-chip"><img src="${logoApp()}" alt="SEDAPAL"></span>
       </div></div>`;
   }
   let mapaNisL = null, planL = null, ccL = null, ccReloj = null;
@@ -4600,6 +4716,250 @@
     if (pintar === false) return;
     state.vista = null; render(); window.scrollTo(0, 0);
   }
+  /* ================= FORMULARIO: VERIFICACIÓN DE VEHÍCULOS (DGMFO0029 v3) ================= */
+  const VEH_CHK = [
+    { id: "doc", t: "DOCUMENTOS", items: ["SOAT", "Brevete del chofer", "Revisión técnica vigente", "Tarjeta de propiedad", "Otro"] },
+    { id: "todo", t: "PARA TODO VEHÍCULO", items: ["Sistema de Dirección", "Sistema de Frenos", "Alarma de Retroceso", "Cinturón de Seguridad", "Sistema Hidráulico", "Espejos", "Llantas", "Espárragos y Tuercas", "Botiquín", "Luces", "Limpiaparabrisas", "Aro y Pestaña", "Claxon", "Panel de Controles", "Asientos", "Extintor", "Vidrios de Ventanas", "Suspensión", "Guardabarro", "Calzas de Seguridad", "Estribos", "Triángulo y cono de seguridad", "Sistema de escape", "Mangueras hidráulicas", "Orden y Limpieza"] },
+    { id: "buses", t: "BUSES Y CAMIONETAS", items: ["Compresora - Sistema de Aire", "Sistema Freno de Emergencia", "Pértiga", "Radio de Comunicación"] },
+    { id: "cisterna", t: "CAMIÓN CISTERNA / HIDROJET Y PLATAFORMAS", items: ["Sistema Freno de Emergencia", "Compresora - Sistema de Aire", "Descarga a Tierra", "Válvulas", "Sistema de Tornamesa", "Acoples - Sistema de Frenos", "Acoples - Sistema Eléctrico", "Escaleras y Barandas", "Gatos Mecánicos de Estacionamiento"] },
+    { id: "camaratv", t: "CÁMARA TV", items: ["Remolque", "Llantas", "Bocamaza", "Rueda Guía, Sproket", "Pines y Bocinas", "Luces de seguridad", "Amortiguación"] },
+    { id: "herr", t: "HERRAMIENTAS", items: ["Gata y palanca", "Llave francesa", "Llave stilson", "Llave de ruedas", "Llanta de repuesto", "Otro (linterna u otros)"] },
+    { id: "cargador", t: "CARGADOR FRONTAL", items: ["Sistema Freno de Emergencia", "Botellas Hidráulicas", "Cuchara y Dientes", "Pines y Bocinas"] },
+    { id: "excav", t: "EXCAVADORA / RETROEXCAVADORA", items: ["Rueda Guía, Sproket", "Botellas Hidráulicas", "Mandos Finales", "Orugas y Rodillos", "Tornamesa", "Pines del Cucharón", "Zapatas"] },
+    { id: "motoniv", t: "MOTONIVELADORA", items: ["Sistema Freno de Emergencia", "Sistema Hidráulico de Tornamesa y Dirección", "Articulación de Escarificador", "Balancín de Dirección"] },
+    { id: "volq", t: "VOLQUETES", items: ["Sistema Freno de Emergencia", "Compresora - Sistema de Aire", "Pin y Seguro de Tolva", "Pines - Pistón de Levante", "Compuerta"] },
+    { id: "gruas", t: "GRÚAS", items: ["Plumas o Brazos", "Estabilizadores", "Gancho de Levante", "Lengüeta de Seguridad de Gancho", "Válvula de Seguridad", "Diagrama de Carga", "Diagrama de Señales"] },
+    { id: "rodillo", t: "RODILLO", items: ["Rola"] }
+  ];
+  const VEH_AMB = ["Derrame de lubricantes sobre el suelo", "Derrame de combustible sobre el suelo", "Derrame antes de encender", "Derrame después de encender", "Cuenta y utiliza bandeja metálica para contención de derrames", "Recoge y dispone los residuos (según DGMPC006)"];
+  const VEH_VERIF = ["Nivel del líquido del radiador", "Nivel de aceite de motor", "Nivel de aceite hidrolina", "Nivel de líquido de freno", "Nivel de combustible", "Fugas de agua / aire"];
+  const VEH_ENC = [["centro", "Centro de Servicio / Sede"], ["gerencia", "Gerencia"], ["equipo", "Equipo"], ["kilometraje", "Kilometraje"], ["lugar", "Lugar de inspección"], ["actividad", "Actividad"], ["tipoveh", "Tipo de Vehículo / Maquinaria"], ["interno", "N° Interno"], ["conductor", "Conductor del Veh./Maq."], ["fichadni", "Ficha/DNI conductor"], ["responsable", "Responsable de Grupo / Supervisor"], ["fichaResp", "Ficha N° responsable"], ["clase", "Clase (brevete)"], ["categoria", "Categoría (brevete)"]];
+  let vehC1 = null, vehC2 = null;   // contextos de las firmas
+
+  function vehInit() {
+    if (!state.veh) state.veh = { placa: "", datos: {}, chk: {}, sino: {}, ai: {}, operar: "", autoriz: "", mantFecha: "", mantDoc: "", obs: [""], med: [{}], fotos: [], firmas: {} };
+    return state.veh;
+  }
+  function vehFirmaFile(dataUrl) {   // dataURL -> File para marca de agua/guardado (no se usa marca de agua en firmas)
+    return dataUrl || "";
+  }
+  function renderVehiculos() {
+    const v = vehInit();
+    const app = document.getElementById("app"); app.classList.add("max-w-md");
+    const enc = n => `<div class="f"><label>${escA(VEH_ENC.find(e => e[0] === n)[1])}</label><input data-enc="${n}" value="${escA(v.datos[n] || "")}" ${n === "kilometraje" ? 'inputmode="numeric"' : ""}></div>`;
+    const chkRows = g => g.items.map((it, i) => {
+      const val = (v.chk[g.id] || {})[i];
+      return `<div class="vh-item ${val ? "" : "off"}"><div class="vh-nm">${escA(it)}</div>
+        <button class="vh-chk ${val ? "on" : ""}" data-chk="${g.id}" data-i="${i}" aria-label="estado">${val ? "✓" : "—"}</button></div>`;
+    }).join("");
+    const sinoRows = VEH_AMB.map((it, i) => {
+      const val = v.sino[i];
+      return `<div class="vh-item"><div class="vh-nm">${escA(it)}</div><div class="vh-sino">
+        <button class="si ${val === "si" ? "on" : ""}" data-sino="${i}" data-v="si">SÍ</button>
+        <button class="no ${val === "no" ? "on" : ""}" data-sino="${i}" data-v="no">NO</button></div></div>`;
+    }).join("");
+    const aiRows = VEH_VERIF.map((it, i) => {
+      const val = v.ai[i] || "";
+      return `<div class="vh-item"><div class="vh-nm">${escA(it)}</div><div class="vh-ai">
+        <select data-ai="${i}"><option value="">—</option><option value="A" ${val === "A" ? "selected" : ""}>A (Adecuado)</option><option value="I" ${val === "I" ? "selected" : ""}>I (Inadecuado)</option></select></div></div>`;
+    }).join("");
+    const sec = (titulo, tag, cuerpo) => `<div class="vh-sec"><h3>${titulo}${tag ? `<span class="vh-tag">${tag}</span>` : ""}</h3><div class="vh-pad">${cuerpo}</div></div>`;
+    const obsRows = v.obs.map((o, i) => `<div class="f"><textarea data-obs="${i}" placeholder="Observación...">${escA(o || "")}</textarea></div>`).join("");
+    const medRows = v.med.map((m, i) => `<div class="vh-med"><div class="vh-n">Medida ${i + 1}</div>
+      <div class="f"><label>Medida correctiva propuesta</label><input data-med="${i}" data-k="medida" value="${escA(m.medida || "")}"></div>
+      <div class="vh-grid2"><div class="f"><label>Plazo</label><input data-med="${i}" data-k="plazo" value="${escA(m.plazo || "")}"></div>
+      <div class="f"><label>Responsable</label><input data-med="${i}" data-k="resp" value="${escA(m.resp || "")}"></div></div>
+      <div class="vh-grid2"><div class="f"><label>Fecha implementación</label><input type="date" data-med="${i}" data-k="fecha" value="${escA(m.fecha || "")}"></div>
+      <div class="f"><label>Verificado por</label><input data-med="${i}" data-k="verif" value="${escA(m.verif || "")}"></div></div></div>`).join("");
+    const fotoRows = v.fotos.map((f, i) => `<div class="vh-foto"><div class="th">${f.url ? `<img src="${f.url}" alt="">` : "🖼️"}</div>
+      <div class="f" style="flex:1;margin:0"><label>Anexo ${i + 1} — título</label><input data-foto="${i}" value="${escA(f.titulo || "")}" placeholder="Ej. Llanta delantera derecha"></div>
+      <button class="vh-del" data-fotodel="${i}" aria-label="Quitar">✕</button></div>`).join("");
+
+    app.innerHTML = `${vehEstilos()}
+      <div class="vh-top"><button class="vh-volver" id="vhVolver" aria-label="Volver">‹</button>
+        <div class="ico">🚚</div><div class="min-w-0"><b>Verificación de Vehículos</b><small>DGMFO0029 · ${escA(state.operario || "")}</small></div></div>
+      ${sec("DATOS DEL VEHÍCULO", "", `
+        <div class="f"><label>N° de Placa</label><input id="vhPlaca" value="${escA(v.placa || "")}" placeholder="Ej. ABC-123" style="font-weight:700;text-transform:uppercase"></div>
+        <div class="vh-grid2">${VEH_ENC.slice(0, 12).map(e => enc(e[0])).join("")}</div>
+        <div class="vh-hint">La placa es el identificador. Si existe en cuadrillas, se autocompletan los datos; si no, se llenan a mano.</div>`)}
+      ${VEH_CHK.map(g => g.id === "doc"
+        ? sec(g.t, "✓ / —", chkRows(g) + `<div class="vh-grid2" style="margin-top:8px">${enc("clase")}${enc("categoria")}</div>`)
+        : g.id === "camaratv"
+          ? sec(g.t, "✓ / —", chkRows(g)) + sec("CONSIDERACIONES AMBIENTALES", "Sí / No", sinoRows) + sec("VERIFICAR PARA TODO VEHÍCULO", "A / I", aiRows)
+          : sec(g.t, "✓ / —", chkRows(g))).join("")}
+      ${sec("MANTENIMIENTO", "", `
+        <div class="f"><label>Último mantenimiento realizado a la unidad</label><input type="date" id="vhMantFecha" value="${escA(v.mantFecha || "")}"></div>
+        <div class="f"><label>Documento que acredite el mantenimiento</label><input id="vhMantDoc" value="${escA(v.mantDoc || "")}" placeholder="N° de documento / referencia"></div>`)}
+      ${sec("CONDICIONES PARA OPERAR", "", `<div class="vh-pick" id="vhOperar">
+        <button class="good ${v.operar === "op" ? "on" : ""}" data-v="op">✓ Operativo</button>
+        <button class="badb ${v.operar === "no" ? "on" : ""}" data-v="no">✗ No operativo</button></div>`)}
+      ${sec("AUTORIZACIÓN DEL RESPONSABLE", "", `<div class="vh-hint">¿Autoriza el uso del vehículo?</div><div class="vh-pick" id="vhAutoriz">
+        <button class="good ${v.autoriz === "si" ? "on" : ""}" data-v="si">Sí</button>
+        <button class="badb ${v.autoriz === "no" ? "on" : ""}" data-v="no">No</button></div>`)}
+      ${sec("OBSERVACIONES", "", `<div id="vhObs">${obsRows}</div><button class="vh-add" id="vhAddObs">+ Agregar observación</button>`)}
+      ${sec("MEDIDAS CORRECTIVAS", "", `<div id="vhMed">${medRows}</div><button class="vh-add" id="vhAddMed">+ Agregar medida</button>`)}
+      ${sec("FOTOS (ANEXOS)", "", `<div id="vhFotos">${fotoRows}</div><button class="vh-add" id="vhAddFoto">📷 Agregar foto</button>
+        <input type="file" id="vhFotoIn" accept="image/*" capture="environment" hidden>`)}
+      ${sec("FIRMAS", "", `
+        <div class="vh-frow"><label>Conductor del Veh./Maq.</label><button class="vh-mini" data-clr="1">Borrar</button></div>
+        <canvas class="vh-firma" id="vhF1"></canvas>
+        <div class="vh-frow" style="margin-top:12px"><label>Responsable de Grupo / Supervisor</label><button class="vh-mini" data-clr="2">Borrar</button></div>
+        <canvas class="vh-firma" id="vhF2"></canvas>`)}
+      ${sec("CONFORMIDAD", "", `
+        <div class="f"><label>Responsable de la verificación</label><input class="vh-ro" value="${escA(state.operario || "")}" readonly></div>
+        <div class="f"><label>Fecha</label><input class="vh-ro" value="${new Date().toLocaleDateString("es-PE")}" readonly></div>
+        <div class="vh-hint">Se toman del usuario y la fecha del dispositivo (no editables).</div>`)}
+      <div style="height:78px"></div>
+      <div class="vh-guardar"><button id="vhGuardar">Guardar y generar PDF</button><div id="vhMsg" class="vh-gmsg"></div></div>`;
+    activarVehiculos();
+  }
+  function activarVehiculos() {
+    const v = state.veh, app = document.getElementById("app");
+    document.getElementById("vhVolver").onclick = () => { if (confirm("¿Salir del formulario? Se perderá lo no guardado.")) { state.veh = null; abrirModulo(""); } };
+    const placa = document.getElementById("vhPlaca");
+    placa.oninput = () => { v.placa = placa.value.toUpperCase(); };
+    placa.onblur = () => vehAutocompletar(v.placa);
+    app.querySelectorAll("[data-enc]").forEach(inp => inp.oninput = () => { v.datos[inp.dataset.enc] = inp.value; });
+    app.querySelectorAll("[data-chk]").forEach(b => b.onclick = () => {
+      const g = b.dataset.chk, i = +b.dataset.i; v.chk[g] = v.chk[g] || {};
+      v.chk[g][i] = !v.chk[g][i]; b.classList.toggle("on", v.chk[g][i]); b.textContent = v.chk[g][i] ? "✓" : "—";
+      b.closest(".vh-item").classList.toggle("off", !v.chk[g][i]);
+    });
+    app.querySelectorAll("[data-sino]").forEach(b => b.onclick = () => {
+      const i = +b.dataset.sino, val = b.dataset.v; v.sino[i] = v.sino[i] === val ? "" : val;
+      b.closest(".vh-sino").querySelectorAll("button").forEach(x => x.classList.toggle("on", x.dataset.v === v.sino[i]));
+    });
+    app.querySelectorAll("[data-ai]").forEach(s => s.onchange = () => { v.ai[+s.dataset.ai] = s.value; });
+    ["Operar", "Autoriz"].forEach(k => { const g = document.getElementById("vh" + k); g.querySelectorAll("button").forEach(b => b.onclick = () => {
+      const campo = k.toLowerCase(); v[campo] = v[campo] === b.dataset.v ? "" : b.dataset.v;
+      g.querySelectorAll("button").forEach(x => x.classList.toggle("on", x.dataset.v === v[campo]));
+    }); });
+    document.getElementById("vhMantFecha").oninput = e => v.mantFecha = e.target.value;
+    document.getElementById("vhMantDoc").oninput = e => v.mantDoc = e.target.value;
+    app.querySelectorAll("[data-obs]").forEach(t => t.oninput = () => { v.obs[+t.dataset.obs] = t.value; });
+    document.getElementById("vhAddObs").onclick = () => { v.obs.push(""); renderVehiculos(); };
+    app.querySelectorAll("[data-med]").forEach(inp => inp.oninput = () => { const i = +inp.dataset.med; v.med[i] = v.med[i] || {}; v.med[i][inp.dataset.k] = inp.value; });
+    document.getElementById("vhAddMed").onclick = () => { v.med.push({}); renderVehiculos(); };
+    app.querySelectorAll("[data-foto]").forEach(inp => inp.oninput = () => { v.fotos[+inp.dataset.foto].titulo = inp.value; });
+    app.querySelectorAll("[data-fotodel]").forEach(b => b.onclick = () => { v.fotos.splice(+b.dataset.fotodel, 1); renderVehiculos(); });
+    const fin = document.getElementById("vhFotoIn");
+    document.getElementById("vhAddFoto").onclick = () => fin.click();
+    fin.onchange = async () => { const f = fin.files[0]; if (!f) return; try {
+      const real = Date.now(); const blob = await watermarkPhoto(f, false, new Date(), real, ["VERIFICACIÓN DE VEHÍCULOS", v.placa ? "Placa: " + v.placa : ""]);
+      v.fotos.push({ titulo: "", url: URL.createObjectURL(blob), blob }); renderVehiculos();
+    } catch (e) { v.fotos.push({ titulo: "", url: URL.createObjectURL(f), blob: f }); renderVehiculos(); } fin.value = ""; };
+    vehC1 = vehFirma(document.getElementById("vhF1"), "f1"); vehC2 = vehFirma(document.getElementById("vhF2"), "f2");
+    app.querySelectorAll("[data-clr]").forEach(b => b.onclick = () => { const cv = document.getElementById("vhF" + b.dataset.clr); cv.getContext("2d").clearRect(0, 0, cv.width, cv.height); v.firmas["f" + b.dataset.clr] = ""; });
+    document.getElementById("vhGuardar").onclick = guardarVehiculo;
+  }
+  function vehFirma(cv, clave) {
+    const ctx = cv.getContext("2d"), r = cv.getBoundingClientRect();
+    cv.width = r.width * 2; cv.height = r.height * 2; ctx.scale(2, 2); ctx.lineWidth = 2; ctx.lineCap = "round"; ctx.strokeStyle = "#0A2540";
+    if (state.veh.firmas[clave]) { const im = new Image(); im.onload = () => ctx.drawImage(im, 0, 0, r.width, r.height); im.src = state.veh.firmas[clave]; }
+    let draw = false, px, py;
+    const pos = e => { const b = cv.getBoundingClientRect(); const t = e.touches ? e.touches[0] : e; return [t.clientX - b.left, t.clientY - b.top]; };
+    const down = e => { draw = true;[px, py] = pos(e); e.preventDefault(); };
+    const move = e => { if (!draw) return; const [x, y] = pos(e); ctx.beginPath(); ctx.moveTo(px, py); ctx.lineTo(x, y); ctx.stroke();[px, py] = [x, y]; e.preventDefault(); };
+    const up = () => { if (draw) { draw = false; state.veh.firmas[clave] = cv.toDataURL("image/png"); } };
+    cv.addEventListener("mousedown", down); cv.addEventListener("mousemove", move); window.addEventListener("mouseup", up);
+    cv.addEventListener("touchstart", down, { passive: false }); cv.addEventListener("touchmove", move, { passive: false }); cv.addEventListener("touchend", up);
+    return ctx;
+  }
+  function vehAutocompletar(placa) {
+    placa = (placa || "").trim().toUpperCase(); if (!placa) return;
+    try {
+      const lista = (state.cuadrillas || []).concat(state.cqLista || []);
+      const veh = lista.find(c => String(c.placa || "").toUpperCase() === placa);
+      if (veh) { const v = state.veh;
+        if (veh.tipo) v.datos.tipoveh = v.datos.tipoveh || veh.tipo;
+        if (veh.interno) v.datos.interno = v.datos.interno || veh.interno;
+        if (veh.conductor) v.datos.conductor = v.datos.conductor || veh.conductor;
+        if (veh.centro) v.datos.centro = v.datos.centro || veh.centro;
+        toast("Datos del vehículo autocompletados"); renderVehiculos();
+      }
+    } catch (e) {}
+  }
+  async function guardarVehiculo() {
+    const v = state.veh, btn = document.getElementById("vhGuardar"), msg = document.getElementById("vhMsg");
+    btn.disabled = true; btn.textContent = "Guardando…"; msg.textContent = "";
+    try {
+      if (!enLinea()) throw new Error("Necesitas conexión para guardar este formulario (genera PDF y correo). Intenta cuando tengas internet.");
+      // fotos -> base64
+      const fotos = [];
+      for (const f of v.fotos) { if (f.blob) fotos.push({ titulo: f.titulo || "", b64: await blobB64(f.blob) }); }
+      // secciones ya como etiqueta→valor (para que el servidor arme el PDF genérico, sin duplicar las 96 etiquetas)
+      const secciones = [];
+      VEH_CHK.forEach(g => {
+        const filas = g.items.map((it, i) => ({ n: it, v: (v.chk[g.id] || {})[i] ? "✓" : "—" }));
+        if (g.id === "doc") { filas.push({ n: "Clase (brevete)", v: v.datos.clase || "—" }); filas.push({ n: "Categoría (brevete)", v: v.datos.categoria || "—" }); }
+        secciones.push({ t: g.t, filas });
+        if (g.id === "camaratv") {
+          secciones.push({ t: "CONSIDERACIONES AMBIENTALES", filas: VEH_AMB.map((it, i) => ({ n: it, v: v.sino[i] === "si" ? "Sí" : v.sino[i] === "no" ? "No" : "—" })) });
+          secciones.push({ t: "VERIFICAR PARA TODO VEHÍCULO", filas: VEH_VERIF.map((it, i) => ({ n: it, v: v.ai[i] === "A" ? "A (Adecuado)" : v.ai[i] === "I" ? "I (Inadecuado)" : "—" })) });
+        }
+      });
+      const datosLbl = VEH_ENC.filter(e => e[0] !== "clase" && e[0] !== "categoria").map(e => ({ n: e[1], v: v.datos[e[0]] || "—" }));
+      const payload = {
+        placa: v.placa || "", datos: v.datos, chk: v.chk, sino: v.sino, ai: v.ai,
+        operar: v.operar, autoriz: v.autoriz, mantFecha: v.mantFecha, mantDoc: v.mantDoc,
+        obs: v.obs.filter(x => x && x.trim()), med: v.med.filter(m => m && (m.medida || m.plazo || m.resp)),
+        firmas: v.firmas, fotos, operario: state.operario, fecha: new Date().toLocaleDateString("es-PE"),
+        hora: new Date().toLocaleTimeString("es-PE"),
+        secciones, datosLbl,
+        operarTxt: v.operar === "op" ? "OPERATIVO" : v.operar === "no" ? "NO OPERATIVO" : "—",
+        autorizTxt: v.autoriz === "si" ? "SÍ" : v.autoriz === "no" ? "NO" : "—"
+      };
+      const r = await rdApi("veh_guardar", payload);
+      if (!r || !r.ok) throw new Error((r && r.msg) || "No se pudo guardar");
+      msg.innerHTML = `<span style="color:#16A34A">✓ Guardado. ${r.correo ? "Correo enviado a " + escA(r.correo) : "PDF generado"}.</span>`;
+      toast("Verificación guardada ✅");
+      setTimeout(() => { state.veh = null; abrirModulo(""); }, 1600);
+    } catch (e) { btn.disabled = false; btn.textContent = "Guardar y generar PDF"; msg.innerHTML = `<span style="color:#DC2626">${escA(e.message || e)}</span>`; }
+  }
+  function blobB64(blob) { return new Promise((ok, no) => { const r = new FileReader(); r.onload = () => ok(String(r.result).split(",")[1]); r.onerror = no; r.readAsDataURL(blob); }); }
+  function vehEstilos() {
+    return `<style>
+      #app.max-w-md{max-width:460px}
+      .vh-top{background:linear-gradient(135deg,var(--brand,#0A4D8C),var(--brand-dark,#073B6E));color:#fff;padding:12px 14px;display:flex;align-items:center;gap:10px;position:sticky;top:0;z-index:6;border-radius:0 0 14px 14px}
+      .vh-top .ico{width:38px;height:38px;border-radius:11px;background:rgba(255,255,255,.15);display:flex;align-items:center;justify-content:center;font-size:19px}
+      .vh-top b{font-size:15px;display:block;line-height:1.1}.vh-top small{font-size:11px;color:#C9D8EA}
+      .vh-volver{background:rgba(255,255,255,.15);border:0;color:#fff;width:32px;height:32px;border-radius:9px;font-size:22px;cursor:pointer;flex:none}
+      .vh-sec{background:#fff;border:1px solid var(--line,#E2E8F0);border-radius:14px;margin:12px;overflow:hidden}
+      .vh-sec>h3{margin:0;padding:11px 14px;background:#EAF1F8;color:var(--brand-dark,#073B6E);font-size:12.5px;letter-spacing:.3px;display:flex;align-items:center;gap:8px}
+      .vh-tag{margin-left:auto;font-size:10px;font-weight:700;background:#fff;border:1px solid var(--line,#E2E8F0);border-radius:999px;padding:2px 8px;color:#5B6B7B}
+      .vh-pad{padding:10px 12px}
+      .vh-grid2{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+      .vh-pad .f{display:flex;flex-direction:column;gap:3px;margin-bottom:8px}
+      .vh-pad .f label{font-size:11px;font-weight:700;color:#5B6B7B}
+      .vh-pad .f input,.vh-pad .f select,.vh-pad .f textarea{border:1.5px solid var(--line,#E2E8F0);border-radius:10px;padding:9px 10px;font-size:14px;font-family:inherit;background:#fff;width:100%}
+      .vh-ro{background:#F1F5F9;color:#5B6B7B}
+      .vh-item{display:flex;align-items:center;gap:10px;padding:7px 2px;border-bottom:1px solid #EEF2F6}.vh-item:last-child{border-bottom:0}
+      .vh-nm{flex:1;font-size:13.5px;line-height:1.2}
+      .vh-chk{width:42px;height:34px;border:1.6px solid var(--line,#E2E8F0);border-radius:9px;background:#fff;font-size:17px;font-weight:800;color:#B6C2CF;flex:none;cursor:pointer}
+      .vh-chk.on{background:#E7F6EC;border-color:#16A34A;color:#16A34A}
+      .vh-sino{display:flex;gap:6px;flex:none}
+      .vh-sino button{width:42px;height:34px;border:1.6px solid var(--line,#E2E8F0);border-radius:9px;background:#fff;font-size:12px;font-weight:800;color:#5B6B7B;cursor:pointer}
+      .vh-sino .si.on{background:#E7F6EC;border-color:#16A34A;color:#16A34A}.vh-sino .no.on{background:#FDECEC;border-color:#DC2626;color:#DC2626}
+      .vh-ai{width:128px;flex:none}.vh-ai select{padding:7px 8px;border:1.6px solid var(--line,#E2E8F0);border-radius:9px;font-weight:700;width:100%}
+      .vh-pick{display:flex;gap:8px}.vh-pick button{flex:1;border:1.6px solid var(--line,#E2E8F0);border-radius:10px;background:#fff;padding:11px;font-weight:800;font-size:13px;color:#5B6B7B;cursor:pointer}
+      .vh-pick .good.on{background:#E7F6EC;border-color:#16A34A;color:#16A34A}.vh-pick .badb.on{background:#FDECEC;border-color:#DC2626;color:#DC2626}
+      .vh-firma{border:1.6px dashed #B6C2CF;border-radius:12px;background:#fff;height:150px;touch-action:none;display:block;width:100%}
+      .vh-frow{display:flex;justify-content:space-between;align-items:center;margin:4px 0}.vh-frow label{font-size:12px;font-weight:700;color:#5B6B7B}
+      .vh-mini{font-size:12px;color:var(--brand,#0A4D8C);background:none;border:0;cursor:pointer;font-weight:700}
+      .vh-foto{display:flex;gap:8px;align-items:center;border:1px solid var(--line,#E2E8F0);border-radius:10px;padding:8px;margin-bottom:8px}
+      .vh-foto .th{width:46px;height:46px;border-radius:8px;background:#E7EEF5;display:flex;align-items:center;justify-content:center;font-size:20px;flex:none;overflow:hidden}
+      .vh-foto .th img{width:100%;height:100%;object-fit:cover}
+      .vh-del{background:none;border:0;color:#DC2626;font-size:16px;cursor:pointer;flex:none}
+      .vh-med{border:1px solid var(--line,#E2E8F0);border-radius:10px;padding:8px;margin-bottom:8px;background:#FBFDFF}.vh-med .vh-n{font-size:11px;font-weight:800;color:var(--brand,#0A4D8C)}
+      .vh-add{width:100%;border:1.6px dashed var(--brand,#0A4D8C);color:var(--brand,#0A4D8C);background:#F2F7FC;border-radius:10px;padding:10px;font-weight:700;cursor:pointer;margin-top:4px}
+      .vh-hint{font-size:11px;color:#5B6B7B;padding:2px}
+      .vh-pad textarea{min-height:38px;resize:vertical}
+      .vh-guardar{position:fixed;bottom:0;left:0;right:0;max-width:460px;margin:0 auto;padding:10px 12px;background:#fff;border-top:1px solid var(--line,#E2E8F0);z-index:6}
+      .vh-guardar button{width:100%;background:var(--brand,#0A4D8C);color:#fff;border:0;border-radius:12px;padding:14px;font-size:16px;font-weight:800;cursor:pointer}
+      .vh-guardar button:disabled{opacity:.6}.vh-gmsg{font-size:12.5px;text-align:center;margin-top:6px}
+    </style>`;
+  }
+
   function renderVistaGis() {
     const app = document.getElementById("app");
     app.classList.remove("max-w-md");
@@ -4609,6 +4969,7 @@
     else if (state.vista === "CENTRO_CONTROL") renderCentroControl();
     else if (state.vista === "CUADRILLAS") renderCuadrillas();
     else if (state.vista === "SUPERVISION") { renderSupervision(); return; }
+    else if (state.vista === "VERIF_VEHICULOS") { renderVehiculos(); return; }
     else renderLaboratorio();
     const v = document.getElementById("gisVolver"); if (v) v.onclick = () => salirVistaGis();
   }
@@ -6332,6 +6693,180 @@
       } catch (x) { gu.disabled = false; gu.textContent = "💾 Guardar"; if (err) err.textContent = msgError(x); }
     };
     prev();
+  }
+
+  // ---------------- PLANTILLA CORREO (Panel de administración) ----------------
+  // Asunto + cuerpo del correo de fugas «No Reparada», directorio por los 7 centros (EOMR / Comercial) y copia fija.
+  const CORREO_PH = ["centro", "nis", "codigoSgio", "direccion", "distrito", "sector", "ubicacion", "caudal", "fechaDeteccion", "fechaVerificacion", "operario", "fotos", "mapa"];
+  function correoEditActual() {
+    if (!state.correoEdit) {
+      const c = cfgCorreo() || {};
+      const cents = {};
+      Object.keys(CORREO_CENTROS).forEach(k => {
+        const g = (c.centros && c.centros[k]) || {};
+        cents[k] = { eomr: (g.eomr || []).map(x => ({ n: x.n || "", c: x.c || "" })), com: (g.com || []).map(x => ({ n: x.n || "", c: x.c || "" })) };
+      });
+      state.correoEdit = { asunto: c.asunto || "", cuerpo: c.cuerpo || "", centros: cents, cc: (c.cc || []).map(x => ({ n: x.n || "", c: x.c || "" })) };
+    }
+    if (!state.correoCentroSel) state.correoCentroSel = "COMAS";
+    return state.correoEdit;
+  }
+  function coLista(e, g) { return g === "cc" ? e.cc : e.centros[state.correoCentroSel][g]; }
+  function htmlAdminCorreo() {
+    const e = correoEditActual(), cs = state.correoCentroSel;
+    const fila = (g, x, i) => `
+      <div class="co-row">
+        <input class="input coD" data-g="${g}" data-i="${i}" data-k="n" placeholder="Nombre" value="${escA(x.n)}" autocomplete="off">
+        <input class="input coD" data-g="${g}" data-i="${i}" data-k="c" type="email" inputmode="email" placeholder="correo@sedapal.com.pe" value="${escA(x.c)}" autocomplete="off">
+        <button type="button" class="coDel" data-g="${g}" data-i="${i}" aria-label="Quitar">🗑</button>
+      </div>`;
+    const bloque = (g, titulo, sub) => {
+      const arr = coLista(e, g);
+      return `<div class="mt-3"><div class="font-semibold text-sm">${titulo}</div><div class="text-xs mb-2" style="color:var(--ink-soft)">${sub}</div>
+        ${arr.map((x, i) => fila(g, x, i)).join("") || `<div class="text-xs py-1" style="color:var(--ink-soft)">Sin destinatarios.</div>`}
+        <button type="button" class="coAdd btn-ghost" data-g="${g}" style="width:auto;padding:7px 12px;margin-top:4px">+ Agregar</button></div>`;
+    };
+    return `<style>
+        .co-row{display:grid;grid-template-columns:1fr 1.3fr 40px;gap:8px;align-items:center;margin-bottom:8px}
+        .co-row .input{margin:0}.coDel{background:#FBE0DD;border:0;border-radius:9px;height:38px;cursor:pointer;font-size:15px}
+        @media(max-width:620px){.co-row{grid-template-columns:1fr 40px;grid-template-areas:'n d' 'c c';gap:6px;border:1px solid var(--line);border-radius:10px;padding:8px}
+          .coD[data-k=n]{grid-area:n}.coDel{grid-area:d}.coD[data-k=c]{grid-area:c}}
+      </style>
+      <div class="text-sm mb-3" style="color:var(--ink-soft)">Al marcar una fuga como <b>No Reparada</b> en el GPFO0405 y guardar, la app abre Outlook con este correo listo. El destinatario sale solo según el <b>centro de servicio</b> y el <b>tipo de fuga</b> (Red → EOMR, Conexión → Comercial). Las fotos van como enlaces de Drive.</div>
+      <div class="card p-3 mb-3" style="background:#F6F9FC">
+        <label class="text-sm font-semibold block mb-1">Asunto</label>
+        <input id="coAsunto" class="input mb-2" value="${escA(e.asunto)}" autocomplete="off">
+        <label class="text-sm font-semibold block mb-1">Cuerpo</label>
+        <textarea id="coCuerpo" class="input" rows="9" style="resize:vertical;font-family:inherit">${escA(e.cuerpo)}</textarea>
+        <div class="text-xs mt-2" style="color:var(--ink-soft)">Campos que puedes usar (se reemplazan solos): ${CORREO_PH.map(p => "<code>{" + p + "}</code>").join(" ")}</div>
+      </div>
+      <div class="card p-3 mb-3">
+        <label class="text-sm font-semibold block mb-1">Destinatarios por centro de servicio</label>
+        <select id="coCentro" class="input mb-1">${Object.keys(CORREO_CENTROS).map(k => `<option value="${k}" ${k === cs ? "selected" : ""}>${escA(CORREO_CENTROS[k])}</option>`).join("")}</select>
+        ${bloque("eomr", "EOMR (fugas en red) — Para", "Reciben el correo cuando la fuga es en red.")}
+        ${bloque("com", "Comercial (fugas en conexión) — Para", "Reciben el correo cuando la fuga es en una conexión.")}
+      </div>
+      <div class="card p-3 mb-3">
+        <label class="text-sm font-semibold block mb-1">Copia fija (CC)</label>
+        <div class="text-xs mb-2" style="color:var(--ink-soft)">Van siempre en copia, en cualquier centro (p. ej. supervisores).</div>
+        ${coLista(e, "cc").map((x, i) => fila("cc", x, i)).join("") || `<div class="text-xs py-1" style="color:var(--ink-soft)">Sin copia fija.</div>`}
+        <button type="button" class="coAdd btn-ghost" data-g="cc" style="width:auto;padding:7px 12px;margin-top:4px">+ Agregar</button>
+      </div>
+      <div id="coErr" class="text-sm mb-2" style="color:var(--danger)"></div>
+      <button id="coGuardar" class="btn-primary w-full">💾 Guardar plantilla</button>`;
+  }
+  function activarAdminCorreo(app) {
+    const e = correoEditActual();
+    const repintar = () => { const y = window.scrollY; renderAdmin(); window.scrollTo(0, y); };
+    const a = document.getElementById("coAsunto"); if (a) a.oninput = () => { e.asunto = a.value; };
+    const cu = document.getElementById("coCuerpo"); if (cu) cu.oninput = () => { e.cuerpo = cu.value; };
+    const sel = document.getElementById("coCentro"); if (sel) sel.onchange = () => { state.correoCentroSel = sel.value; repintar(); };
+    app.querySelectorAll(".coD").forEach(inp => inp.oninput = () => { coLista(e, inp.dataset.g)[+inp.dataset.i][inp.dataset.k] = inp.value; });
+    app.querySelectorAll(".coDel").forEach(b => b.onclick = () => { coLista(e, b.dataset.g).splice(+b.dataset.i, 1); repintar(); });
+    app.querySelectorAll(".coAdd").forEach(b => b.onclick = () => { coLista(e, b.dataset.g).push({ n: "", c: "" }); repintar(); });
+    const gu = document.getElementById("coGuardar"); if (gu) gu.onclick = guardarCorreo;
+  }
+  async function guardarCorreo() {
+    const e = correoEditActual(), gu = document.getElementById("coGuardar"), err = document.getElementById("coErr");
+    if (err) err.textContent = "";
+    const emailOk = c => !c || /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(c.trim());
+    let mal = "";
+    const rev = arr => arr.forEach(x => { if (!emailOk(x.c)) mal = mal || x.c; });
+    Object.keys(e.centros).forEach(k => { rev(e.centros[k].eomr); rev(e.centros[k].com); });
+    rev(e.cc);
+    if (mal) { if (err) err.textContent = "Revisa el correo: « " + mal + " » no es válido."; return; }
+    gu.disabled = true; gu.textContent = "Guardando…";
+    try {
+      const r = await rdApi("correo_guardar", { config: { asunto: e.asunto, cuerpo: e.cuerpo, centros: e.centros, cc: e.cc } });
+      if (r && r.config) { state.correoCfg = r.config; try { localStorage.setItem("ecrf_correo", JSON.stringify(r.config)); } catch (x) {} state.correoEdit = null; }
+      toast("Plantilla de correo guardada ✅"); const y = window.scrollY; renderAdmin(); window.scrollTo(0, y);
+    } catch (x) { gu.disabled = false; gu.textContent = "💾 Guardar plantilla"; if (err) err.textContent = msgError(x); }
+  }
+
+  // ---------------- ÍCONO & APP MÓVIL: logo del aplicativo (Panel de administración) ----------------
+  // Permite subir/cambiar el logo que se ve dentro de la app (login, cabecera, presentación). Al guardar,
+  // se actualiza para todos como una actualización normal (sin desinstalar). El ícono de la pantalla de
+  // inicio del celular depende del sistema operativo y solo cambia al reinstalar; eso se avisa en el módulo.
+  function imgADataURL(file, max) {
+    return new Promise((ok, no) => {
+      const fr = new FileReader(); fr.onerror = () => no("No se pudo leer la imagen");
+      fr.onload = () => {
+        const im = new Image(); im.onerror = () => no("Imagen no válida");
+        im.onload = () => {
+          let w = im.width || 1, h = im.height || 1; const s = Math.min(1, max / Math.max(w, h));
+          w = Math.max(1, Math.round(w * s)); h = Math.max(1, Math.round(h * s));
+          const cv = document.createElement("canvas"); cv.width = w; cv.height = h;
+          cv.getContext("2d").drawImage(im, 0, 0, w, h);
+          ok(cv.toDataURL("image/png"));
+        };
+        im.src = fr.result;
+      };
+      fr.readAsDataURL(file);
+    });
+  }
+  function htmlAdminLogo() {
+    const actual = logoApp();
+    const nuevo = state.logoEdit || null;
+    return `<div class="text-sm mb-3" style="color:var(--ink-soft)">Cambia el <b>logo del aplicativo</b> (el que se ve en el inicio de sesión, la cabecera y la presentación). Al guardar, se actualiza para todos <b>como una actualización</b>, sin que nadie desinstale la app (cada celular lo toma la próxima vez que abre la app).</div>
+      <div style="display:flex;gap:16px;flex-wrap:wrap;align-items:flex-start">
+        <div style="text-align:center">
+          <div class="text-xs mb-1" style="color:var(--ink-soft)">Actual</div>
+          <span class="logo-chip" style="padding:10px 14px"><img src="${actual}" alt="Logo actual" style="height:54px;width:auto"></span>
+        </div>
+        ${nuevo ? `<div style="text-align:center">
+          <div class="text-xs mb-1" style="color:#12613B;font-weight:700">Nuevo (sin guardar)</div>
+          <span class="logo-chip" style="padding:10px 14px;outline:2px solid #12613B"><img src="${nuevo}" alt="Logo nuevo" style="height:54px;width:auto"></span>
+        </div>` : ""}
+      </div>
+      <input type="file" id="logoIn" accept="image/png,image/jpeg,image/webp" style="display:none">
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:14px">
+        <button id="logoElegir" class="btn-ghost" style="width:auto;padding:10px 16px">🖼️ Elegir imagen…</button>
+        ${nuevo ? `<button id="logoGuardar" class="btn-primary" style="width:auto;padding:10px 18px">💾 Guardar logo</button>
+        <button id="logoCancelar" class="btn-ghost" style="width:auto;padding:10px 16px">Cancelar</button>` : ""}
+        <button id="logoRestaurar" class="btn-ghost" style="width:auto;padding:10px 16px;color:var(--danger)">↩️ Restaurar el de SEDAPAL</button>
+      </div>
+      <div id="logoErr" class="text-sm mt-3" style="color:var(--danger)"></div>
+      <div class="card p-3 mt-4" style="background:#FFF8E6;border:1px solid #F3D88A">
+        <div class="font-semibold mb-1" style="color:#8A6D00">Sobre el ícono de la pantalla de inicio del celular</div>
+        <div class="text-xs" style="color:#6B5600;line-height:1.5">El logo <b>dentro</b> de la app sí cambia solo con guardar aquí. El ícono que queda en la <b>pantalla de inicio</b> del celular lo controla el sistema (Android/iOS) y por seguridad <b>solo se actualiza al reinstalar</b> la app — eso no lo puede cambiar ningún aplicativo de forma remota. Si quieres que ese ícono también cambie para instalaciones nuevas, dime y te preparo el <code>icon-192.png</code> y <code>icon-512.png</code> para reemplazar en GitHub.</div>
+      </div>`;
+  }
+  function activarAdminLogo(app) {
+    const err = document.getElementById("logoErr");
+    const repintar = () => { const y = window.scrollY; renderAdmin(); window.scrollTo(0, y); };
+    const inp = document.getElementById("logoIn");
+    const el = document.getElementById("logoElegir"); if (el) el.onclick = () => inp && inp.click();
+    if (inp) inp.onchange = async () => {
+      const f = inp.files && inp.files[0]; if (!f) return;
+      if (err) err.textContent = "";
+      try { state.logoEdit = await imgADataURL(f, 256); repintar(); }
+      catch (x) { if (err) err.textContent = String(x); }
+    };
+    const ca = document.getElementById("logoCancelar"); if (ca) ca.onclick = () => { state.logoEdit = null; repintar(); };
+    const gu = document.getElementById("logoGuardar"); if (gu) gu.onclick = guardarLogo;
+    const re = document.getElementById("logoRestaurar"); if (re) re.onclick = restaurarLogo;
+  }
+  async function guardarLogo() {
+    const gu = document.getElementById("logoGuardar"), err = document.getElementById("logoErr");
+    if (!state.logoEdit) return;
+    if (err) err.textContent = "";
+    gu.disabled = true; gu.textContent = "Guardando…";
+    try {
+      const r = await rdApi("logo_guardar", { b64: state.logoEdit });
+      if (r && r.config && r.config.b64) { state.logoApp = r.config.b64; try { localStorage.setItem("ecrf_logo", r.config.b64); } catch (e) {} }
+      state.logoEdit = null; toast("Logo actualizado ✅ (los celulares lo toman al abrir la app)");
+      const y = window.scrollY; renderAdmin(); window.scrollTo(0, y);
+    } catch (x) { gu.disabled = false; gu.textContent = "💾 Guardar logo"; if (err) err.textContent = msgError(x); }
+  }
+  async function restaurarLogo() {
+    if (!confirm("¿Restaurar el logo de SEDAPAL por defecto?")) return;
+    const err = document.getElementById("logoErr"); if (err) err.textContent = "";
+    try {
+      const r = await rdApi("logo_borrar", {});
+      state.logoApp = ""; state.logoEdit = null; try { localStorage.removeItem("ecrf_logo"); } catch (e) {}
+      toast("Logo restaurado al de SEDAPAL");
+      const y = window.scrollY; renderAdmin(); window.scrollTo(0, y);
+    } catch (x) { if (err) err.textContent = msgError(x); }
   }
 
   /* ---------------- CUADRILLAS FUGAS (módulo CUADRILLAS) ----------------
