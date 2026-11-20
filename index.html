@@ -1244,7 +1244,7 @@
       })() : state.form === "GPFO0405" ? {
         codigoSgio: state.codigoSgio, fechaDeteccion: state.fechaDeteccion, ubicacion: state.ubicacion,
         caudal: Number(state.caudal), fechaVerificacion: state.fechaVerif, situacion: state.situacion,
-        tipoFuga: state.situacion === "No Reparada" ? (state.tipoFuga || "") : "",
+        tipoFuga: state.situacion === "No Reparada" ? equipoFugaForm() : "",
         fecha: state.fechaVerif, hora: state.horaVerif || nowHM()
       } : {
         presion: Number(state.presion), fecha: state.fecha, hora: state.hora
@@ -1778,28 +1778,24 @@
         ${state.situacion === "No Reparada" ? bloqueTipoFuga() : ""}
       </div>`;
   }
-  // Bloque bajo «No Reparada»: tipo de fuga (define a quién va el correo) + aviso del destinatario
+  // Equipo al que se reporta una fuga no reparada, según la ubicación ya elegida arriba: Redes → EOMR, Conexiones → EC
+  function equipoFugaForm() { const g = grupoUbicacion(state.ubicacion, "f5Ubi"); return g === "conex" ? "Conexión" : g === "redes" ? "Red" : ""; }
+  // Bloque bajo «No Reparada»: mensaje del equipo al que se reportará (sin volver a preguntar red/conexión)
   function bloqueTipoFuga() {
     const ccss = (state.nisSel && state.nisSel.ccss) || "";
-    const cod = centroCod(ccss), t = state.tipoFuga || "";
-    const btn = (val, txt, sub) => `<button type="button" class="f5Tipo" data-t="${val}" aria-pressed="${t === val}"
-        style="flex:1;min-height:54px;border:0;border-radius:10px;font-weight:700;padding:6px;line-height:1.25;
-        background:${t === val ? "#0A4D8C" : "var(--card)"};color:${t === val ? "#fff" : "var(--ink)"};box-shadow:${t === val ? "none" : "inset 0 0 0 1.5px var(--line)"}">
-        ${txt}<br><small style="font-weight:500;opacity:.85">${sub}</small></button>`;
-    let aviso;
-    if (!ccss) aviso = `<div class="text-xs" style="color:#8E2019">Elige el NIS para saber el centro de servicio.</div>`;
-    else if (!cod) aviso = `<div class="text-xs" style="color:#8E2019">El centro «${escA(ccss)}» no está en la lista. Avisa a un administrador.</div>`;
-    else if (!t) aviso = `<div class="text-xs" style="color:var(--ink-soft)">Centro: <b>${escA(CORREO_CENTROS[cod])}</b>. Elige si la fuga es en red o en conexión.</div>`;
+    const cod = centroCod(ccss), tipo = equipoFugaForm();
+    const equipo = tipo === "Conexión" ? "EC" : tipo === "Red" ? "EOMR" : "";
+    let msg;
+    if (!tipo) msg = `<div class="text-sm" style="color:#8E2019">Elige primero la <b>ubicación de la fuga</b> (Redes o Conexiones) arriba.</div>`;
+    else if (!ccss || !cod) msg = `<div class="text-sm" style="color:#8E2019">No se pudo determinar el centro de servicio${ccss ? " («" + escA(ccss) + "»)" : ""}. Avisa a un administrador.</div>`;
     else {
-      const d = destinatariosFuga(ccss, t);
-      aviso = d.para.length
-        ? `<div class="text-xs" style="color:var(--ink-soft)">Irá a <b>${t === "Conexión" ? "Comercial" : "EOMR"}</b> de <b>${escA(CORREO_CENTROS[cod])}</b>: ${escA(d.para.map(x => x.n || x.c).join(", "))}.</div>`
-        : `<div class="text-xs" style="color:#8E2019">No hay destinatarios de ${t === "Conexión" ? "Comercial" : "EOMR"} para ${escA(CORREO_CENTROS[cod])}. Configúralos en Panel → «Plantilla correo».</div>`;
+      const d = destinatariosFuga(ccss, tipo);
+      msg = `<div class="text-sm" style="color:#8E2019">Se estará reportando la fuga no reparada al <b>Equipo: ${equipo} (${escA(CORREO_CENTROS[cod])})</b> — ${escA(state.ubicacion)}.</div>`
+          + (d.para.length ? "" : `<div class="text-xs mt-1" style="color:#8E2019">Aún no hay destinatarios de ${equipo} para ${escA(CORREO_CENTROS[cod])}. Configúralos en Panel → «Plantilla correo».</div>`);
     }
     return `<div style="margin-top:12px;padding:12px;border:1.5px dashed var(--danger);border-radius:12px;background:#FFF6F5">
-        <div class="font-semibold mb-2" style="color:#8E2019">Fuga no reparada — ¿dónde es la fuga?</div>
-        <div style="display:flex;gap:8px">${btn("Red", "🔧 Red", "Avisa al EOMR")}${btn("Conexión", "🏠 Conexión", "Avisa a Comercial")}</div>
-        <div class="mt-2">${aviso}</div>
+        <div class="font-semibold mb-1" style="color:#8E2019">Fuga no reparada</div>
+        ${msg}
         <div class="text-xs mt-2" style="color:var(--ink-soft)">Al guardar se preparará el correo: toca «Enviar correo» en el registro para abrir Outlook con las fotos como enlaces.</div>
       </div>`;
   }
@@ -1810,8 +1806,7 @@
     document.getElementById("f5FechaDet").onchange = e => { state.fechaDeteccion = e.target.value; ok(); };
     const re = () => { const y = window.scrollY; renderNuevo(); window.scrollTo(0, y); };
     activarUbicacion("f5Ubi", () => state.ubicacion, v => { state.ubicacion = v; }, re);
-    document.querySelectorAll(".f5Sit").forEach(b => b.onclick = () => { state.situacion = b.dataset.s; if (b.dataset.s !== "No Reparada") state.tipoFuga = ""; re(); });
-    document.querySelectorAll(".f5Tipo").forEach(b => b.onclick = () => { state.tipoFuga = b.dataset.t; re(); });
+    document.querySelectorAll(".f5Sit").forEach(b => b.onclick = () => { state.situacion = b.dataset.s; re(); });
   }
   // Rellena los {campos} de la plantilla con los datos del registro
   function correoTxt(txt, d) { return String(txt || "").replace(/\{(\w+)\}/g, (m, k) => (d[k] != null ? String(d[k]) : "")); }
@@ -2689,7 +2684,9 @@
            defecto: { titulo: "Cuadrillas Fugas", descripcion: "Laboratorios, camionetas y su personal" } },
     // Verificación de vehículos: checklist de pre-uso (DGMFO0029), firmas, fotos, PDF y correo (al inicio solo administradores)
     VERIF_VEHICULOS: { tipo: "vista", soloAdmin: true, ico: () => ICO_VEH, abrir: () => abrirModulo("VERIF_VEHICULOS"), estilo: "background:#EAF1F8;border-color:#A9C3E0",
-           defecto: { titulo: "Verificación de vehículos", descripcion: "DGMFO0029 · checklist de pre-uso, PDF y correo" } }
+           defecto: { titulo: "Verificación de vehículos", descripcion: "DGMFO0029 · checklist de pre-uso, PDF y correo" } },
+    BUSCADOR_REG: { tipo: "vista", soloAdmin: true, ico: () => ICO_BUSCAR, abrir: () => abrirModulo("BUSCADOR_REG"), estilo: "background:#EEF0FD;border-color:#B7BEF2",
+           defecto: { titulo: "Buscador de registros ECRF", descripcion: "Consulta de registros guardados (solo lectura)" } }
   };
   const MOD_RETIRADOS = ["MAPA_NIS", "REPLICA_GIS"];   // se unieron en PLANO_GIS
   function modulosConfig() {
@@ -4423,6 +4420,7 @@
   const ICO_RUTA = ICS(`<circle cx="6" cy="19" r="3"/><path d="M9 19h8.5a3.5 3.5 0 0 0 0-7h-11a3.5 3.5 0 0 1 0-7H15"/><circle cx="18" cy="5" r="3"/>`);
   const ICO_LAB = ICS(`<path d="M14 18V6a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2v11a1 1 0 0 0 1 1h2"/><path d="M15 18H9"/><path d="M19 18h2a1 1 0 0 0 1-1v-3.65a1 1 0 0 0-.22-.62l-3.48-4.35A1 1 0 0 0 17.52 8H14"/><circle cx="17" cy="18" r="2"/><circle cx="7" cy="18" r="2"/>`);
   const ICO_VEH = ICS(`<path d="M9 5H7a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-2"/><rect x="9" y="3" width="6" height="4" rx="1"/><path d="m9 14 2 2 4-4"/>`);
+  const ICO_BUSCAR = ICS(`<circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/>`);
   const ICO_LAT = {
     GPFO0381: ICS(`<path d="m12 14 4-4"/><path d="M3.34 19a10 10 0 1 1 17.32 0"/>`),
     GPFO0405: ICS(`<path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/>`),
@@ -4440,7 +4438,7 @@
     { id: "GESTION", nombre: "Gestión & Reportes", color: "#FFF4DB" }
   ];
   const GRUPO_DE = { REPORTE_DIARIO: "OPER", GPFO0381: "FORM", GPFO0405: "FORM", GPFO0416: "FORM", SUPERVISION: "FORM", PDF: "FORM",
-                     PLANO_GIS: "GIS", PLANIFICADOR_RUTAS: "GIS", LABORATORIO_ECRF: "GIS", SGIO: "GESTION", CENTRO_CONTROL: "GESTION", CUADRILLAS: "GESTION" };
+                     PLANO_GIS: "GIS", PLANIFICADOR_RUTAS: "GIS", LABORATORIO_ECRF: "GIS", SGIO: "GESTION", CENTRO_CONTROL: "GESTION", CUADRILLAS: "GESTION", BUSCADOR_REG: "GESTION" };
   // Grupos del menú en el orden que eligió el administrador (Panel → Orden del menú lateral)
   function gruposNav(orden) {
     let o = orden; if (!o) try { o = JSON.parse(localStorage.getItem("ecrf_grupos") || "[]"); } catch (e) { o = []; }
@@ -4518,7 +4516,7 @@
     else if (MODULOS_APP[id] && MODULOS_APP[id].tipo === "form") {
       state.form = id; sessionStorage.setItem("ecrf_form", id); state.tab = "nuevo";
       resetForm(); state.rutaSel = null; state.rutaQuery = "";
-    } else if (["PLANO_GIS", "PLANIFICADOR_RUTAS", "LABORATORIO_ECRF", "SGIO", "CENTRO_CONTROL", "CUADRILLAS", "SUPERVISION", "VERIF_VEHICULOS"].includes(id)) {
+    } else if (["PLANO_GIS", "PLANIFICADOR_RUTAS", "LABORATORIO_ECRF", "SGIO", "CENTRO_CONTROL", "CUADRILLAS", "SUPERVISION", "VERIF_VEHICULOS", "BUSCADOR_REG"].includes(id)) {
       state.vista = id; state.labTab = "vehiculo";
       if (id === "CENTRO_CONTROL") { state.ccDatos = null; state.ccEncuadrado = false; }
       // La actualización del SGIO NO se dispara al entrar: solo al pulsar «Actualizar» (Centro de Control) o «Buscar» (Incidencias).
@@ -4970,8 +4968,124 @@
     else if (state.vista === "CUADRILLAS") renderCuadrillas();
     else if (state.vista === "SUPERVISION") { renderSupervision(); return; }
     else if (state.vista === "VERIF_VEHICULOS") { renderVehiculos(); return; }
+    else if (state.vista === "BUSCADOR_REG") { renderBuscador(); return; }
     else renderLaboratorio();
     const v = document.getElementById("gisVolver"); if (v) v.onclick = () => salirVistaGis();
+  }
+
+  /* ---------------- BUSCADOR DE REGISTROS ECRF (solo lectura) ---------------- */
+  const BQ_FORMS = [["", "Todos los formularios"], ["GPFO0381", "GPFO0381 – Presiones"], ["GPFO0405", "GPFO0405 – Verificación de reparación"], ["GPFO0416", "GPFO0416 – Verificación por muestreo"]];
+  const BQ_FILTROS = [["nis", "NIS"], ["codigoSgio", "Código SGIO"], ["operario", "Operario"]];
+  const BQ_LBL = { nis: "NIS", codigoSgio: "Código SGIO", operario: "Operario", fecha: "Fecha", hora: "Hora", direccion: "Dirección", urb: "Urbanización", distrito: "Distrito", sector: "Sector", ccss: "Centro de servicio", presion: "Presión (mca)", ubicacion: "Ubicación de la fuga", caudal: "Caudal (L/día)", fechaDeteccion: "Fecha de detección", fechaVerificacion: "Fecha de verificación", situacion: "Situación", tipoFuga: "Tipo de fuga", tecnico: "Técnico a cargo", laboratorio: "Laboratorio", cFecha: "Fecha (contratista)", cUbi: "Ubicación (contratista)", cPres: "Presión contratista (mca)", cCaudal: "Caudal contratista (L/día)", sFecha: "Fecha (SEDAPAL)", sUbi: "Ubicación (SEDAPAL)", sPres: "Presión SEDAPAL (mca)", sCaudal: "Caudal SEDAPAL (L/día)", variacion: "Variación (L/día)", errorPct: "Error (%)" };
+  const BQ_OCULTO = ["id", "form", "fotos", "fotosBlobs", "latNis", "lonNis", "lat", "lon", "creadoEn", "datosManual", "manual", "horaFijadaPara", "pendienteId", "subido", "local", "editPendiente", "ediciones", "nFotos"];
+  function usuariosBuscador() { try { return [...new Set(JSON.parse(localStorage.getItem("ecrf_usuarios") || "[]").map(u => u.name).filter(Boolean))].sort(); } catch (e) { return []; } }
+  function bqInit() { if (!state.bq) state.bq = { form: "", fi: "", ff: "", filtros: [], r: null, cargando: false }; return state.bq; }
+  function renderBuscador() {
+    const b = bqInit(), us = usuariosBuscador(), r = b.r;
+    const filtroRow = (f, i) => `<div class="bq-filtro">
+        <select class="input bqCampo" data-i="${i}" aria-label="Campo de filtro"><option value="">Elegir campo…</option>${BQ_FILTROS.map(([k, t]) => `<option value="${k}" ${f.campo === k ? "selected" : ""}>${t}</option>`).join("")}</select>
+        ${f.campo === "operario"
+        ? `<select class="input bqValor" data-i="${i}" aria-label="Operario"><option value="">Elegir operario…</option>${us.map(n => `<option ${f.valor === n ? "selected" : ""}>${escA(n)}</option>`).join("")}</select>`
+        : `<input class="input bqValor" data-i="${i}" value="${escA(f.valor || "")}" placeholder="${f.campo ? "Valor a buscar" : "Elige un campo"}" ${f.campo ? "" : "disabled"} ${f.campo === "nis" || f.campo === "codigoSgio" ? 'inputmode="numeric"' : ""} autocomplete="off" aria-label="Valor">`}
+        <button type="button" class="bqDel" data-i="${i}" aria-label="Quitar filtro">🗑</button></div>`;
+    document.getElementById("app").innerHTML = `${estilosGis()}
+      ${cabeceraGis("Buscador de registros ECRF", "consulta de registros guardados (solo lectura)", ICO_BUSCAR, "Gestión & Reportes")}
+      <div class="gis-wrap px-4 py-4 pb-24">
+        <form id="bqForm" class="card p-4 mb-3" autocomplete="off">
+          <label class="bq-lbl">Formulario</label>
+          <select id="bqFormSel" class="input" style="margin-bottom:12px">${BQ_FORMS.map(([k, t]) => `<option value="${k}" ${b.form === k ? "selected" : ""}>${t}</option>`).join("")}</select>
+          <label class="bq-lbl">Rango de fecha del formulario</label>
+          <div class="bq-fechas">
+            <label><span>Fecha inicio</span><input id="bqFi" type="date" class="input" value="${b.fi || ""}"></label>
+            <label><span>Fecha término</span><input id="bqFf" type="date" class="input" value="${b.ff || ""}"></label>
+          </div>
+          <label class="bq-lbl" style="margin-top:14px">Filtros</label>
+          <div id="bqFiltros">${b.filtros.length ? b.filtros.map(filtroRow).join("") : `<div class="text-xs" style="color:var(--ink-soft);margin-bottom:8px">Sin filtros: traerá todos los del periodo. Agrega uno o más para afinar (se combinan con «y»).</div>`}</div>
+          <button type="button" id="bqAdd" class="btn-ghost" style="width:auto;padding:8px 14px">+ Agregar filtro</button>
+          <button id="bqBuscar" type="submit" class="btn-primary w-full mt-3" ${b.cargando ? "disabled" : ""}>${b.cargando ? "Buscando…" : "🔎 Buscar"}</button>
+        </form>
+        ${!r ? `<div class="card text-center text-sm" style="padding:20px;color:var(--ink-soft)">Define el formulario, el rango de fechas y los filtros, y pulsa <b>Buscar</b>.</div>`
+        : b.cargando ? `<div class="text-sm py-6" style="color:var(--ink-soft)">Buscando registros…</div>`
+        : r.error ? `<div class="card p-4 text-sm" style="color:var(--danger)">${escA(r.error)}</div>`
+        : !r.resultados.length ? `<div class="card text-center text-sm" style="padding:20px;color:var(--ink-soft)">No se encontraron registros con esos filtros.</div>`
+        : `<div class="text-sm mb-2" style="color:var(--ink-soft)">${r.total} registro(s)${r.total > r.resultados.length ? " · se muestran los primeros " + r.resultados.length : ""}</div>
+           ${r.resultados.map((x, i) => htmlResBq(x, i)).join("")}`}
+      </div>
+      <style>
+        .bq-lbl{display:block;font-size:12px;font-weight:700;color:var(--ink-soft);margin-bottom:4px}
+        .bq-fechas{display:grid;grid-template-columns:1fr 1fr;gap:10px}.bq-fechas label span{display:block;font-size:12px;font-weight:700;color:var(--ink-soft);margin-bottom:4px}
+        .bq-filtro{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.2fr) 40px;gap:8px;align-items:center;margin-bottom:8px}
+        .bq-filtro .input{min-width:0}.bqDel{background:#FBE0DD;border:0;border-radius:9px;height:38px;cursor:pointer;font-size:15px}
+        .bq-res{display:flex;justify-content:space-between;gap:10px;align-items:center}
+      </style>`;
+    const volver = document.getElementById("gisVolver"); if (volver) volver.onclick = () => salirVistaGis();
+    const sel = document.getElementById("bqFormSel"); if (sel) sel.onchange = () => { b.form = sel.value; };
+    const fi = document.getElementById("bqFi"); if (fi) fi.onchange = () => { b.fi = fi.value; };
+    const ff = document.getElementById("bqFf"); if (ff) ff.onchange = () => { b.ff = ff.value; };
+    const repintar = () => { const y = window.scrollY; renderBuscador(); window.scrollTo(0, y); };
+    document.querySelectorAll(".bqCampo").forEach(s => s.onchange = () => { const i = +s.dataset.i; b.filtros[i].campo = s.value; b.filtros[i].valor = ""; repintar(); });
+    document.querySelectorAll(".bqValor").forEach(s => s.oninput = s.onchange = () => { b.filtros[+s.dataset.i].valor = s.value; });
+    document.querySelectorAll(".bqDel").forEach(x => x.onclick = () => { b.filtros.splice(+x.dataset.i, 1); repintar(); });
+    const add = document.getElementById("bqAdd"); if (add) add.onclick = () => { if (b.filtros.length >= 6) { toast("Máximo 6 filtros", true); return; } b.filtros.push({ campo: "", valor: "" }); repintar(); };
+    const fr = document.getElementById("bqForm"); if (fr) fr.onsubmit = e => { e.preventDefault(); buscarRegistros(); };
+    document.querySelectorAll(".bqVer").forEach(x => x.onclick = () => { const it = (b.r && b.r.resultados) || []; verDetalleBq(it[+x.dataset.i]); });
+  }
+  function htmlResBq(x, i) {
+    const extra = x.codigoSgio ? ` · SGIO ${escA(x.codigoSgio)}` : "";
+    return `<div class="card p-3 mb-2"><div class="bq-res">
+        <div class="min-w-0">
+          <div class="font-bold">${escA(x.form)} · ${escA(dmy(x.fecha))}</div>
+          <div class="text-sm" style="color:var(--ink-soft)">${x.nis ? "NIS " + escA(x.nis) : "—"}${extra}</div>
+          <div class="text-xs" style="color:var(--ink-soft)">Operario: ${escA(x.operario || "—")} · ${(x.fotos || []).length} foto(s)</div>
+        </div>
+        <button class="btn-ghost bqVer" data-i="${i}" style="width:auto;padding:8px 12px;white-space:nowrap">Ver detalle</button>
+      </div></div>`;
+  }
+  async function buscarRegistros() {
+    const b = bqInit();
+    const filtros = b.filtros.filter(f => f.campo && String(f.valor).trim());
+    b.cargando = true; b.r = { cargando: true }; renderBuscador();
+    try {
+      const r = await rdApi("buscar_registros", { form: b.form, fechaIni: b.fi, fechaFin: b.ff, filtros });
+      b.cargando = false; b.r = r && r.ok ? r : { error: (r && r.msg) || "No se pudo buscar" };
+    } catch (e) { b.cargando = false; b.r = { error: msgError(e) }; }
+    renderBuscador();
+  }
+  // Detalle de un registro a pantalla completa (solo lectura), con su registro fotográfico
+  function verDetalleBq(x) {
+    if (!x) return;
+    const d = x.data || {};
+    const campos = Object.keys(d).filter(k => BQ_OCULTO.indexOf(k) < 0 && d[k] !== "" && d[k] != null)
+      .map(k => `<div class="bqd-row"><dt>${escA(BQ_LBL[k] || k)}</dt><dd>${escA(fmtCampoBq(k, d[k]))}</dd></div>`).join("");
+    const fotos = (x.fotos || []).map(id => ({ mini: fotoUrl(id), grande: fotoUrlGrande(id) }));
+    let el = document.getElementById("bqDetalle");
+    if (!el) { el = document.createElement("div"); el.id = "bqDetalle"; document.body.appendChild(el); }
+    el.style.cssText = "position:fixed;inset:0;z-index:95;background:rgba(10,20,35,.55);display:flex;align-items:flex-end;justify-content:center";
+    el.innerHTML = `<div style="background:var(--bg,#F4F6F9);width:100%;max-width:560px;max-height:92vh;border-radius:18px 18px 0 0;overflow:auto;box-shadow:0 -8px 30px rgba(0,0,0,.3)">
+        <div style="position:sticky;top:0;background:#03204C;color:#fff;display:flex;align-items:center;justify-content:space-between;padding:14px 16px">
+          <b style="font-size:15px">${escA(x.form)} · ${escA(dmy(x.fecha))}</b>
+          <button id="bqdClose" aria-label="Cerrar" style="background:none;border:0;color:#fff;font-size:24px;width:40px;height:40px">✕</button>
+        </div>
+        <div style="padding:14px 16px 24px">
+          <dl class="bqd-dl">${campos || `<div class="text-sm" style="color:var(--ink-soft)">Sin datos.</div>`}</dl>
+          <div class="text-sm font-semibold mt-3 mb-2" style="color:var(--ink-soft)">Registro fotográfico (${fotos.length})</div>
+          ${fotos.length ? `<div class="bqd-fotos">${fotos.map((f, i) => `<button class="bqdFoto" data-i="${i}" style="padding:0;border:1px solid var(--line);border-radius:10px;overflow:hidden;background:#E8EEF3;aspect-ratio:1"><img src="${f.mini}" alt="Foto ${i + 1}" loading="lazy" style="width:100%;height:100%;object-fit:cover" onerror="this.replaceWith(Object.assign(document.createElement('span'),{textContent:'📷',style:'font-size:24px'}))"></button>`).join("")}</div>`
+          : `<div class="text-sm" style="color:var(--ink-soft)">Sin fotos.</div>`}
+          <div class="text-xs mt-3" style="color:var(--ink-soft)">Solo consulta — este registro no se puede editar desde aquí.</div>
+        </div>
+      </div>
+      <style>.bqd-dl{display:flex;flex-direction:column;gap:0}.bqd-row{display:grid;grid-template-columns:42% 58%;gap:8px;padding:7px 0;border-bottom:1px solid var(--line)}
+        .bqd-row dt{font-size:12px;font-weight:700;color:var(--ink-soft)}.bqd-row dd{font-size:13px;margin:0;word-break:break-word}
+        .bqd-fotos{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}</style>`;
+    const cerrar = () => { el.remove(); };
+    el.onclick = e => { if (e.target === el) cerrar(); };
+    document.getElementById("bqdClose").onclick = cerrar;
+    el.querySelectorAll(".bqdFoto").forEach(bt => bt.onclick = () => abrirVisor(fotos, +bt.dataset.i));
+  }
+  function fmtCampoBq(k, v) {
+    if (/^fecha/i.test(k) && /^\d{4}-\d{2}-\d{2}/.test(String(v))) return dmy(String(v).slice(0, 10));
+    if (k === "tipoFuga") return v === "Conexión" ? "Conexión (EC)" : v === "Red" ? "Red (EOMR)" : String(v);
+    return String(v);
   }
   // Si el recuadro del mapa cambia de tamaño (girar el celular, cargar el panel), el mapa se reajusta solo
   function vigilarTamano(mapa) {
@@ -6131,7 +6245,7 @@
     if (!d) { cargarPerfilesAdmin(); return `<div class="text-sm py-6" style="color:var(--ink-soft)">Cargando perfiles…</div>`; }
     if (d.error) return `<div class="card p-4 text-sm" style="color:var(--danger)">${escA(d.error)}</div>`;
     if (!d.perfiles.some(p => p.id === state.pfSel)) state.pfSel = d.perfiles[0].id;
-    const sel = d.perfiles.find(p => p.id === state.pfSel), mods = d.modulos.filter(m => MODULOS_APP[m.id]);
+    const sel = d.perfiles.find(p => p.id === state.pfSel), mods = d.modulos.filter(m => MODULOS_APP[m.id]).filter((m, i, a) => a.findIndex(x => x.id === m.id) === i);
     const nMods = p => mods.filter(m => m.roles.includes(p.id)).length;
     const tarjeta = p => `<div class="pf-card ${p.id === state.pfSel ? "on" : ""} ${p.activo ? "" : "off"}">
         <button class="pf-sel pfSel" data-id="${escA(p.id)}" aria-pressed="${p.id === state.pfSel}">
